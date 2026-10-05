@@ -1,12 +1,125 @@
 import os
+import ccxt
+import pandas as pd
+import numpy as np
 import requests
+import time
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 def send(msg):
     url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
-    requests.post(url, json={"chat_id": CHAT_ID, "text": msg})
+    try:
+        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
+    except:
+        pass
 
-send("✅ تست موفق! ربات آماده است.")
+class Bot:
+    def __init__(self):
+        self.ex = ccxt.okx({'enableRateLimit': True})
+    
+    def ema(self, s, l):
+        return s.ewm(span=l, adjust=False).mean()
+    
+    def rsi(self, s, l=14):
+        d = s.diff()
+        g = d.where(d > 0, 0).ewm(span=l, adjust=False).mean()
+        ls = -d.where(d < 0, 0).ewm(span=l, adjust=False).mean()
+        return 100 - (100 / (1 + g / ls))
+    
+    def atr(self, h, lo, c, l=14):
+        tr = pd.concat([h - lo, (h - c.shift()).abs(), (lo - c.shift()).abs()], axis=1).max(axis=1)
+        return tr.ewm(span=l, adjust=False).mean()
+    
+    def analyze(self, symbol):
+        try:
+            o = self.ex.fetch_ohlcv(symbol, '4h', 300)
+            if not o or len(o) < 200:
+                return None
+            
+            df = pd.DataFrame(o, columns=['ts', 'o', 'h', 'l', 'c', 'v'])
+            for col in ['o', 'h', 'l', 'c', 'v']:
+                df[col] = pd.to_numeric(df[col])
+            
+            df['ema50'] = self.ema(df['c'], 50)
+            df['ema200'] = self.ema(df['c'], 200)
+            df['rsi'] = self.rsi(df['c'])
+            df['atr'] = self.atr(df['h'], df['l'], df['c'])
+            df['vma'] = df['v'].rolling(20).mean()
+            
+            last = df.iloc[-1]
+            
+            # شرط خرید
+            if (last['ema50'] > last['ema200'] and 
+                last['rsi'] < 40 and 
+                last['v'] > last['vma'] * 0.7):
+                
+                entry = last['c']
+                sl = entry - 2 * last['atr']
+                tp = entry + 3 * last['atr']
+                
+                return {
+                    'sym': symbol,
+                    'type': 'BUY',
+                    'entry': entry,
+                    'sl': sl,
+                    'tp': tp,
+                    'rsi': last['rsi'],
+                    'vol': last['v'] / last['vma']
+                }
+            
+            # شرط فروش
+            if (last['ema50'] < last['ema200'] and 
+                last['rsi'] > 60 and 
+                last['v'] > last['vma'] * 0.7):
+                
+                entry = last['c']
+                sl = entry + 2 * last['atr']
+                tp = entry - 3 * last['atr']
+                
+                return {
+                    'sym': symbol,
+                    'type': 'SELL',
+                    'entry': entry,
+                    'sl': sl,
+                    'tp': tp,
+                    'rsi': last['rsi'],
+                    'vol': last['v'] / last['vma']
+                }
+            
+            return None
+        except:
+            return None
+
+
+print("شروع اسکن...")
+bot = Bot()
+
+markets = bot.ex.load_markets()
+symbols = [s for s, m in markets.items() if m['quote'] == 'USDT' and m['spot'] and m['active']]
+
+signals = []
+for i, sym in enumerate(symbols[:150]):
+    sig = bot.analyze(sym)
+    if sig:
+        signals.append(sig)
+        print("سیگنال: " + sym + " (" + sig['type'] + ")")
+    time.sleep(0.05)
+
+if signals:
+    msg = "<b>سیگنال های جدید</b>\n\n"
+    for s in signals:
+        emoji = "🟢" if s['type'] == 'BUY' else "🔴"
+        msg += emoji + " <b>" + s['sym'] + "</b> (" + s['type'] + ")\n"
+        msg += "ورود: <code>" + str(round(s['entry'], 4)) + "</code>\n"
+        msg += "حد ضرر: <code>" + str(round(s['sl'], 4)) + "</code>\n"
+        msg += "حد سود: <code>" + str(round(s['tp'], 4)) + "</code>\n"
+        msg += "RSI: " + str(round(s['rsi'], 1)) + " | حجم: " + str(round(s['vol'], 2)) + "x\n\n"
+    send(msg)
+    print("ارسال شد: " + str(len(signals)) + " سیگنال")
+else:
+    send("هیچ سیگنالی پیدا نشد.")
+    print("سیگنالی نیست")
+
 print("Done!")
