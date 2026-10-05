@@ -52,40 +52,32 @@ class Bot:
             
             # شرط خرید
             if (last['ema50'] > last['ema200'] and 
-                last['rsi'] < 40 and 
-                last['v'] > last['vma'] * 0.7):
+                last['rsi'] < 45 and 
+                last['v'] > last['vma'] * 0.5):
                 
                 entry = last['c']
                 sl = entry - 2 * last['atr']
                 tp = entry + 3 * last['atr']
                 
                 return {
-                    'sym': symbol,
-                    'type': 'BUY',
-                    'entry': entry,
-                    'sl': sl,
-                    'tp': tp,
-                    'rsi': last['rsi'],
-                    'vol': last['v'] / last['vma']
+                    'sym': symbol, 'type': 'BUY',
+                    'entry': entry, 'sl': sl, 'tp': tp,
+                    'rsi': last['rsi'], 'vol': last['v'] / last['vma']
                 }
             
             # شرط فروش
             if (last['ema50'] < last['ema200'] and 
-                last['rsi'] > 60 and 
-                last['v'] > last['vma'] * 0.7):
+                last['rsi'] > 55 and 
+                last['v'] > last['vma'] * 0.5):
                 
                 entry = last['c']
                 sl = entry + 2 * last['atr']
                 tp = entry - 3 * last['atr']
                 
                 return {
-                    'sym': symbol,
-                    'type': 'SELL',
-                    'entry': entry,
-                    'sl': sl,
-                    'tp': tp,
-                    'rsi': last['rsi'],
-                    'vol': last['v'] / last['vma']
+                    'sym': symbol, 'type': 'SELL',
+                    'entry': entry, 'sl': sl, 'tp': tp,
+                    'rsi': last['rsi'], 'vol': last['v'] / last['vma']
                 }
             
             return None
@@ -99,24 +91,46 @@ bot = Bot()
 markets = bot.ex.load_markets()
 symbols = [s for s, m in markets.items() if m['quote'] == 'USDT' and m['spot'] and m['active']]
 
+print("تعداد کل ارزها: " + str(len(symbols)))
+
+MAX_COINS = 1000
 signals = []
-for i, sym in enumerate(symbols[:150]):
+for i, sym in enumerate(symbols[:MAX_COINS]):
     sig = bot.analyze(sym)
     if sig:
         signals.append(sig)
         print("سیگنال: " + sym + " (" + sig['type'] + ")")
+    
+    if (i + 1) % 100 == 0:
+        print("پیشرفت: " + str(i + 1) + "/" + str(MAX_COINS) + " | سیگنال: " + str(len(signals)))
+    
     time.sleep(0.05)
 
+print("اسکن کامل شد. سیگنال: " + str(len(signals)))
+
 if signals:
-    msg = "<b>سیگنال های جدید</b>\n\n"
-    for s in signals:
+    signals_sorted = sorted(signals, key=lambda x: x['rsi'] if x['type'] == 'BUY' else -x['rsi'])
+    
+    summary = "<b>سیگنال های جدید</b>\n"
+    summary += "تعداد: " + str(len(signals)) + "\n\n"
+    for i, s in enumerate(signals_sorted[:20], 1):
+        summary += str(i) + ". " + s['sym'] + " (" + s['type'] + ")\n"
+    send(summary)
+    
+    time.sleep(1)
+    
+    for s in signals_sorted[:10]:
         emoji = "🟢" if s['type'] == 'BUY' else "🔴"
-        msg += emoji + " <b>" + s['sym'] + "</b> (" + s['type'] + ")\n"
+        msg = emoji + " <b>" + s['sym'] + "</b> (" + s['type'] + ")\n"
+        msg += "━━━━━━━━━━━━━━━\n"
         msg += "ورود: <code>" + str(round(s['entry'], 4)) + "</code>\n"
         msg += "حد ضرر: <code>" + str(round(s['sl'], 4)) + "</code>\n"
         msg += "حد سود: <code>" + str(round(s['tp'], 4)) + "</code>\n"
-        msg += "RSI: " + str(round(s['rsi'], 1)) + " | حجم: " + str(round(s['vol'], 2)) + "x\n\n"
-    send(msg)
+        msg += "━━━━━━━━━━━━━━━\n"
+        msg += "RSI: " + str(round(s['rsi'], 1)) + " | حجم: " + str(round(s['vol'], 2)) + "x"
+        send(msg)
+        time.sleep(1)
+    
     print("ارسال شد: " + str(len(signals)) + " سیگنال")
 else:
     send("هیچ سیگنالی پیدا نشد.")
