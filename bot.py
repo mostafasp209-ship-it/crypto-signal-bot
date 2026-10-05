@@ -50,10 +50,10 @@ class Bot:
             
             last = df.iloc[-1]
             
-            # شرط خرید
-            if (last['ema50'] > last['ema200'] and 
-                last['rsi'] < 45 and 
-                last['v'] > last['vma'] * 0.5):
+            # ===== شرط خرید (نرم) =====
+            if (last['ema50'] > last['ema200'] * 0.98 and 
+                last['rsi'] < 55 and 
+                last['v'] > last['vma'] * 0.3):
                 
                 entry = last['c']
                 sl = entry - 2 * last['atr']
@@ -65,10 +65,10 @@ class Bot:
                     'rsi': last['rsi'], 'vol': last['v'] / last['vma']
                 }
             
-            # شرط فروش
-            if (last['ema50'] < last['ema200'] and 
-                last['rsi'] > 55 and 
-                last['v'] > last['vma'] * 0.5):
+            # ===== شرط فروش (نرم) =====
+            if (last['ema50'] < last['ema200'] * 1.02 and 
+                last['rsi'] > 45 and 
+                last['v'] > last['vma'] * 0.3):
                 
                 entry = last['c']
                 sl = entry + 2 * last['atr']
@@ -88,12 +88,23 @@ class Bot:
 print("شروع اسکن...")
 bot = Bot()
 
+# ===== تست تشخیصی =====
+try:
+    test = bot.ex.fetch_ohlcv('BTC/USDT', '4h', 5)
+    if test and len(test) > 0:
+        print("تست BTC: OK - " + str(len(test)) + " کندل")
+    else:
+        print("تست BTC: خالی")
+except Exception as e:
+    print("خطا در تست: " + str(e))
+# ===== پایان تست =====
+
 markets = bot.ex.load_markets()
 symbols = [s for s, m in markets.items() if m['quote'] == 'USDT' and m['spot'] and m['active']]
 
 print("تعداد کل ارزها: " + str(len(symbols)))
 
-MAX_COINS = 1000
+MAX_COINS = 500
 signals = []
 for i, sym in enumerate(symbols[:MAX_COINS]):
     sig = bot.analyze(sym)
@@ -102,7 +113,7 @@ for i, sym in enumerate(symbols[:MAX_COINS]):
         print("سیگنال: " + sym + " (" + sig['type'] + ")")
     
     if (i + 1) % 100 == 0:
-        print("پیشرفت: " + str(i + 1) + "/" + str(MAX_COINS) + " | سیگنال: " + str(len(signals)))
+        print("پیشرفت: " + str(i + 1) + "/" + str(min(MAX_COINS, len(symbols))) + " | سیگنال: " + str(len(signals)))
     
     time.sleep(0.05)
 
