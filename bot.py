@@ -17,20 +17,13 @@ def send(msg):
 
 class Bot:
     def __init__(self):
-        # صرافی‌های آمریکایی که IPهای GitHub رو بلاک نمی‌کنن
         self.ex = None
-        exchange_list = ['kraken', 'coinbase', 'gemini', 'bitstamp']
+        # صرافی‌هایی که از IP آمریکا جواب می‌دن
+        exchange_list = ['binanceus', 'bitstamp', 'bitfinex', 'cryptocom']
         
         for name in exchange_list:
             try:
                 test_ex = getattr(ccxt, name)({'enableRateLimit': True, 'timeout': 30000})
-                test_data = test_ex.fetch_ohlcv('BTC/USD', '4h', 5)
-                if test_data and len(test_data) > 0:
-                    self.ex = test_ex
-                    self.quote = 'USD'
-                    print("صرافی متصل: " + name.upper())
-                    break
-                # اگه USD نبود، USDT رو تست کن
                 test_data = test_ex.fetch_ohlcv('BTC/USDT', '4h', 5)
                 if test_data and len(test_data) > 0:
                     self.ex = test_ex
@@ -74,7 +67,6 @@ class Bot:
             
             last = df.iloc[-1]
             
-            # شرط خرید (نرم)
             if (last['ema50'] > last['ema200'] * 0.98 and 
                 last['rsi'] < 55 and 
                 last['v'] > last['vma'] * 0.3):
@@ -89,7 +81,6 @@ class Bot:
                     'rsi': last['rsi'], 'vol': last['v'] / last['vma']
                 }
             
-            # شرط فروش (نرم)
             if (last['ema50'] < last['ema200'] * 1.02 and 
                 last['rsi'] > 45 and 
                 last['v'] > last['vma'] * 0.3):
