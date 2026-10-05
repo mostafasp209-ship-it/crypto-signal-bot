@@ -4,9 +4,12 @@ import pandas as pd
 import numpy as np
 import requests
 import time
+import json
+from datetime import datetime
 
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+SIGNALS_FILE = "signals.json"
 
 def send(msg):
     url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
@@ -27,87 +30,109 @@ def fmt_price(p):
     return "{:.2f}".format(p)
 
 # ============================================================
-# فاندامنتال: CoinGecko Derivatives API
+# ذخیره و بارگذاری سیگنال‌ها
 # ============================================================
-def get_derivatives_data(coin_id):
-    """
-    دریافت فاندینگ ریت و Open Interest از CoinGecko
-    coin_id: مثل 'bitcoin', 'ethereum', 'solana'
-    """
+def load_signals():
     try:
-        url = "https://api.coingecko.com/api/v3/derivatives"
-        r = requests.get(url, timeout=15)
-        if r.status_code == 200:
-            data = r.json()
-            for item in data:
-                if item.get('index_id', '').lower() == coin_id.lower():
-                    return {
-                        'funding': item.get('funding_rate'),
-                        'oi': item.get('open_interest'),
-                        'oi_usd': item.get('open_interest'),  # معمولاً به USD
-                        'price': item.get('price'),
-                        'volume_24h': item.get('volume_24h')
-                    }
+        with open(SIGNALS_FILE, 'r') as f:
+            return json.load(f)
     except:
-        pass
-    return None
+        return []
 
-def get_long_short_ratio(symbol):
-    """
-    دریافت نسبت Long/Short از Binance Futures API (عمومی)
-    """
-    try:
-        # تبدیل نماد به فرمت Binance
-        base = symbol.split('/')[0]
-        binance_symbol = base + "USDT"
-        
-        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
-        params = {
-            'symbol': binance_symbol,
-            'period': '4h',
-            'limit': 1
-        }
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if data and len(data) > 0:
-                return float(data[0].get('longShortRatio', 0))
-    except:
-        pass
-    return None
+def save_signals(signals):
+    with open(SIGNALS_FILE, 'w') as f:
+        json.dump(signals, f, indent=2)
 
+def check_signal_status(signal, current_price):
+    if signal.get('status') != 'ACTIVE':
+        return signal, None
+    
+    entry = signal['entry']
+    sl = signal['sl']
+    tp1 = signal['tp1']
+    tp2 = signal['tp2']
+    tp3 = signal['tp3']
+    sig_type = signal['type']
+    
+    pnl = None
+    new_status = None
+    
+    if sig_type == 'BUY':
+        if current_price <= sl:
+            new_status = 'SL_HIT'
+            pnl = ((sl - entry) / entry) * 100
+        elif current_price >= tp3:
+            new_status = 'TP3_HIT'
+            pnl = ((tp3 - entry) / entry) * 100
+        elif current_price >= tp2:
+            new_status = 'TP2_HIT'
+            pnl = ((tp2 - entry) / entry) * 100
+        elif current_price >= tp1:
+            new_status = 'TP1_HIT'
+            pnl = ((tp1 - entry) / entry) * 100
+    else:
+        if current_price >= sl:
+            new_status = 'SL_HIT'
+            pnl = ((entry - sl) / entry) * 100
+        elif current_price <= tp3:
+            new_status = 'TP3_HIT'
+            pnl = ((entry - tp3) / entry) * 100
+        elif current_price <= tp2:
+            new_status = 'TP2_HIT'
+            pnl = ((entry - tp2) / entry) * 100
+        elif current_price <= tp1:
+            new_status = 'TP1_HIT'
+            pnl = ((entry - tp1) / entry) * 100
+    
+    if new_status:
+        signal['status'] = new_status
+        signal['pnl'] = round(pnl, 2)
+        signal['closed_at'] = datetime.now().isoformat()
+    
+    return signal, new_status
+
+# ============================================================
+# فاندامنتال
+# ============================================================
 def get_funding_from_binance(symbol):
-    """
-    دریافت فاندینگ ریت از Binance Futures API (عمومی)
-    """
     try:
         base = symbol.split('/')[0]
         binance_symbol = base + "USDT"
-        
         url = "https://fapi.binance.com/fapi/v1/premiumIndex"
         params = {'symbol': binance_symbol}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
             data = r.json()
-            return float(data.get('lastFundingRate', 0)) * 100  # تبدیل به درصد
+            return float(data.get('lastFundingRate', 0)) * 100
     except:
         pass
     return None
 
 def get_open_interest(symbol):
-    """
-    دریافت Open Interest از Binance Futures API (عمومی)
-    """
     try:
         base = symbol.split('/')[0]
         binance_symbol = base + "USDT"
-        
         url = "https://fapi.binance.com/fapi/v1/openInterest"
         params = {'symbol': binance_symbol}
         r = requests.get(url, params=params, timeout=10)
         if r.status_code == 200:
             data = r.json()
             return float(data.get('openInterest', 0))
+    except:
+        pass
+    return None
+
+def get_long_short_ratio(symbol):
+    try:
+        base = symbol.split('/')[0]
+        binance_symbol = base + "USDT"
+        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+        params = {'symbol': binance_symbol, 'period': '4h', 'limit': 1}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0:
+                return float(data[0].get('longShortRatio', 0))
     except:
         pass
     return None
@@ -162,7 +187,6 @@ class Bot:
         df['bb_upper'] = df['bb_mid'] + std * df['bb_std']
         df['bb_lower'] = df['bb_mid'] - std * df['bb_std']
         df['bb_position'] = (df['c'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-        df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
         return df
     
     def fibonacci(self, df, lookback=50):
@@ -180,21 +204,19 @@ class Bot:
             'level_100': low
         }
     
-    def check_fib_support(self, price, fib, tolerance=0.02):
+    def check_fib_support(self, price, fib, tol=0.02):
         if fib is None:
             return 0
-        levels = [fib['level_382'], fib['level_500'], fib['level_618'], fib['level_786']]
-        for lv in levels:
-            if lv > 0 and abs(price - lv) / lv < tolerance:
+        for lv in [fib['level_382'], fib['level_500'], fib['level_618'], fib['level_786']]:
+            if lv > 0 and abs(price - lv) / lv < tol:
                 return 3
         return 0
     
-    def check_fib_resistance(self, price, fib, tolerance=0.02):
+    def check_fib_resistance(self, price, fib, tol=0.02):
         if fib is None:
             return 0
-        levels = [fib['level_236'], fib['level_382'], fib['level_500']]
-        for lv in levels:
-            if lv > 0 and abs(price - lv) / lv < tolerance:
+        for lv in [fib['level_236'], fib['level_382'], fib['level_500']]:
+            if lv > 0 and abs(price - lv) / lv < tol:
                 return 3
         return 0
     
@@ -330,9 +352,7 @@ class Bot:
                 if dist < 3: buy_bonus += 2
                 elif dist < 7: buy_bonus += 1
             
-            if (buy_filters >= 3 and last['rsi'] < 45 and 
-                last['v'] > last['vma'] * 0.5):
-                
+            if (buy_filters >= 3 and last['rsi'] < 45 and last['v'] > last['vma'] * 0.5):
                 entry = last['c']
                 atr = last['atr']
                 recent_low = df['l'].iloc[-10:].min()
@@ -343,7 +363,6 @@ class Bot:
                 tp1 = entry + 1.0 * atr
                 tp2 = entry + 2.0 * atr
                 tp3 = entry + 3.0 * atr
-                
                 total = daily_score + brooks_b + rtm_b + ichi_bull + buy_bonus
                 
                 return {
@@ -354,8 +373,8 @@ class Bot:
                     'atr': atr, 'daily': daily_score,
                     'brooks': brooks_b, 'rtm': rtm_b,
                     'ichi': ichi_bull, 'bb': bb_bull, 'fib': fib_bull,
-                    'total': total,
-                    'score': buy_filters * 3 + buy_bonus
+                    'total': total, 'score': buy_filters * 3 + buy_bonus,
+                    'status': 'ACTIVE', 'created_at': datetime.now().isoformat(), 'pnl': None
                 }
             
             # ===== SELL =====
@@ -373,9 +392,7 @@ class Bot:
                 if dist < 3: sell_bonus += 2
                 elif dist < 7: sell_bonus += 1
             
-            if (sell_filters >= 3 and last['rsi'] > 55 and 
-                last['v'] > last['vma'] * 0.5):
-                
+            if (sell_filters >= 3 and last['rsi'] > 55 and last['v'] > last['vma'] * 0.5):
                 entry = last['c']
                 atr = last['atr']
                 recent_high = df['h'].iloc[-10:].max()
@@ -386,7 +403,6 @@ class Bot:
                 tp1 = entry - 1.0 * atr
                 tp2 = entry - 2.0 * atr
                 tp3 = entry - 3.0 * atr
-                
                 total = daily_score + brooks_s + rtm_s + ichi_bear + sell_bonus
                 
                 return {
@@ -397,8 +413,8 @@ class Bot:
                     'atr': atr, 'daily': daily_score,
                     'brooks': brooks_s, 'rtm': rtm_s,
                     'ichi': ichi_bear, 'bb': bb_bear, 'fib': fib_bear,
-                    'total': total,
-                    'score': sell_filters * 3 + sell_bonus
+                    'total': total, 'score': sell_filters * 3 + sell_bonus,
+                    'status': 'ACTIVE', 'created_at': datetime.now().isoformat(), 'pnl': None
                 }
             
             return None
@@ -429,10 +445,8 @@ def format_signal(s):
     rr1 = abs(s['tp1'] - entry) / risk if risk > 0 else 0
     rr2 = abs(s['tp2'] - entry) / risk if risk > 0 else 0
     rr3 = abs(s['tp3'] - entry) / risk if risk > 0 else 0
-    
     size = 10 / risk if risk > 0 else 0
     
-    # ===== فاندامنتال =====
     funding = get_funding_from_binance(s['sym'])
     oi = get_open_interest(s['sym'])
     ls_ratio = get_long_short_ratio(s['sym'])
@@ -447,10 +461,7 @@ def format_signal(s):
     else:
         funding_txt = "نامشخص"
     
-    if oi is not None:
-        oi_txt = "{:,.0f}".format(oi) + " واحد"
-    else:
-        oi_txt = "نامشخص"
+    oi_txt = "{:,.0f} واحد".format(oi) if oi is not None else "نامشخص"
     
     if ls_ratio is not None:
         if ls_ratio > 2.0:
@@ -501,12 +512,42 @@ def format_signal(s):
     return msg
 
 
+# ============================================================
+# اجرا
+# ============================================================
 print("شروع اسکن...")
 bot = Bot()
 
+# ===== بررسی سیگنال‌های قبلی =====
+old_signals = load_signals()
+print("سیگنال‌های قبلی: " + str(len(old_signals)))
+
+active_count = 0
+for old_sig in old_signals:
+    if old_sig.get('status') == 'ACTIVE':
+        active_count += 1
+        try:
+            ticker = bot.ex.fetch_ticker(old_sig['sym'])
+            current_price = ticker['last']
+            updated, new_status = check_signal_status(old_sig, current_price)
+            old_sig.clear()
+            old_sig.update(updated)
+            if new_status:
+                emoji = "✅" if 'TP' in new_status else "❌"
+                msg = emoji + " <b>" + old_sig['sym'] + "</b>\n"
+                msg += "وضعیت جدید: <b>" + new_status + "</b>\n"
+                msg += "سود/ضرر: " + str(old_sig['pnl']) + "%\n"
+                msg += "قیمت فعلی: " + fmt_price(current_price)
+                send(msg)
+                time.sleep(1)
+        except:
+            pass
+
+print("سیگنال‌های فعال: " + str(active_count))
+
+# ===== اسکن بازار =====
 markets = bot.ex.load_markets()
 symbols = [s for s, m in markets.items() if m['quote'] == bot.quote and m['spot'] and m['active']]
-
 print("تعداد کل ارزها: " + str(len(symbols)))
 
 MAX_COINS = 500
@@ -516,14 +557,18 @@ for i, sym in enumerate(symbols[:MAX_COINS]):
     if sig:
         signals.append(sig)
         print("سیگنال: " + sym + " (" + sig['type'] + ")")
-    
     if (i + 1) % 100 == 0:
         print("پیشرفت: " + str(i + 1) + "/" + str(min(MAX_COINS, len(symbols))) + " | سیگنال: " + str(len(signals)))
-    
     time.sleep(0.05)
 
 print("اسکن کامل شد. سیگنال: " + str(len(signals)))
 
+# ===== ذخیره سیگنال‌های جدید =====
+all_signals = old_signals + signals
+save_signals(all_signals)
+print("سیگنال‌های ذخیره شده: " + str(len(all_signals)))
+
+# ===== ارسال =====
 if signals:
     signals_sorted = sorted(signals, key=lambda x: x['score'], reverse=True)
     
@@ -533,7 +578,6 @@ if signals:
         emoji = "🟢" if s['type'] == 'BUY' else "🔴"
         summary += str(i) + ". " + emoji + " " + s['sym'] + " (" + s['type'] + ")\n"
     send(summary)
-    
     time.sleep(2)
     
     for s in signals_sorted[:10]:
@@ -543,7 +587,22 @@ if signals:
     
     print("ارسال شد: " + str(len(signals)) + " سیگنال")
 else:
-    send("هیچ سیگنالی پیدا نشد.")
-    print("سیگنالی نیست")
+    print("سیگنال جدیدی نیست")
+
+# ===== گزارش عملکرد =====
+closed = [s for s in all_signals if s.get('status') in ['TP1_HIT', 'TP2_HIT', 'TP3_HIT', 'SL_HIT']]
+if closed:
+    wins = [s for s in closed if 'TP' in s.get('status', '')]
+    losses = [s for s in closed if s.get('status') == 'SL_HIT']
+    total = len(closed)
+    win_rate = (len(wins) / total * 100) if total > 0 else 0
+    
+    report = "📊 <b>گزارش عملکرد</b>\n\n"
+    report += "• کل معاملات بسته شده: " + str(total) + "\n"
+    report += "• برد: " + str(len(wins)) + "\n"
+    report += "• باخت: " + str(len(losses)) + "\n"
+    report += "• وین ریت: " + str(round(win_rate, 1)) + "%\n"
+    send(report)
+    print("گزارش ارسال شد. وین ریت: " + str(round(win_rate, 1)) + "%")
 
 print("Done!")
