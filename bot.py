@@ -26,7 +26,95 @@ def fmt_price(p):
         return "{:.4f}".format(p)
     return "{:.2f}".format(p)
 
+# ============================================================
+# فاندامنتال: CoinGecko Derivatives API
+# ============================================================
+def get_derivatives_data(coin_id):
+    """
+    دریافت فاندینگ ریت و Open Interest از CoinGecko
+    coin_id: مثل 'bitcoin', 'ethereum', 'solana'
+    """
+    try:
+        url = "https://api.coingecko.com/api/v3/derivatives"
+        r = requests.get(url, timeout=15)
+        if r.status_code == 200:
+            data = r.json()
+            for item in data:
+                if item.get('index_id', '').lower() == coin_id.lower():
+                    return {
+                        'funding': item.get('funding_rate'),
+                        'oi': item.get('open_interest'),
+                        'oi_usd': item.get('open_interest'),  # معمولاً به USD
+                        'price': item.get('price'),
+                        'volume_24h': item.get('volume_24h')
+                    }
+    except:
+        pass
+    return None
 
+def get_long_short_ratio(symbol):
+    """
+    دریافت نسبت Long/Short از Binance Futures API (عمومی)
+    """
+    try:
+        # تبدیل نماد به فرمت Binance
+        base = symbol.split('/')[0]
+        binance_symbol = base + "USDT"
+        
+        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
+        params = {
+            'symbol': binance_symbol,
+            'period': '4h',
+            'limit': 1
+        }
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            if data and len(data) > 0:
+                return float(data[0].get('longShortRatio', 0))
+    except:
+        pass
+    return None
+
+def get_funding_from_binance(symbol):
+    """
+    دریافت فاندینگ ریت از Binance Futures API (عمومی)
+    """
+    try:
+        base = symbol.split('/')[0]
+        binance_symbol = base + "USDT"
+        
+        url = "https://fapi.binance.com/fapi/v1/premiumIndex"
+        params = {'symbol': binance_symbol}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            return float(data.get('lastFundingRate', 0)) * 100  # تبدیل به درصد
+    except:
+        pass
+    return None
+
+def get_open_interest(symbol):
+    """
+    دریافت Open Interest از Binance Futures API (عمومی)
+    """
+    try:
+        base = symbol.split('/')[0]
+        binance_symbol = base + "USDT"
+        
+        url = "https://fapi.binance.com/fapi/v1/openInterest"
+        params = {'symbol': binance_symbol}
+        r = requests.get(url, params=params, timeout=10)
+        if r.status_code == 200:
+            data = r.json()
+            return float(data.get('openInterest', 0))
+    except:
+        pass
+    return None
+
+# ============================================================
+# کلاس ربات
+# ============================================================
 class Bot:
     def __init__(self):
         self.ex = None
@@ -58,7 +146,6 @@ class Bot:
         tr = pd.concat([h - lo, (h - c.shift()).abs(), (lo - c.shift()).abs()], axis=1).max(axis=1)
         return tr.ewm(span=l, adjust=False).mean()
     
-    # ===== ایچیموکو =====
     def ichimoku(self, df):
         df = df.copy()
         df['tenkan'] = (df['h'].rolling(9).max() + df['l'].rolling(9).min()) / 2
@@ -68,44 +155,32 @@ class Bot:
         df['chikou'] = df['c'].shift(-26)
         return df
     
-    # ===== بولینگر باند =====
     def bollinger(self, df, l=20, std=2):
         df = df.copy()
         df['bb_mid'] = df['c'].rolling(l).mean()
         df['bb_std'] = df['c'].rolling(l).std()
         df['bb_upper'] = df['bb_mid'] + std * df['bb_std']
         df['bb_lower'] = df['bb_mid'] - std * df['bb_std']
-        # موقعیت قیمت نسبت به باندها (0 = پایین، 1 = بالا)
         df['bb_position'] = (df['c'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-        # عرض باند (نوسان)
         df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / df['bb_mid']
         return df
     
-    # ===== فیبوناچی =====
     def fibonacci(self, df, lookback=50):
         recent = df.tail(lookback)
         high = recent['h'].max()
         low = recent['l'].min()
         diff = high - low
-        
         if diff == 0:
             return None
-        
-        fib = {
-            'high': high,
-            'low': low,
-            'level_0': high,
-            'level_236': high - diff * 0.236,
-            'level_382': high - diff * 0.382,
-            'level_500': high - diff * 0.5,
-            'level_618': high - diff * 0.618,
-            'level_786': high - diff * 0.786,
+        return {
+            'high': high, 'low': low,
+            'level_0': high, 'level_236': high - diff * 0.236,
+            'level_382': high - diff * 0.382, 'level_500': high - diff * 0.5,
+            'level_618': high - diff * 0.618, 'level_786': high - diff * 0.786,
             'level_100': low
         }
-        return fib
     
     def check_fib_support(self, price, fib, tolerance=0.02):
-        """بررسی نزدیکی قیمت به سطوح فیبوناچی (حمایت)"""
         if fib is None:
             return 0
         levels = [fib['level_382'], fib['level_500'], fib['level_618'], fib['level_786']]
@@ -115,7 +190,6 @@ class Bot:
         return 0
     
     def check_fib_resistance(self, price, fib, tolerance=0.02):
-        """بررسی نزدیکی قیمت به سطوح فیبوناچی (مقاومت)"""
         if fib is None:
             return 0
         levels = [fib['level_236'], fib['level_382'], fib['level_500']]
@@ -224,7 +298,6 @@ class Bot:
             nearest_res, nearest_sup = self.find_sr(df)
             fib = self.fibonacci(df)
             
-            # ===== ایچیموکو ۴ ساعته =====
             ichi_bull = 0
             if last['c'] > max(last['senkou_a'], last['senkou_b']): ichi_bull += 1
             if last['tenkan'] > last['kijun']: ichi_bull += 1
@@ -235,12 +308,10 @@ class Bot:
             if last['tenkan'] < last['kijun']: ichi_bear += 1
             if last['senkou_a'] < last['senkou_b']: ichi_bear += 1
             
-            # ===== بولینگر =====
             bb_pos = last['bb_position']
-            bb_bull = 1 if bb_pos < 0.2 else 0   # نزدیک باند پایین
-            bb_bear = 1 if bb_pos > 0.8 else 0   # نزدیک باند بالا
+            bb_bull = 1 if bb_pos < 0.2 else 0
+            bb_bear = 1 if bb_pos > 0.8 else 0
             
-            # ===== فیبوناچی =====
             fib_bull = self.check_fib_support(last['c'], fib)
             fib_bear = self.check_fib_resistance(last['c'], fib)
             
@@ -361,6 +432,36 @@ def format_signal(s):
     
     size = 10 / risk if risk > 0 else 0
     
+    # ===== فاندامنتال =====
+    funding = get_funding_from_binance(s['sym'])
+    oi = get_open_interest(s['sym'])
+    ls_ratio = get_long_short_ratio(s['sym'])
+    
+    if funding is not None:
+        if funding < -0.01:
+            funding_txt = str(round(funding, 4)) + "% 🟢 فرصت خرید"
+        elif funding > 0.05:
+            funding_txt = str(round(funding, 4)) + "% 🔴 ریسک"
+        else:
+            funding_txt = str(round(funding, 4)) + "% ⚪ نرمال"
+    else:
+        funding_txt = "نامشخص"
+    
+    if oi is not None:
+        oi_txt = "{:,.0f}".format(oi) + " واحد"
+    else:
+        oi_txt = "نامشخص"
+    
+    if ls_ratio is not None:
+        if ls_ratio > 2.0:
+            ls_txt = str(round(ls_ratio, 2)) + " 🔴 لانگ زیاد"
+        elif ls_ratio > 1.5:
+            ls_txt = str(round(ls_ratio, 2)) + " ⚠️ لانگ متوسط"
+        else:
+            ls_txt = str(round(ls_ratio, 2)) + " ✅ متعادل"
+    else:
+        ls_txt = "نامشخص"
+    
     msg = emoji + " <b>سیگنال " + name + ": " + s['sym'] + "</b>\n"
     msg += "⚡ قدرت: " + strength + " (" + str(s['total']) + ")\n\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -386,6 +487,11 @@ def format_signal(s):
     msg += "• Fibonacci: " + ("✅" if s['fib'] else "❌") + "\n"
     msg += "• RSI: " + str(round(s['rsi'], 1)) + " | حجم: " + str(round(s['vol'], 2)) + "x\n"
     msg += "• ATR: " + fmt_price(s['atr']) + "\n\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "📈 <b>فاندامنتال:</b>\n"
+    msg += "• فاندینگ: " + funding_txt + "\n"
+    msg += "• Open Interest: " + oi_txt + "\n"
+    msg += "• نسبت L/S: " + ls_txt + "\n\n"
     msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
     msg += "💡 <b>مدیریت سرمایه (با ۱۰۰۰ دلار):</b>\n"
     msg += "• ریسک ۱٪ = ۱۰ دلار\n"
@@ -435,7 +541,7 @@ if signals:
         send(msg)
         time.sleep(2)
     
-    print("ارسال شد: " + str-(len(signals)) + " سیگن Brooksال")
+    print("ارسال شد: " + str(len(signals)) + " سیگنال")
 else:
     send("هیچ سیگنالی پیدا نشد.")
     print("سیگنالی نیست")
