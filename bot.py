@@ -17,18 +17,28 @@ def send(msg):
 
 class Bot:
     def __init__(self):
-        # اول Binance، اگه نشد OKX
+        # صرافی‌های آمریکایی که IPهای GitHub رو بلاک نمی‌کنن
         self.ex = None
-        for name in ['binance', 'okx', 'bybit']:
+        exchange_list = ['kraken', 'coinbase', 'gemini', 'bitstamp']
+        
+        for name in exchange_list:
             try:
                 test_ex = getattr(ccxt, name)({'enableRateLimit': True, 'timeout': 30000})
+                test_data = test_ex.fetch_ohlcv('BTC/USD', '4h', 5)
+                if test_data and len(test_data) > 0:
+                    self.ex = test_ex
+                    self.quote = 'USD'
+                    print("صرافی متصل: " + name.upper())
+                    break
+                # اگه USD نبود، USDT رو تست کن
                 test_data = test_ex.fetch_ohlcv('BTC/USDT', '4h', 5)
                 if test_data and len(test_data) > 0:
                     self.ex = test_ex
+                    self.quote = 'USDT'
                     print("صرافی متصل: " + name.upper())
                     break
             except Exception as e:
-                print("صرافی " + name + " کار نکرد: " + str(e)[:100])
+                print("صرافی " + name + " کار نکرد: " + str(e)[:80])
         
         if self.ex is None:
             raise Exception("هیچ صرافی‌ای جواب نداد!")
@@ -103,7 +113,7 @@ print("شروع اسکن...")
 bot = Bot()
 
 markets = bot.ex.load_markets()
-symbols = [s for s, m in markets.items() if m['quote'] == 'USDT' and m['spot'] and m['active']]
+symbols = [s for s, m in markets.items() if m['quote'] == bot.quote and m['spot'] and m['active']]
 
 print("تعداد کل ارزها: " + str(len(symbols)))
 
