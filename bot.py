@@ -17,7 +17,21 @@ def send(msg):
 
 class Bot:
     def __init__(self):
-        self.ex = ccxt.okx({'enableRateLimit': True})
+        # اول Binance، اگه نشد OKX
+        self.ex = None
+        for name in ['binance', 'okx', 'bybit']:
+            try:
+                test_ex = getattr(ccxt, name)({'enableRateLimit': True, 'timeout': 30000})
+                test_data = test_ex.fetch_ohlcv('BTC/USDT', '4h', 5)
+                if test_data and len(test_data) > 0:
+                    self.ex = test_ex
+                    print("صرافی متصل: " + name.upper())
+                    break
+            except Exception as e:
+                print("صرافی " + name + " کار نکرد: " + str(e)[:100])
+        
+        if self.ex is None:
+            raise Exception("هیچ صرافی‌ای جواب نداد!")
     
     def ema(self, s, l):
         return s.ewm(span=l, adjust=False).mean()
@@ -50,7 +64,7 @@ class Bot:
             
             last = df.iloc[-1]
             
-            # ===== شرط خرید (نرم) =====
+            # شرط خرید (نرم)
             if (last['ema50'] > last['ema200'] * 0.98 and 
                 last['rsi'] < 55 and 
                 last['v'] > last['vma'] * 0.3):
@@ -65,7 +79,7 @@ class Bot:
                     'rsi': last['rsi'], 'vol': last['v'] / last['vma']
                 }
             
-            # ===== شرط فروش (نرم) =====
+            # شرط فروش (نرم)
             if (last['ema50'] < last['ema200'] * 1.02 and 
                 last['rsi'] > 45 and 
                 last['v'] > last['vma'] * 0.3):
@@ -87,17 +101,6 @@ class Bot:
 
 print("شروع اسکن...")
 bot = Bot()
-
-# ===== تست تشخیصی =====
-try:
-    test = bot.ex.fetch_ohlcv('BTC/USDT', '4h', 5)
-    if test and len(test) > 0:
-        print("تست BTC: OK - " + str(len(test)) + " کندل")
-    else:
-        print("تست BTC: خالی")
-except Exception as e:
-    print("خطا در تست: " + str(e))
-# ===== پایان تست =====
 
 markets = bot.ex.load_markets()
 symbols = [s for s, m in markets.items() if m['quote'] == 'USDT' and m['spot'] and m['active']]
