@@ -43,7 +43,54 @@
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
       "closed_reason": null
+    },
+    {
+      "id": "WHBT_USDT_BUY_1791247626",
+      "symbol": "WHBT/USDT",
+      "exchange": "bitfinex",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 12,
+      "created_at": "2026-10-06T00:47:06.866255+00:00",
+      "updated_at": "2026-10-06T00:47:06.866263+00:00",
+      "expiry_at": "2026-10-08T00:47:06.866266+00:00",
+      "entry": 85.281,
+      "sl": 84.00178500000001,
+      "tp1": 86.560215,
+      "tp2": 87.58358700000001,
+      "tp3": 88.606959,
+      "rr": 1.5600000000000056,
+      "rr1": 1.0,
+      "rr2": 1.8000000000000111,
+      "rr3": 2.600000000000011,
+      "risk_pct": 1.4999999999999922,
+      "risk_usd": 10.0,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 0,
+        "ichi": 2,
+        "fib": 1,
+        "sr": 1,
+        "brooks": 1,
+        "rtm": 0
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
-  "last_run": "2026-10-06T00:37:16.151771+00:00"
+  "last_run": "2026-10-06T00:47:20.353663+00:00"
 }
