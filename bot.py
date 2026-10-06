@@ -11,10 +11,6 @@ import pandas as pd
 import requests
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
 EXCHANGE_NAMES = [
     "binanceus",
     "bitstamp",
@@ -68,10 +64,6 @@ STATS = {
 }
 
 
-# ============================================================
-# UTILITIES
-# ============================================================
-
 def utc_now():
     return datetime.now(timezone.utc)
 
@@ -96,16 +88,16 @@ def fmt_price(value):
     x = safe_float(value)
     if x is None:
         return "N/A"
-    if abs(x)_counts >= 100:
+    if abs(x) >= 100:
         return f"{x:,.2f}"
     if abs(x) >= 1:
         return f"{x:,.4f}"
     if abs(x) >= 0.01:
-        return] f"{x:.6f =}"
-    return f"{x :.8f}"
+        return f"{x:.6f}"
+    return f"{x:.8f}"
 
 
-def0 classify_error(exc):
+def classify_error(exc):
     if isinstance(exc, (
         ccxt.RateLimitExceeded,
         ccxt.DDoSProtection,
@@ -126,10 +118,6 @@ def0 classify_error(exc):
 
     return "exchange_fail"
 
-
-# ============================================================
-# PERSISTENCE
-# ============================================================
 
 def load_state():
     if not os.path.exists(DATA_FILE):
@@ -166,10 +154,6 @@ def trim_state(state):
     return state
 
 
-# ============================================================
-# TELEGRAM
-# ============================================================
-
 def telegram_send(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials are missing; message skipped.")
@@ -194,10 +178,6 @@ def telegram_send(text):
         print("Telegram exception:", exc)
         return False
 
-
-# ============================================================
-# EXCHANGE MANAGER
-# ============================================================
 
 class ExchangeManager:
     def __init__(self):
@@ -232,7 +212,7 @@ class ExchangeManager:
     def mark_ok(self, exchange):
         name = self._name_of(exchange)
         if name:
-            self.fail
+            self.fail_counts[name] = 0
 
     def mark_fail(self, exchange):
         name = self._name_of(exchange)
@@ -312,10 +292,6 @@ class ExchangeManager:
             return None
 
 
-# ============================================================
-# INDICATORS
-# ============================================================
-
 def add_indicators(df):
     df = df.copy()
     close = df["close"]
@@ -378,10 +354,6 @@ def closed_candles(raw):
     df.dropna(inplace=True)
     return df
 
-
-# ============================================================
-# TECHNICAL SCORE COMPONENTS
-# ============================================================
 
 def ema_score(last):
     score = 0
@@ -502,10 +474,6 @@ def rtm_score(df):
     return False, False, 0
 
 
-# ============================================================
-# QUICK 4H-ONLY SCORE
-# ============================================================
-
 def compute_4h_score(df):
     last = df.iloc[-1]
     components = {}
@@ -533,10 +501,6 @@ def compute_4h_score(df):
     return bull, bear, components
 
 
-# ============================================================
-# TREND FILTER
-# ============================================================
-
 def daily_trend(manager, exchange, symbol):
     try:
         raw = manager.fetch_ohlcv(
@@ -560,10 +524,6 @@ def daily_trend(manager, exchange, symbol):
         print("[WARN] daily trend failed " + exchange.id + " " + symbol + ": " + type(exc).__name__ + ": " + str(exc))
         return "UNKNOWN"
 
-
-# ============================================================
-# FUNDAMENTALS
-# ============================================================
 
 def fundamental_data(manager, symbol):
     result = {
@@ -620,10 +580,6 @@ def fundamental_score(data, side):
         return 1
     return 0
 
-
-# ============================================================
-# LEVELS
-# ============================================================
 
 def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     entry = safe_float(entry)
@@ -683,10 +639,6 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         "weighted_rr": weighted_rr,
     }
 
-
-# ============================================================
-# TRY BUILD SIGNAL
-# ============================================================
 
 def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     if len(df_4h) < 205:
@@ -786,10 +738,6 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         "closed_reason": None,
     }
 
-
-# ============================================================
-# TRADE MANAGEMENT
-# ============================================================
 
 def duplicate_exists(state, symbol, side):
     cutoff = utc_now() - timedelta(hours=DUPLICATE_COOLDOWN_HOURS)
@@ -943,10 +891,6 @@ def update_open_signals(state, manager):
     return changed
 
 
-# ============================================================
-# REPORTING
-# ============================================================
-
 def performance_report(state):
     signals = state.get("signals", [])
     closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
@@ -1008,10 +952,6 @@ def format_signal(signal):
     )
 
 
-# ============================================================
-# SCANNER
-# ============================================================
-
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
     if not candidates:
@@ -1066,10 +1006,6 @@ def scan_market(manager, state):
     signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
     return signals
 
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
     print("=" * 70)
