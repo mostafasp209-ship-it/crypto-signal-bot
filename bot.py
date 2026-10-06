@@ -1,608 +1,1164 @@
 import os
-import ccxt
-import pandas as pd
-import numpy as np
-import requests
-import time
 import json
-from datetime import datetime
+import time
+import math
+import traceback
+from datetime import datetime, timezone, timedelta
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-SIGNALS_FILE = "signals.json"
+import ccxt
+import numpy as np
+import pandas as pd
+import requests
 
-def send(msg):
-    url = "https://api.telegram.org/bot" + TOKEN + "/sendMessage"
+
+# ============================================================
+# CONFIG
+# ============================================================
+
+EXCHANGE_NAMES = [
+    "binanceus",
+    "bitstamp",
+    "bitfinex",
+    "cryptocom",
+]
+
+FUNDING_SOURCES = [
+    "binanceus",
+    "bitstamp",
+]
+
+QUOTE = "USDT"
+TIMEFRAME = "4h"
+TREND_TIMEFRAME = "1d"
+
+MAX_COINS = 300
+MIN_SCORE = 12
+MIN_RR = 1.50
+
+SIGNAL_EXPIRY_HOURS = 48
+RISK_USD = 10.0
+FEE_RATE = 0.001
+
+TP_WEIGHTS = {
+    "tp1": 0.50,
+    "tp2": 0.30,
+    "tp3": 0.20,
+}
+
+DATA_FILE = "signals.json"
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+
+REQUEST_TIMEOUT_MS = 15000
+OHLCV_LIMIT = 260
+DAILY_LIMIT = 120
+SLEEP_BETWEEN_SYMBOLS = 0.08
+
+
+# ============================================================
+# UTILITIES
+# ============================================================
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+def iso_now():
+    return utc_now().isoformat()
+
+
+def safe_float(value, default=None):
     try:
-        requests.post(url, json={"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}, timeout=10)
-    except:
-        pass
+        if value is None:
+            return default
+        x = float(value)
+        if not math.isfinite(x):
+            return default
+        return x
+    except Exception:
+        return default
 
-def fmt_price(p):
-    if p == 0:
-        return "0"
-    if abs(p) < 0.0001:
-        return "{:.1e}".format(p)
-    if abs(p) < 1:
-        return "{:.6f}".format(p)
-    if abs(p) < 100:
-        return "{:.4f}".format(p)
-    return "{:.2f}".format(p)
+
+def fmt_price(value):
+    x = safe_float(value)
+    if x is None:
+        return "N/A"
+    if abs(x) >= 100:
+        return f"{x:,.2f}"
+    if abs(x) >= 1:
+        return f"{x:,.4f}"
+    if abs(x) >= 0.01:
+        return f"{x:.6f}"
+    return f"{x:.8f}"
+
+
+def pct(a, b):
+    a = safe_float(a)
+    b = safe_float(b)
+    if a is None or b in (None, 0):
+        return None
+    return (a / b - 1.0) * 100.0
+
+
+def clamp(x, lo, hi):
+    return max(lo, min(hi, x))
+
 
 # ============================================================
-# ذخیره و بارگذاری سیگنال‌ها
+# PERSISTENCE
 # ============================================================
-def load_signals():
+
+def load_state():
+    if not os.path.exists(DATA_FILE):
+        return {"signals": [], "last_run": None}
+
     try:
-        with open(SIGNALS_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-def save_signals(signals):
-    with open(SIGNALS_FILE, 'w') as f:
-        json.dump(signals, f, indent=2)
+        if not isinstance(data, dict):
+            return {"signals": [], "last_run": None}
 
-def check_signal_status(signal, current_price):
-    if signal.get('status') != 'ACTIVE':
-        return signal, None
-    
-    entry = signal['entry']
-    sl = signal['sl']
-    tp1 = signal['tp1']
-    tp2 = signal['tp2']
-    tp3 = signal['tp3']
-    sig_type = signal['type']
-    
-    pnl = None
-    new_status = None
-    
-    if sig_type == 'BUY':
-        if current_price <= sl:
-            new_status = 'SL_HIT'
-            pnl = ((sl - entry) / entry) * 100
-        elif current_price >= tp3:
-            new_status = 'TP3_HIT'
-            pnl = ((tp3 - entry) / entry) * 100
-        elif current_price >= tp2:
-            new_status = 'TP2_HIT'
-            pnl = ((tp2 - entry) / entry) * 100
-        elif current_price >= tp1:
-            new_status = 'TP1_HIT'
-            pnl = ((tp1 - entry) / entry) * 100
-    else:
-        if current_price >= sl:
-            new_status = 'SL_HIT'
-            pnl = ((entry - sl) / entry) * 100
-        elif current_price <= tp3:
-            new_status = 'TP3_HIT'
-            pnl = ((entry - tp3) / entry) * 100
-        elif current_price <= tp2:
-            new_status = 'TP2_HIT'
-            pnl = ((entry - tp2) / entry) * 100
-        elif current_price <= tp1:
-            new_status = 'TP1_HIT'
-            pnl = ((entry - tp1) / entry) * 100
-    
-    if new_status:
-        signal['status'] = new_status
-        signal['pnl'] = round(pnl, 2)
-        signal['closed_at'] = datetime.now().isoformat()
-    
-    return signal, new_status
+        data.setdefault("signals", [])
+        data.setdefault("last_run", None)
+        return data
+    except Exception:
+        print("WARNING: signals.json could not be read; starting clean.")
+        return {"signals": [], "last_run": None}
+
+
+def save_state(state):
+    tmp = DATA_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, DATA_FILE)
+
 
 # ============================================================
-# فاندامنتال
+# TELEGRAM
 # ============================================================
-def get_funding_from_binance(symbol):
+
+def telegram_send(text):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Telegram credentials are missing; message skipped.")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+
     try:
-        base = symbol.split('/')[0]
-        binance_symbol = base + "USDT"
-        url = "https://fapi.binance.com/fapi/v1/premiumIndex"
-        params = {'symbol': binance_symbol}
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            return float(data.get('lastFundingRate', 0)) * 100
-    except:
-        pass
-    return None
+        r = requests.post(
+            url,
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
+            timeout=20,
+        )
+        if not r.ok:
+            print("Telegram error:", r.status_code, r.text[:500])
+            return False
+        return True
+    except Exception as exc:
+        print("Telegram exception:", exc)
+        return False
 
-def get_open_interest(symbol):
-    try:
-        base = symbol.split('/')[0]
-        binance_symbol = base + "USDT"
-        url = "https://fapi.binance.com/fapi/v1/openInterest"
-        params = {'symbol': binance_symbol}
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            return float(data.get('openInterest', 0))
-    except:
-        pass
-    return None
-
-def get_long_short_ratio(symbol):
-    try:
-        base = symbol.split('/')[0]
-        binance_symbol = base + "USDT"
-        url = "https://fapi.binance.com/futures/data/globalLongShortAccountRatio"
-        params = {'symbol': binance_symbol, 'period': '4h', 'limit': 1}
-        r = requests.get(url, params=params, timeout=10)
-        if r.status_code == 200:
-            data = r.json()
-            if data and len(data) > 0:
-                return float(data[0].get('longShortRatio', 0))
-    except:
-        pass
-    return None
 
 # ============================================================
-# کلاس ربات
+# EXCHANGE MANAGER
 # ============================================================
-class Bot:
+
+class ExchangeManager:
     def __init__(self):
-        self.ex = None
-        exchange_list = ['binanceus', 'bitstamp', 'bitfinex', 'cryptocom']
-        for name in exchange_list:
+        self.exchanges = {}
+        self.market_counts = {}
+
+    def build(self):
+        for name in EXCHANGE_NAMES:
             try:
-                test_ex = getattr(ccxt, name)({'enableRateLimit': True, 'timeout': 30000})
-                test_data = test_ex.fetch_ohlcv('BTC/USDT', '4h', 5)
-                if test_data and len(test_data) > 0:
-                    self.ex = test_ex
-                    self.quote = 'USDT'
-                    print("صرافی متصل: " + name.upper())
-                    break
-            except Exception as e:
-                print("صرافی " + name + " کار نکرد: " + str(e)[:80])
-        if self.ex is None:
-            raise Exception("هیچ صرافی‌ای جواب نداد!")
-    
-    def ema(self, s, l):
-        return s.ewm(span=l, adjust=False).mean()
-    
-    def rsi(self, s, l=14):
-        d = s.diff()
-        g = d.where(d > 0, 0).ewm(span=l, adjust=False).mean()
-        ls = -d.where(d < 0, 0).ewm(span=l, adjust=False).mean()
-        return 100 - (100 / (1 + g / ls))
-    
-    def atr(self, h, lo, c, l=14):
-        tr = pd.concat([h - lo, (h - c.shift()).abs(), (lo - c.shift()).abs()], axis=1).max(axis=1)
-        return tr.ewm(span=l, adjust=False).mean()
-    
-    def ichimoku(self, df):
-        df = df.copy()
-        df['tenkan'] = (df['h'].rolling(9).max() + df['l'].rolling(9).min()) / 2
-        df['kijun'] = (df['h'].rolling(26).max() + df['l'].rolling(26).min()) / 2
-        df['senkou_a'] = ((df['tenkan'] + df['kijun']) / 2).shift(26)
-        df['senkou_b'] = ((df['h'].rolling(52).max() + df['l'].rolling(52).min()) / 2).shift(26)
-        df['chikou'] = df['c'].shift(-26)
-        return df
-    
-    def bollinger(self, df, l=20, std=2):
-        df = df.copy()
-        df['bb_mid'] = df['c'].rolling(l).mean()
-        df['bb_std'] = df['c'].rolling(l).std()
-        df['bb_upper'] = df['bb_mid'] + std * df['bb_std']
-        df['bb_lower'] = df['bb_mid'] - std * df['bb_std']
-        df['bb_position'] = (df['c'] - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-        return df
-    
-    def fibonacci(self, df, lookback=50):
-        recent = df.tail(lookback)
-        high = recent['h'].max()
-        low = recent['l'].min()
-        diff = high - low
-        if diff == 0:
-            return None
-        return {
-            'high': high, 'low': low,
-            'level_0': high, 'level_236': high - diff * 0.236,
-            'level_382': high - diff * 0.382, 'level_500': high - diff * 0.5,
-            'level_618': high - diff * 0.618, 'level_786': high - diff * 0.786,
-            'level_100': low
-        }
-    
-    def check_fib_support(self, price, fib, tol=0.02):
-        if fib is None:
-            return 0
-        for lv in [fib['level_382'], fib['level_500'], fib['level_618'], fib['level_786']]:
-            if lv > 0 and abs(price - lv) / lv < tol:
-                return 3
-        return 0
-    
-    def check_fib_resistance(self, price, fib, tol=0.02):
-        if fib is None:
-            return 0
-        for lv in [fib['level_236'], fib['level_382'], fib['level_500']]:
-            if lv > 0 and abs(price - lv) / lv < tol:
-                return 3
-        return 0
-    
-    def brooks_buy(self, df):
-        last, p1, p2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        bull = 1 if last['c'] > last['o'] else 0
-        rng = last['h'] - last['l']
-        strong = 1 if rng > 0 and (last['c'] - last['l']) / rng > 0.84 else 0
-        above = 1 if last['c'] > p1['h'] else 0
-        two_bear = 1 if (p1['c'] < p1['o']) and (p2['c'] < p2['o']) else 0
-        return bull + strong + above + two_bear
-    
-    def brooks_sell(self, df):
-        last, p1, p2 = df.iloc[-1], df.iloc[-2], df.iloc[-3]
-        bear = 1 if last['c'] < last['o'] else 0
-        rng = last['h'] - last['l']
-        strong = 1 if rng > 0 and (last['h'] - last['c']) / rng > 0.84 else 0
-        below = 1 if last['c'] < p1['l'] else 0
-        two_bull = 1 if (p1['c'] > p1['o']) and (p2['c'] > p2['o']) else 0
-        return bear + strong + below + two_bull
-    
-    def rtm_buy(self, df):
-        last, p1 = df.iloc[-1], df.iloc[-2]
-        rlow = df['l'].iloc[-10:].min()
-        sweep = 1 if (p1['l'] <= rlow * 1.002) and (p1['c'] > rlow) and (last['c'] > p1['c']) else 0
-        shigh = df['h'].iloc[-5:-1].max()
-        mss = 1 if last['c'] > shigh else 0
-        disc = 1 if last['c'] <= rlow * 1.01 else 0
-        hdiv = 1 if (last['l'] > df['l'].iloc[-5]) and (last['rsi'] < df['rsi'].iloc[-5]) else 0
-        return sweep + mss + disc + hdiv
-    
-    def rtm_sell(self, df):
-        last, p1 = df.iloc[-1], df.iloc[-2]
-        rhigh = df['h'].iloc[-10:].max()
-        sweep = 1 if (p1['h'] >= rhigh * 0.998) and (p1['c'] < rhigh) and (last['c'] < p1['c']) else 0
-        slow = df['l'].iloc[-5:-1].min()
-        mss = 1 if last['c'] < slow else 0
-        prem = 1 if last['c'] >= rhigh * 0.99 else 0
-        hdiv = 1 if (last['h'] < df['h'].iloc[-5]) and (last['rsi'] > df['rsi'].iloc[-5]) else 0
-        return sweep + mss + prem + hdiv
-    
-    def daily_trend(self, symbol):
-        try:
-            o = self.ex.fetch_ohlcv(symbol, '1d', 200)
-            if not o or len(o) < 200:
-                return None
-            df = pd.DataFrame(o, columns=['ts','o','h','l','c','v'])
-            for col in ['o','h','l','c','v']:
-                df[col] = pd.to_numeric(df[col])
-            df = self.ichimoku(df)
-            last = df.iloc[-1]
-            score = 0
-            if last['c'] > max(last['senkou_a'], last['senkou_b']): score += 1
-            if last['tenkan'] > last['kijun']: score += 1
-            if last['senkou_a'] > last['senkou_b']: score += 1
-            if len(df) > 27 and last['c'] > df['c'].iloc[-27]: score += 1
-            return score
-        except:
-            return None
-    
-    def find_sr(self, df, lookback=50):
-        recent = df.tail(lookback)
-        highs, lows = [], []
-        for i in range(2, len(recent) - 2):
-            if (recent['h'].iloc[i] > recent['h'].iloc[i-1] and recent['h'].iloc[i] > recent['h'].iloc[i-2]
-                and recent['h'].iloc[i] > recent['h'].iloc[i+1] and recent['h'].iloc[i] > recent['h'].iloc[i+2]):
-                highs.append(recent['h'].iloc[i])
-            if (recent['l'].iloc[i] < recent['l'].iloc[i-1] and recent['l'].iloc[i] < recent['l'].iloc[i-2]
-                and recent['l'].iloc[i] < recent['l'].iloc[i+1] and recent['l'].iloc[i] < recent['l'].iloc[i+2]):
-                lows.append(recent['l'].iloc[i])
-        last_price = df['c'].iloc[-1]
-        nearest_res = min([r for r in highs if r > last_price], default=None)
-        nearest_sup = max([s for s in lows if s < last_price], default=None)
-        return nearest_res, nearest_sup
-    
-    def analyze(self, symbol):
-        try:
-            o = self.ex.fetch_ohlcv(symbol, '4h', 300)
-            if not o or len(o) < 200:
-                return None
-            df = pd.DataFrame(o, columns=['ts','o','h','l','c','v'])
-            for col in ['o','h','l','c','v']:
-                df[col] = pd.to_numeric(df[col])
-            df['ema50'] = self.ema(df['c'], 50)
-            df['ema200'] = self.ema(df['c'], 200)
-            df['rsi'] = self.rsi(df['c'])
-            df['atr'] = self.atr(df['h'], df['l'], df['c'])
-            df['vma'] = df['v'].rolling(20).mean()
-            df = self.ichimoku(df)
-            df = self.bollinger(df)
-            
-            last = df.iloc[-1]
-            daily_score = self.daily_trend(symbol)
-            if daily_score is None:
-                daily_score = 0
-            
-            brooks_b = self.brooks_buy(df)
-            brooks_s = self.brooks_sell(df)
-            rtm_b = self.rtm_buy(df)
-            rtm_s = self.rtm_sell(df)
-            nearest_res, nearest_sup = self.find_sr(df)
-            fib = self.fibonacci(df)
-            
-            ichi_bull = 0
-            if last['c'] > max(last['senkou_a'], last['senkou_b']): ichi_bull += 1
-            if last['tenkan'] > last['kijun']: ichi_bull += 1
-            if last['senkou_a'] > last['senkou_b']: ichi_bull += 1
-            
-            ichi_bear = 0
-            if last['c'] < min(last['senkou_a'], last['senkou_b']): ichi_bear += 1
-            if last['tenkan'] < last['kijun']: ichi_bear += 1
-            if last['senkou_a'] < last['senkou_b']: ichi_bear += 1
-            
-            bb_pos = last['bb_position']
-            bb_bull = 1 if bb_pos < 0.2 else 0
-            bb_bear = 1 if bb_pos > 0.8 else 0
-            
-            fib_bull = self.check_fib_support(last['c'], fib)
-            fib_bear = self.check_fib_resistance(last['c'], fib)
-            
-            # ===== BUY =====
-            buy_filters = 0
-            if daily_score >= 2: buy_filters += 1
-            if brooks_b >= 2: buy_filters += 1
-            if rtm_b >= 1: buy_filters += 1
-            if ichi_bull >= 2: buy_filters += 1
-            
-            buy_bonus = 0
-            if bb_bull: buy_bonus += 2
-            if fib_bull: buy_bonus += 2
-            if nearest_sup:
-                dist = ((last['c'] - nearest_sup) / last['c']) * 100
-                if dist < 3: buy_bonus += 2
-                elif dist < 7: buy_bonus += 1
-            
-            if (buy_filters >= 3 and last['rsi'] < 45 and last['v'] > last['vma'] * 0.5):
-                entry = last['c']
-                atr = last['atr']
-                recent_low = df['l'].iloc[-10:].min()
-                
-                ez_low = max(recent_low, entry - 0.5 * atr)
-                ez_high = entry + 0.2 * atr
-                sl = min(recent_low - 0.5 * atr, entry - 2 * atr)
-                tp1 = entry + 1.0 * atr
-                tp2 = entry + 2.0 * atr
-                tp3 = entry + 3.0 * atr
-                total = daily_score + brooks_b + rtm_b + ichi_bull + buy_bonus
-                
-                return {
-                    'sym': symbol, 'type': 'BUY',
-                    'entry': entry, 'ez_low': ez_low, 'ez_high': ez_high,
-                    'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-                    'rsi': last['rsi'], 'vol': last['v'] / last['vma'],
-                    'atr': atr, 'daily': daily_score,
-                    'brooks': brooks_b, 'rtm': rtm_b,
-                    'ichi': ichi_bull, 'bb': bb_bull, 'fib': fib_bull,
-                    'total': total, 'score': buy_filters * 3 + buy_bonus,
-                    'status': 'ACTIVE', 'created_at': datetime.now().isoformat(), 'pnl': None
-                }
-            
-            # ===== SELL =====
-            sell_filters = 0
-            if daily_score <= 1: sell_filters += 1
-            if brooks_s >= 2: sell_filters += 1
-            if rtm_s >= 1: sell_filters += 1
-            if ichi_bear >= 2: sell_filters += 1
-            
-            sell_bonus = 0
-            if bb_bear: sell_bonus += 2
-            if fib_bear: sell_bonus += 2
-            if nearest_res:
-                dist = ((nearest_res - last['c']) / last['c']) * 100
-                if dist < 3: sell_bonus += 2
-                elif dist < 7: sell_bonus += 1
-            
-            if (sell_filters >= 3 and last['rsi'] > 55 and last['v'] > last['vma'] * 0.5):
-                entry = last['c']
-                atr = last['atr']
-                recent_high = df['h'].iloc[-10:].max()
-                
-                ez_low = entry - 0.2 * atr
-                ez_high = min(recent_high, entry + 0.5 * atr)
-                sl = max(recent_high + 0.5 * atr, entry + 2 * atr)
-                tp1 = entry - 1.0 * atr
-                tp2 = entry - 2.0 * atr
-                tp3 = entry - 3.0 * atr
-                total = daily_score + brooks_s + rtm_s + ichi_bear + sell_bonus
-                
-                return {
-                    'sym': symbol, 'type': 'SELL',
-                    'entry': entry, 'ez_low': ez_low, 'ez_high': ez_high,
-                    'sl': sl, 'tp1': tp1, 'tp2': tp2, 'tp3': tp3,
-                    'rsi': last['rsi'], 'vol': last['v'] / last['vma'],
-                    'atr': atr, 'daily': daily_score,
-                    'brooks': brooks_s, 'rtm': rtm_s,
-                    'ichi': ichi_bear, 'bb': bb_bear, 'fib': fib_bear,
-                    'total': total, 'score': sell_filters * 3 + sell_bonus,
-                    'status': 'ACTIVE', 'created_at': datetime.now().isoformat(), 'pnl': None
-                }
-            
-            return None
-        except:
-            return None
+                cls = getattr(ccxt, name)
+                ex = cls({
+                    "enableRateLimit": True,
+                    "timeout": REQUEST_TIMEOUT_MS,
+                })
+                ex.load_markets()
+                self.exchanges[name] = ex
+                self.market_counts[name] = len(ex.markets)
+                print(f"[OK] {name}: {len(ex.markets)} markets")
+            except Exception as exc:
+                print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
 
+        return bool(self.exchanges)
 
-def format_signal(s):
-    emoji = "🟢" if s['type'] == 'BUY' else "🔴"
-    name = "خرید" if s['type'] == 'BUY' else "فروش"
-    
-    if s['total'] >= 12:
-        strength = "🔥🔥🔥 قوی"
-    elif s['total'] >= 8:
-        strength = "🔥🔥 متوسط"
-    else:
-        strength = "🔥 ضعیف"
-    
-    entry = s['entry']
-    sl = s['sl']
-    risk = abs(entry - sl)
-    
-    sl_pct = ((sl - entry) / entry) * 100
-    tp1_pct = ((s['tp1'] - entry) / entry) * 100
-    tp2_pct = ((s['tp2'] - entry) / entry) * 100
-    tp3_pct = ((s['tp3'] - entry) / entry) * 100
-    
-    rr1 = abs(s['tp1'] - entry) / risk if risk > 0 else 0
-    rr2 = abs(s['tp2'] - entry) / risk if risk > 0 else 0
-    rr3 = abs(s['tp3'] - entry) / risk if risk > 0 else 0
-    size = 10 / risk if risk > 0 else 0
-    
-    funding = get_funding_from_binance(s['sym'])
-    oi = get_open_interest(s['sym'])
-    ls_ratio = get_long_short_ratio(s['sym'])
-    
-    if funding is not None:
-        if funding < -0.01:
-            funding_txt = str(round(funding, 4)) + "% 🟢 فرصت خرید"
-        elif funding > 0.05:
-            funding_txt = str(round(funding, 4)) + "% 🔴 ریسک"
-        else:
-            funding_txt = str(round(funding, 4)) + "% ⚪ نرمال"
-    else:
-        funding_txt = "نامشخص"
-    
-    oi_txt = "{:,.0f} واحد".format(oi) if oi is not None else "نامشخص"
-    
-    if ls_ratio is not None:
-        if ls_ratio > 2.0:
-            ls_txt = str(round(ls_ratio, 2)) + " 🔴 لانگ زیاد"
-        elif ls_ratio > 1.5:
-            ls_txt = str(round(ls_ratio, 2)) + " ⚠️ لانگ متوسط"
-        else:
-            ls_txt = str(round(ls_ratio, 2)) + " ✅ متعادل"
-    else:
-        ls_txt = "نامشخص"
-    
-    msg = emoji + " <b>سیگنال " + name + ": " + s['sym'] + "</b>\n"
-    msg += "⚡ قدرت: " + strength + " (" + str(s['total']) + ")\n\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "📍 <b>محدوده ورود:</b>\n"
-    msg += fmt_price(s['ez_low']) + " تا " + fmt_price(s['ez_high']) + "\n"
-    msg += "🎯 بهینه: " + fmt_price(entry) + "\n\n"
-    msg += "🛑 <b>حد ضرر:</b> " + fmt_price(sl) + " (" + str(round(sl_pct, 2)) + "%)\n\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "🎯 <b>اهداف سود:</b>\n\n"
-    msg += "🥇 TP1: " + fmt_price(s['tp1']) + " (" + str(round(tp1_pct, 2)) + "%) | R/R: 1:" + str(round(rr1, 2)) + "\n"
-    msg += "   ↳ بستن ۵۰٪\n\n"
-    msg += "🥈 TP2: " + fmt_price(s['tp2']) + " (" + str(round(tp2_pct, 2)) + "%) | R/R: 1:" + str(round(rr2, 2)) + "\n"
-    msg += "   ↳ بستن ۳۰٪\n\n"
-    msg += "🥉 TP3: " + fmt_price(s['tp3']) + " (" + str(round(tp3_pct, 2)) + "%) | R/R: 1:" + str(round(rr3, 2)) + "\n"
-    msg += "   ↳ بستن ۲۰٪\n\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "📊 <b>تکنیکال:</b>\n"
-    msg += "• Daily: " + str(s['daily']) + "/4\n"
-    msg += "• Brooks: " + str(s['brooks']) + "/4\n"
-    msg += "• RTM: " + str(s['rtm']) + "/4\n"
-    msg += "• Ichimoku: " + str(s['ichi']) + "/3\n"
-    msg += "• Bollinger: " + ("✅" if s['bb'] else "❌") + "\n"
-    msg += "• Fibonacci: " + ("✅" if s['fib'] else "❌") + "\n"
-    msg += "• RSI: " + str(round(s['rsi'], 1)) + " | حجم: " + str(round(s['vol'], 2)) + "x\n"
-    msg += "• ATR: " + fmt_price(s['atr']) + "\n\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "📈 <b>فاندامنتال:</b>\n"
-    msg += "• فاندینگ: " + funding_txt + "\n"
-    msg += "• Open Interest: " + oi_txt + "\n"
-    msg += "• نسبت L/S: " + ls_txt + "\n\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    msg += "💡 <b>مدیریت سرمایه (با ۱۰۰۰ دلار):</b>\n"
-    msg += "• ریسک ۱٪ = ۱۰ دلار\n"
-    msg += "• حجم: " + str(round(size, 4)) + " واحد\n\n"
-    msg += "⏰ اعتبار: ۴۸ ساعت"
-    
-    return msg
+    def get_exchange(self, name):
+        return self.exchanges.get(name)
+
+    def market_symbols(self, exchange):
+        result = []
+        for symbol, market in exchange.markets.items():
+            if not market.get("active", True):
+                continue
+            if not market.get("spot", False):
+                continue
+            if market.get("quote") != QUOTE:
+                continue
+            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
+                continue
+            result.append(symbol)
+        return sorted(set(result))
+
+    def scan_symbols(self):
+        # Prefer Binance.US, then fill with fallback exchanges.
+        ordered = []
+        seen = set()
+
+        for name in EXCHANGE_NAMES:
+            ex = self.exchanges.get(name)
+            if not ex:
+                continue
+
+            symbols = self.market_symbols(ex)
+            print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
+
+            for symbol in symbols:
+                if symbol not in seen:
+                    ordered.append((name, symbol))
+                    seen.add(symbol)
+
+                if len(ordered) >= MAX_COINS:
+                    return ordered
+
+        return ordered
+
+    def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
+        return exchange.fetch_ohlcv(
+            symbol,
+            timeframe=timeframe,
+            limit=limit,
+        )
+
+    def ticker_price(self, exchange, symbol):
+        try:
+            ticker = exchange.fetch_ticker(symbol)
+            return safe_float(ticker.get("last"))
+        except Exception:
+            return None
 
 
 # ============================================================
-# اجرا
+# INDICATORS
 # ============================================================
-print("شروع اسکن...")
-bot = Bot()
 
-# ===== بررسی سیگنال‌های قبلی =====
-old_signals = load_signals()
-print("سیگنال‌های قبلی: " + str(len(old_signals)))
+def add_indicators(df):
+    df = df.copy()
 
-active_count = 0
-for old_sig in old_signals:
-    if old_sig.get('status') == 'ACTIVE':
-        active_count += 1
+    close = df["close"]
+    high = df["high"]
+    low = df["low"]
+
+    df["ema20"] = close.ewm(span=20, adjust=False).mean()
+    df["ema50"] = close.ewm(span=50, adjust=False).mean()
+    df["ema200"] = close.ewm(span=200, adjust=False).mean()
+
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df["rsi"] = 100 - (100 / (1 + rs))
+
+    prev_close = close.shift(1)
+    tr = pd.concat(
+        [
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    df["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
+
+    mid = close.rolling(20).mean()
+    std = close.rolling(20).std(ddof=0)
+    df["bb_mid"] = mid
+    df["bb_upper"] = mid + 2 * std
+    df["bb_lower"] = mid - 2 * std
+
+    # Ichimoku
+    tenkan = (
+        high.rolling(9).max() +
+        low.rolling(9).min()
+    ) / 2
+
+    kijun = (
+        high.rolling(26).max() +
+        low.rolling(26).min()
+    ) / 2
+
+    span_a = ((tenkan + kijun) / 2).shift(26)
+    span_b = (
+        (
+            high.rolling(52).max() +
+            low.rolling(52).min()
+        ) / 2
+    ).shift(26)
+
+    df["tenkan"] = tenkan
+    df["kijun"] = kijun
+    df["span_a"] = span_a
+    df["span_b"] = span_b
+
+    return df
+
+
+def closed_candles(raw):
+    if not raw or len(raw) < 30:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(
+        raw,
+        columns=["timestamp", "open", "high", "low", "close", "volume"],
+    )
+
+    # Always ignore the currently forming candle.
+    df = df.iloc[:-1].copy()
+
+    for col in ["open", "high", "low", "close", "volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df.dropna(inplace=True)
+    return df
+
+
+# ============================================================
+# TECHNICAL SCORE COMPONENTS
+# ============================================================
+
+def ema_score(last):
+    score = 0
+    if last["close"] > last["ema20"]:
+        score += 1
+    if last["ema20"] > last["ema50"]:
+        score += 1
+    if last["ema50"] > last["ema200"]:
+        score += 1
+
+    bull = score >= 2
+    bear = score <= 1
+    return bull, bear, score
+
+
+def rsi_score(last):
+    rsi = safe_float(last["rsi"])
+    if rsi is None:
+        return False, False, 0
+
+    if 52 <= rsi <= 68:
+        return True, False, 2
+    if 32 <= rsi <= 48:
+        return False, True, 2
+    if rsi > 70:
+        return False, True, 1
+    if rsi < 30:
+        return True, False, 1
+
+    return False, False, 0
+
+
+def bb_score(last):
+    close = last["close"]
+    upper = last["bb_upper"]
+    lower = last["bb_lower"]
+
+    if pd.isna(upper) or pd.isna(lower):
+        return False, False, 0
+
+    width = upper - lower
+    if width <= 0:
+        return False, False, 0
+
+    pos = (close - lower) / width
+
+    if pos < 0.25:
+        return True, False, 1
+    if pos > 0.75:
+        return False, True, 1
+
+    return False, False, 0
+
+
+def ichimoku_score(last):
+    close = last["close"]
+    span_a = last["span_a"]
+    span_b = last["span_b"]
+    tenkan = last["tenkan"]
+    kijun = last["kijun"]
+
+    if any(pd.isna(x) for x in [span_a, span_b, tenkan, kijun]):
+        return False, False, 0
+
+    cloud_top = max(span_a, span_b)
+    cloud_bottom = min(span_a, span_b)
+
+    if close > cloud_top and tenkan > kijun:
+        return True, False, 2
+
+    if close < cloud_bottom and tenkan < kijun:
+        return False, True, 2
+
+    return False, False, 0
+
+
+def fibonacci_score(df):
+    recent = df.tail(80)
+    hi = recent["high"].max()
+    lo = recent["low"].min()
+
+    if hi <= lo:
+        return False, False, 0
+
+    close = df.iloc[-1]["close"]
+    span = hi - lo
+
+    levels = [
+        lo + span * 0.382,
+        lo + span * 0.500,
+        lo + span * 0.618,
+    ]
+
+    distance = min(abs(close - x) for x in levels) / span
+
+    if distance < 0.04 and close > lo:
+        return True, False, 1
+
+    if distance < 0.04 and close < hi:
+        return False, True, 1
+
+    return False, False, 0
+
+
+def sr_score(df):
+    recent = df.tail(60)
+    close = df.iloc[-1]["close"]
+
+    resistance = recent["high"].quantile(0.90)
+    support = recent["low"].quantile(0.10)
+
+    bull = close <= support * 1.03
+    bear = close >= resistance * 0.97
+
+    if bull:
+        return True, False, 1
+    if bear:
+        return False, True, 1
+
+    return False, False, 0
+
+
+def brooks_score(df):
+    # Price-action proxy inspired by trend/bar pressure.
+    recent = df.tail(8)
+    body = recent["close"] - recent["open"]
+    bullish = int((body > 0).sum())
+    bearish = int((body < 0).sum())
+
+    if bullish >= 6:
+        return True, False, 1
+    if bearish >= 6:
+        return False, True, 1
+
+    return False, False, 0
+
+
+def rtm_score(df):
+    # Supply/demand proxy: strong displacement after a short base.
+    if len(df) < 12:
+        return False, False, 0
+
+    recent = df.tail(12)
+    returns = recent["close"].pct_change().dropna()
+
+    positive = returns.tail(4).sum()
+    negative = returns.tail(4).sum()
+
+    if positive > 0.025:
+        return True, False, 1
+    if negative < -0.025:
+        return False, True, 1
+
+    return False, False, 0
+
+
+# ============================================================
+# TREND FILTER
+# ============================================================
+
+def daily_trend(exchange, symbol):
+    try:
+        raw = exchange.fetch_ohlcv(
+            symbol,
+            timeframe=TREND_TIMEFRAME,
+            limit=DAILY_LIMIT,
+        )
+        df = closed_candles(raw)
+        if len(df) < 60:
+            return "UNKNOWN"
+
+        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+        last = df.iloc[-1]
+
+        if last["close"] > last["ema50"]:
+            return "BULL"
+        if last["close"] < last["ema50"]:
+            return "BEAR"
+        return "NEUTRAL"
+
+    except Exception as exc:
+        print(f"daily trend failed {symbol}: {exc}")
+        return "UNKNOWN"
+
+
+# ============================================================
+# FUNDAMENTALS
+# ============================================================
+
+def fundamental_data(manager, symbol):
+    result = {
+        "funding": None,
+        "open_interest": None,
+        "long_short": None,
+        "source": None,
+    }
+
+    for name in FUNDING_SOURCES:
+        exchange = manager.get_exchange(name)
+        if not exchange:
+            continue
+
+        if symbol not in exchange.markets:
+            continue
+
+        # These are optional. Spot-only exchanges normally don't expose
+        # funding/OI, so N/A is expected rather than an error.
         try:
-            ticker = bot.ex.fetch_ticker(old_sig['sym'])
-            current_price = ticker['last']
-            updated, new_status = check_signal_status(old_sig, current_price)
-            old_sig.clear()
-            old_sig.update(updated)
-            if new_status:
-                emoji = "✅" if 'TP' in new_status else "❌"
-                msg = emoji + " <b>" + old_sig['sym'] + "</b>\n"
-                msg += "وضعیت جدید: <b>" + new_status + "</b>\n"
-                msg += "سود/ضرر: " + str(old_sig['pnl']) + "%\n"
-                msg += "قیمت فعلی: " + fmt_price(current_price)
-                send(msg)
-                time.sleep(1)
-        except:
+            if exchange.has.get("fetchFundingRate"):
+                result["funding"] = safe_float(
+                    exchange.fetch_funding_rate(symbol).get("fundingRate")
+                )
+                result["source"] = name
+        except Exception:
             pass
 
-print("سیگنال‌های فعال: " + str(active_count))
+        try:
+            if exchange.has.get("fetchOpenInterest"):
+                oi = exchange.fetch_open_interest(symbol)
+                result["open_interest"] = safe_float(
+                    oi.get("openInterestValue") or oi.get("openInterestAmount")
+                )
+        except Exception:
+            pass
 
-# ===== اسکن بازار =====
-markets = bot.ex.load_markets()
-symbols = [s for s, m in markets.items() if m['quote'] == bot.quote and m['spot'] and m['active']]
-print("تعداد کل ارزها: " + str(len(symbols)))
+        if result["funding"] is not None or result["open_interest"] is not None:
+            break
 
-MAX_COINS = 500
-signals = []
-for i, sym in enumerate(symbols[:MAX_COINS]):
-    sig = bot.analyze(sym)
-    if sig:
-        signals.append(sig)
-        print("سیگنال: " + sym + " (" + sig['type'] + ")")
-    if (i + 1) % 100 == 0:
-        print("پیشرفت: " + str(i + 1) + "/" + str(min(MAX_COINS, len(symbols))) + " | سیگنال: " + str(len(signals)))
-    time.sleep(0.05)
+    return result
 
-print("اسکن کامل شد. سیگنال: " + str(len(signals)))
 
-# ===== ذخیره سیگنال‌های جدید =====
-all_signals = old_signals + signals
-save_signals(all_signals)
-print("سیگنال‌های ذخیره شده: " + str(len(all_signals)))
+def fundamental_score(data, side):
+    funding = data.get("funding")
 
-# ===== ارسال =====
-if signals:
-    signals_sorted = sorted(signals, key=lambda x: x['score'], reverse=True)
-    
-    summary = "<b>سیگنال های جدید</b>\n"
-    summary += "تعداد: " + str(len(signals)) + "\n\n"
-    for i, s in enumerate(signals_sorted[:20], 1):
-        emoji = "🟢" if s['type'] == 'BUY' else "🔴"
-        summary += str(i) + ". " + emoji + " " + s['sym'] + " (" + s['type'] + ")\n"
-    send(summary)
-    time.sleep(2)
-    
-    for s in signals_sorted[:10]:
-        msg = format_signal(s)
-        send(msg)
-        time.sleep(2)
-    
-    print("ارسال شد: " + str(len(signals)) + " سیگنال")
-else:
-    print("سیگنال جدیدی نیست")
+    if funding is None:
+        return 0
 
-# ===== گزارش عملکرد =====
-closed = [s for s in all_signals if s.get('status') in ['TP1_HIT', 'TP2_HIT', 'TP3_HIT', 'SL_HIT']]
-if closed:
-    wins = [s for s in closed if 'TP' in s.get('status', '')]
-    losses = [s for s in closed if s.get('status') == 'SL_HIT']
-    total = len(closed)
-    win_rate = (len(wins) / total * 100) if total > 0 else 0
-    
-    report = "📊 <b>گزارش عملکرد</b>\n\n"
-    report += "• کل معاملات بسته شده: " + str(total) + "\n"
-    report += "• برد: " + str(len(wins)) + "\n"
-    report += "• باخت: " + str(len(losses)) + "\n"
-    report += "• وین ریت: " + str(round(win_rate, 1)) + "%\n"
-    send(report)
-    print("گزارش ارسال شد. وین ریت: " + str(round(win_rate, 1)) + "%")
+    # Funding is a secondary confirmation only.
+    # Positive funding favors shorts; negative funding favors longs.
+    if side == "BUY" and funding < 0:
+        return 1
+    if side == "SELL" and funding > 0:
+        return 1
 
-print("Done!")
+    return 0
+
+
+# ============================================================
+# SIGNAL ENGINE
+# ============================================================
+
+def calculate_levels(side, entry, atr, sr_support, sr_resistance):
+    entry = safe_float(entry)
+    atr = safe_float(atr)
+
+    if not entry or not atr or atr <= 0:
+        return None
+
+    # ATR-based stop with a safety floor.
+    stop_distance = max(atr * 1.8, entry * 0.015)
+
+    if side == "BUY":
+        sl = entry - stop_distance
+        tp1 = entry + stop_distance * 1.0
+        tp2 = entry + stop_distance * 1.8
+        tp3 = entry + stop_distance * 2.6
+    else:
+        sl = entry + stop_distance
+        tp1 = entry - stop_distance * 1.0
+        tp2 = entry - stop_distance * 1.8
+        tp3 = entry - stop_distance * 2.6
+
+    # Don't use S/R to move SL into an unsafe position.
+    if side == "BUY" and sr_support:
+        candidate = sr_support * 0.995
+        if candidate < entry and candidate > sl:
+            sl = candidate
+    elif side == "SELL" and sr_resistance:
+        candidate = sr_resistance * 1.005
+        if candidate > entry and candidate < sl:
+            sl = candidate
+
+    risk = abs(entry - sl)
+    reward = abs(tp3 - entry)
+    rr = reward / risk if risk > 0 else 0
+
+    if rr < MIN_RR:
+        return None
+
+    return {
+        "entry": entry,
+        "sl": sl,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+        "risk_per_unit": risk,
+        "rr": rr,
+    }
+
+
+def build_signal(symbol, exchange_name, df, trend, fundamentals):
+    df = add_indicators(df)
+    if len(df) < 205:
+        return None
+
+    last = df.iloc[-1]
+
+    components = {}
+    bull_total = 0
+    bear_total = 0
+
+    checks = [
+        ("ema", ema_score(last)),
+        ("rsi", rsi_score(last)),
+        ("bb", bb_score(last)),
+        ("ichi", ichimoku_score(last)),
+        ("fib", fibonacci_score(df)),
+        ("sr", sr_score(df)),
+        ("brooks", brooks_score(df)),
+        ("rtm", rtm_score(df)),
+    ]
+
+    for name, (bull, bear, score) in checks:
+        components[name] = score
+        if bull:
+            bull_total += score
+        if bear:
+            bear_total += score
+
+    if trend == "BULL":
+        bull_total += 2
+    elif trend == "BEAR":
+        bear_total += 2
+
+    buy_fund = fundamental_score(fundamentals, "BUY")
+    sell_fund = fundamental_score(fundamentals, "SELL")
+
+    bull_total += buy_fund
+    bear_total += sell_fund
+
+    if bull_total >= bear_total:
+        side = "BUY"
+        score = bull_total
+    else:
+        side = "SELL"
+        score = bear_total
+
+    if score < MIN_SCORE:
+        return None
+
+    close = safe_float(last["close"])
+    atr = safe_float(last["atr"])
+
+    recent = df.tail(60)
+    support = safe_float(recent["low"].quantile(0.10))
+    resistance = safe_float(recent["high"].quantile(0.90))
+
+    levels = calculate_levels(
+        side,
+        close,
+        atr,
+        support,
+        resistance,
+    )
+
+    if not levels:
+        return None
+
+    risk_pct = abs(levels["entry"] - levels["sl"]) / levels["entry"] * 100
+
+    # Reject absurd stops.
+    if risk_pct > 15:
+        return None
+
+    strength = (
+        "قوی" if score >= 18
+        else "متوسط" if score >= 15
+        else "ضعیف"
+    )
+
+    return {
+        "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
+        "symbol": symbol,
+        "exchange": exchange_name,
+        "side": side,
+        "status": "ACTIVE",
+        "strength": strength,
+        "score": int(score),
+        "created_at": iso_now(),
+        "updated_at": iso_now(),
+        "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
+        "entry": levels["entry"],
+        "sl": levels["sl"],
+        "tp1": levels["tp1"],
+        "tp2": levels["tp2"],
+        "tp3": levels["tp3"],
+        "rr": levels["rr"],
+        "risk_pct": risk_pct,
+        "risk_usd": RISK_USD,
+        "components": components,
+        "trend": trend,
+        "fundamentals": fundamentals,
+        "tp1_hit": False,
+        "tp2_hit": False,
+        "tp3_hit": False,
+        "remaining_fraction": 1.0,
+        "realized_pnl": 0.0,
+        "fees_paid": 0.0,
+        "closed_reason": None,
+    }
+
+
+# ============================================================
+# TRADE MANAGEMENT
+# ============================================================
+
+def duplicate_exists(state, symbol, side):
+    for signal in state.get("signals", []):
+        if signal.get("symbol") == symbol and signal.get("side") == side:
+            if signal.get("status") == "ACTIVE":
+                return True
+    return False
+
+
+def close_piece(signal, exit_price, fraction, label):
+    entry = safe_float(signal["entry"])
+    exit_price = safe_float(exit_price)
+
+    if not entry or not exit_price:
+        return
+
+    # Position size is derived from fixed USD risk.
+    risk_per_unit = abs(entry - safe_float(signal["sl"]))
+    if risk_per_unit <= 0:
+        return
+
+    quantity = RISK_USD / risk_per_unit
+    gross = (
+        (exit_price - entry) * quantity
+        if signal["side"] == "BUY"
+        else (entry - exit_price) * quantity
+    )
+
+    piece_qty = quantity * fraction
+    gross_piece = gross * fraction
+
+    entry_fee = entry * piece_qty * FEE_RATE
+    exit_fee = exit_price * piece_qty * FEE_RATE
+    fees = entry_fee + exit_fee
+
+    net = gross_piece - fees
+
+    signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0) + net
+    signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0) + fees
+    signal["remaining_fraction"] = max(
+        0,
+        safe_float(signal.get("remaining_fraction"), 1) - fraction,
+    )
+
+    signal[f"{label}_hit"] = True
+    signal["updated_at"] = iso_now()
+
+
+def price_hit(signal, price, level_name):
+    price = safe_float(price)
+    level = safe_float(signal.get(level_name))
+
+    if price is None or level is None:
+        return False
+
+    if signal["side"] == "BUY":
+        return price >= level
+    return price <= level
+
+
+def stop_hit(signal, price):
+    price = safe_float(price)
+    sl = safe_float(signal.get("sl"))
+
+    if price is None or sl is None:
+        return False
+
+    if signal["side"] == "BUY":
+        return price <= sl
+    return price >= sl
+
+
+def manage_signal(signal, current_price):
+    if signal.get("status") != "ACTIVE":
+        return False
+
+    changed = False
+
+    created = signal.get("created_at")
+    if created:
+        try:
+            created_dt = datetime.fromisoformat(created)
+            if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
+                # Close remaining position at current price.
+                remaining = safe_float(signal.get("remaining_fraction"), 0)
+                if remaining > 0:
+                    close_piece(signal, current_price, remaining, "expiry")
+                signal["status"] = "EXPIRED"
+                signal["closed_reason"] = "48h expiry"
+                signal["updated_at"] = iso_now()
+                return True
+        except Exception:
+            pass
+
+    # Stop is checked before new TP levels.
+    if stop_hit(signal, current_price):
+        remaining = safe_float(signal.get("remaining_fraction"), 0)
+        if remaining > 0:
+            close_piece(signal, current_price, remaining, "sl")
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "SL"
+        signal["updated_at"] = iso_now()
+        return True
+
+    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+        close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
+        # Breakeven after TP1.
+        signal["sl"] = signal["entry"]
+        changed = True
+
+    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
+        close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
+        changed = True
+
+    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
+        close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
+        changed = True
+
+    if signal.get("remaining_fraction", 0) <= 0.000001:
+        signal["remaining_fraction"] = 0
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "TP3"
+        signal["updated_at"] = iso_now()
+        changed = True
+
+    return changed
+
+
+def update_open_signals(state, manager):
+    changed = False
+
+    for signal in state.get("signals", []):
+        if signal.get("status") != "ACTIVE":
+            continue
+
+        symbol = signal.get("symbol")
+        exchange_name = signal.get("exchange")
+        exchange = manager.get_exchange(exchange_name)
+
+        if not exchange:
+            continue
+
+        if symbol not in exchange.markets:
+            continue
+
+        price = manager.ticker_price(exchange, symbol)
+        if price is None:
+            continue
+
+        before_status = signal.get("status")
+        before_tp1 = signal.get("tp1_hit")
+        before_tp2 = signal.get("tp2_hit")
+        before_tp3 = signal.get("tp3_hit")
+
+        manage_signal(signal, price)
+
+        if (
+            signal.get("status") != before_status
+            or signal.get("tp1_hit") != before_tp1
+            or signal.get("tp2_hit") != before_tp2
+            or signal.get("tp3_hit") != before_tp3
+        ):
+            changed = True
+
+    return changed
+
+
+# ============================================================
+# REPORTING
+# ============================================================
+
+def performance_report(state):
+    signals = state.get("signals", [])
+    closed = [
+        s for s in signals
+        if s.get("status") in {"CLOSED", "EXPIRED"}
+    ]
+
+    if not closed:
+        return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
+
+    wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
+    losses = len(closed) - wins
+
+    pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in closed)
+    fees = sum(safe_float(s.get("fees_paid"), 0) for s in closed)
+
+    win_rate = wins / len(closed) * 100
+
+    return (
+        "📊 <b>Performance</b>\n"
+        f"معاملات بسته: {len(closed)}\n"
+        f"برد: {wins} | باخت: {losses}\n"
+        f"Win Rate: {win_rate:.1f}%\n"
+        f"Net PnL: ${pnl:.2f}\n"
+        f"Fees: ${fees:.2f}"
+    )
+
+
+def format_signal(signal):
+    side = signal["side"]
+    emoji = "🟢" if side == "BUY" else "🔴"
+
+    f = signal.get("fundamentals", {})
+    funding = f.get("funding")
+    oi = f.get("open_interest")
+
+    funding_text = (
+        f"{funding * 100:.4f}%"
+        if funding is not None else "N/A"
+    )
+    oi_text = (
+        f"{oi:,.2f}"
+        if oi is not None else "N/A"
+    )
+
+    components = signal.get("components", {})
+
+    return (
+        f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
+        f"صرافی: {signal['exchange']}\n"
+        f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
+        f"روند روزانه: {signal['trend']}\n\n"
+
+        f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
+        f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
+        f"({signal['risk_pct']:.2f}%)\n"
+        f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
+        f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
+        f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
+        f"RR: <b>{signal['rr']:.2f}</b>\n\n"
+
+        f"📐 EMA: {components.get('ema', 0)}\n"
+        f"RSI: {components.get('rsi', 0)}\n"
+        f"BB: {components.get('bb', 0)}\n"
+        f"Ichimoku: {components.get('ichi', 0)}\n"
+        f"Fibonacci: {components.get('fib', 0)}\n"
+        f"S/R: {components.get('sr', 0)}\n"
+        f"Brooks: {components.get('brooks', 0)}\n"
+        f"RTM: {components.get('rtm', 0)}\n\n"
+
+        f"💰 Funding: {funding_text}\n"
+        f"📊 OI: {oi_text}\n"
+        f"⏱ Expiry: 48h\n"
+        f"⚖️ ریسک اسمی: ${signal['risk_usd']:.2f}"
+    )
+
+
+# ============================================================
+# SCANNER
+# ============================================================
+
+def scan_market(manager, state):
+    candidates = manager.scan_symbols()
+
+    if not candidates:
+        print("No markets found.")
+        return []
+
+    signals = []
+
+    for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
+        # Try the preferred venue first, then any other configured venue
+        # that actually lists the same symbol.
+        exchange_names = [preferred_exchange_name]
+        for fallback_name in EXCHANGE_NAMES:
+            if fallback_name not in exchange_names:
+                fallback_exchange = manager.get_exchange(fallback_name)
+                if fallback_exchange and symbol in fallback_exchange.markets:
+                    exchange_names.append(fallback_name)
+
+        signal_created = False
+
+        for exchange_name in exchange_names:
+            exchange = manager.get_exchange(exchange_name)
+            if not exchange:
+                continue
+
+            try:
+                raw = manager.fetch_ohlcv(exchange, symbol)
+                df = closed_candles(raw)
+
+                if len(df) < 210:
+                    continue
+
+                trend = daily_trend(exchange, symbol)
+                fundamentals = fundamental_data(manager, symbol)
+
+                signal = build_signal(
+                    symbol,
+                    exchange_name,
+                    df,
+                    trend,
+                    fundamentals,
+                )
+
+                if not signal:
+                    # A valid market but no qualifying setup; don't need
+                    # to retry the same symbol on every venue.
+                    signal_created = True
+                    break
+
+                if duplicate_exists(state, symbol, signal["side"]):
+                    signal_created = True
+                    break
+
+                signals.append(signal)
+
+                print(
+                    f"[SIGNAL] {symbol} {signal['side']} "
+                    f"score={signal['score']} exchange={exchange_name}"
+                )
+
+                signal_created = True
+                break
+
+            except Exception as exc:
+                print(
+                    f"[SCAN FAIL] {exchange_name} {symbol}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                # Try the next exchange for this symbol.
+
+        time.sleep(SLEEP_BETWEEN_SYMBOLS)
+
+    signals.sort(
+        key=lambda x: (x["score"], x["rr"]),
+        reverse=True,
+    )
+
+    return signals
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+    print("=" * 70)
+    print("CRYPTO SIGNAL BOT")
+    print("Started:", iso_now())
+    print("=" * 70)
+
+    state = load_state()
+
+    manager = ExchangeManager()
+
+    if not manager.build():
+        telegram_send(
+            "❌ <b>Crypto Signal Bot</b>\n"
+            "هیچ صرافی قابل دسترسی نبود."
+        )
+        return
+
+    # First manage previous active trades.
+    if update_open_signals(state, manager):
+        save_state(state)
+
+    new_signals = scan_market(manager, state)
+
+    # Keep the number of stored signals reasonable.
+    state["signals"].extend(new_signals)
+
+    # Keep history but avoid unbounded growth.
+    state["signals"] = state["signals"][-1000:]
+    state["last_run"] = iso_now()
+
+    save_state(state)
+
+    if new_signals:
+        telegram_send(
+            f"🚨 <b>{len(new_signals)} سیگنال جدید</b>\n"
+            f"زمان: {iso_now()}"
+        )
+
+        # Send strongest signals first.
+        for signal in new_signals[:10]:
+            telegram_send(format_signal(signal))
+            time.sleep(0.4)
+    else:
+        telegram_send(
+            "🔎 <b>Crypto Signal Bot</b>\n"
+            "این دور سیگنال جدیدی با امتیاز کافی پیدا نشد."
+        )
+
+    telegram_send(performance_report(state))
+
+    active = sum(
+        1 for s in state["signals"]
+        if s.get("status") == "ACTIVE"
+    )
+
+    print("=" * 70)
+    print(f"New signals: {len(new_signals)}")
+    print(f"Active signals: {active}")
+    print(f"Total stored: {len(state['signals'])}")
+    print("Finished:", iso_now())
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        telegram_send(
+            "❌ <b>Crypto Signal Bot Error</b>\n"
+            "اجرای Bot با خطا متوقف شد. لاگ GitHub Actions را بررسی کن."
+        )
+        raise
