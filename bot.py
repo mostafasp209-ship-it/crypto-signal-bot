@@ -27,7 +27,7 @@ TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = 300
-MIN_SCORE = 10
+MIN_SCORE = 11
 MIN_RR = 1.50
 
 SIGNAL_EXPIRY_HOURS = 48
@@ -98,16 +98,20 @@ def fmt_price(value):
 
 
 def classify_error(exc):
-    if isinstance(exc, (
-        ccxt.RateLimitExceeded,
-        ccxt.DDoSProtection,
-        ccxt.NetworkError,
-        ccxt.RequestTimeout,
-        ccxt.ExchangeNotAvailable,
-    )):
+    if isinstance(
+        exc,
+        (
+            ccxt.RateLimitExceeded,
+            ccxt.DDoSProtection,
+            ccxt.NetworkError,
+            ccxt.RequestTimeout,
+            ccxt.ExchangeNotAvailable,
+        ),
+    ):
         return "exchange_fail"
 
     msg = str(exc).lower()
+
     if (
         "does not have market" in msg
         or "symbol not found" in msg
@@ -122,14 +126,19 @@ def classify_error(exc):
 def load_state():
     if not os.path.exists(DATA_FILE):
         return {"signals": [], "last_run": None}
+
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
+
         if not isinstance(data, dict):
             return {"signals": [], "last_run": None}
+
         data.setdefault("signals", [])
         data.setdefault("last_run", None)
+
         return data
+
     except Exception:
         print("WARNING: signals.json could not be read; starting clean.")
         return {"signals": [], "last_run": None}
@@ -137,20 +146,34 @@ def load_state():
 
 def save_state(state):
     tmp = DATA_FILE + ".tmp"
+
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
+
     os.replace(tmp, DATA_FILE)
 
 
 def trim_state(state):
     signals = state.get("signals", [])
+
     if not signals:
         state["signals"] = []
         return state
-    active = [s for s in signals if s.get("status") == "ACTIVE"]
-    closed = [s for s in signals if s.get("status") != "ACTIVE"]
+
+    active = [
+        s for s in signals
+        if s.get("status") == "ACTIVE"
+    ]
+
+    closed = [
+        s for s in signals
+        if s.get("status") != "ACTIVE"
+    ]
+
     closed = closed[-MAX_STORED_SIGNALS:]
+
     state["signals"] = active + closed
+
     return state
 
 
@@ -158,7 +181,13 @@ def telegram_send(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials are missing; message skipped.")
         return False
-    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
+
+    url = (
+        "https://api.telegram.org/bot"
+        + TELEGRAM_BOT_TOKEN
+        + "/sendMessage"
+    )
+
     try:
         r = requests.post(
             url,
@@ -170,10 +199,17 @@ def telegram_send(text):
             },
             timeout=20,
         )
+
         if not r.ok:
-            print("Telegram error:", r.status_code, r.text[:500])
+            print(
+                "Telegram error:",
+                r.status_code,
+                r.text[:500],
+            )
             return False
+
         return True
+
     except Exception as exc:
         print("Telegram exception:", exc)
         return False
@@ -190,17 +226,38 @@ class ExchangeManager:
         for name in EXCHANGE_NAMES:
             try:
                 cls = getattr(ccxt, name)
-                ex = cls({
-                    "enableRateLimit": True,
-                    "timeout": REQUEST_TIMEOUT_MS,
-                })
+
+                ex = cls(
+                    {
+                        "enableRateLimit": True,
+                        "timeout": REQUEST_TIMEOUT_MS,
+                    }
+                )
+
                 ex.load_markets()
+
                 self.exchanges[name] = ex
                 self.fail_counts[name] = 0
                 self.name_by_id[id(ex)] = name
-                print("[OK] " + name + ": " + str(len(ex.markets)) + " markets")
+
+                print(
+                    "[OK] "
+                    + name
+                    + ": "
+                    + str(len(ex.markets))
+                    + " markets"
+                )
+
             except Exception as exc:
-                print("[FAIL] " + name + ": " + type(exc).__name__ + ": " + str(exc))
+                print(
+                    "[FAIL] "
+                    + name
+                    + ": "
+                    + type(exc).__name__
+                    + ": "
+                    + str(exc)
+                )
+
         return bool(self.exchanges)
 
     def get_exchange(self, name):
@@ -211,106 +268,196 @@ class ExchangeManager:
 
     def mark_ok(self, exchange):
         name = self._name_of(exchange)
+
         if name:
             self.fail_counts[name] = 0
 
     def mark_fail(self, exchange):
         name = self._name_of(exchange)
+
         if not name:
             return
-        self.fail_counts[name] = self.fail_counts.get(name, 0) + 1
+
+        self.fail_counts[name] = (
+            self.fail_counts.get(name, 0) + 1
+        )
+
         if self.fail_counts[name] >= MAX_FAILS_PER_EXCHANGE:
             self.disabled.add(name)
-            print("[DISABLED] " + name + " after " + str(self.fail_counts[name]) + " consecutive fails")
+
+            print(
+                "[DISABLED] "
+                + name
+                + " after "
+                + str(self.fail_counts[name])
+                + " consecutive fails"
+            )
 
     def is_disabled(self, exchange):
         name = self._name_of(exchange)
+
         if name is None:
             return False
+
         return name in self.disabled
 
     def market_symbols(self, exchange):
         result = []
+
         for symbol, market in exchange.markets.items():
             if not market.get("active", True):
                 continue
+
             if not market.get("spot", False):
                 continue
+
             if market.get("quote") != QUOTE:
                 continue
-            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
+
+            if market.get("base") in {
+                "USDT",
+                "USDC",
+                "USD",
+                "BUSD",
+            }:
                 continue
+
             result.append(symbol)
+
         return sorted(set(result))
 
     def scan_symbols(self):
         ordered = []
         seen = set()
+
         for name in EXCHANGE_NAMES:
             ex = self.exchanges.get(name)
+
             if not ex:
                 continue
+
             symbols = self.market_symbols(ex)
-            print(name + ": " + str(len(symbols)) + " " + QUOTE + " spot symbols")
+
+            print(
+                name
+                + ": "
+                + str(len(symbols))
+                + " "
+                + QUOTE
+                + " spot symbols"
+            )
+
             for symbol in symbols:
                 if symbol not in seen:
                     ordered.append((name, symbol))
                     seen.add(symbol)
+
                 if len(ordered) >= MAX_COINS:
                     return ordered
+
         return ordered
 
-    def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
+    def fetch_ohlcv(
+        self,
+        exchange,
+        symbol,
+        timeframe=TIMEFRAME,
+        limit=OHLCV_LIMIT,
+    ):
         if self.is_disabled(exchange):
             return None
+
         try:
             data = exchange.fetch_ohlcv(
                 symbol,
                 timeframe=timeframe,
                 limit=limit,
             )
+
             self.mark_ok(exchange)
+
             return data
+
         except Exception as exc:
             kind = classify_error(exc)
+
             if kind == "exchange_fail":
                 self.mark_fail(exchange)
+
             raise
 
     def ticker_price(self, exchange, symbol):
         if self.is_disabled(exchange):
             return None
+
         try:
             ticker = exchange.fetch_ticker(symbol)
-            price = safe_float(ticker.get("last"))
+
+            price = safe_float(
+                ticker.get("last")
+            )
+
             self.mark_ok(exchange)
+
             return price
+
         except Exception as exc:
             kind = classify_error(exc)
+
             if kind == "exchange_fail":
                 self.mark_fail(exchange)
+
             return None
 
 
 def add_indicators(df):
     df = df.copy()
+
     close = df["close"]
     high = df["high"]
     low = df["low"]
 
-    df["ema20"] = close.ewm(span=20, adjust=False).mean()
-    df["ema50"] = close.ewm(span=50, adjust=False).mean()
-    df["ema200"] = close.ewm(span=200, adjust=False).mean()
+    df["ema20"] = close.ewm(
+        span=20,
+        adjust=False,
+    ).mean()
+
+    df["ema50"] = close.ewm(
+        span=50,
+        adjust=False,
+    ).mean()
+
+    df["ema200"] = close.ewm(
+        span=200,
+        adjust=False,
+    ).mean()
 
     delta = close.diff()
+
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
+
+    avg_gain = gain.ewm(
+        alpha=1 / 14,
+        adjust=False,
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1 / 14,
+        adjust=False,
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan,
+    )
+
+    df["rsi"] = 100 - (
+        100 / (1 + rs)
+    )
 
     prev_close = close.shift(1)
+
     tr = pd.concat(
         [
             high - low,
@@ -319,65 +466,120 @@ def add_indicators(df):
         ],
         axis=1,
     ).max(axis=1)
-    df["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
+
+    df["atr"] = tr.ewm(
+        alpha=1 / 14,
+        adjust=False,
+    ).mean()
 
     mid = close.rolling(20).mean()
     std = close.rolling(20).std(ddof=0)
+
     df["bb_mid"] = mid
     df["bb_upper"] = mid + 2 * std
     df["bb_lower"] = mid - 2 * std
 
-    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
-    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-    span_a = ((tenkan + kijun) / 2).shift(26)
+    tenkan = (
+        high.rolling(9).max()
+        + low.rolling(9).min()
+    ) / 2
+
+    kijun = (
+        high.rolling(26).max()
+        + low.rolling(26).min()
+    ) / 2
+
+    span_a = (
+        (tenkan + kijun) / 2
+    ).shift(26)
+
     span_b = (
-        (high.rolling(52).max() + low.rolling(52).min()) / 2
+        (
+            high.rolling(52).max()
+            + low.rolling(52).min()
+        ) / 2
     ).shift(26)
 
     df["tenkan"] = tenkan
     df["kijun"] = kijun
     df["span_a"] = span_a
     df["span_b"] = span_b
+
     return df
 
 
 def closed_candles(raw):
     if not raw or len(raw) < 30:
         return pd.DataFrame()
+
     df = pd.DataFrame(
         raw,
-        columns=["timestamp", "open", "high", "low", "close", "volume"],
+        columns=[
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        ],
     )
+
     df = df.iloc[:-1].copy()
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    for col in [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    ]:
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce",
+        )
+
     df.dropna(inplace=True)
+
     return df
 
 
 def ema_score(last):
     score = 0
+
     if last["close"] > last["ema20"]:
         score += 1
+
     if last["ema20"] > last["ema50"]:
         score += 1
+
     if last["ema50"] > last["ema200"]:
         score += 1
-    return (score >= 2), (score <= 1), score
+
+    return (
+        score >= 2,
+        score <= 1,
+        score,
+    )
 
 
 def rsi_score(last):
     rsi = safe_float(last["rsi"])
+
     if rsi is None:
         return False, False, 0
+
     if 52 <= rsi <= 68:
         return True, False, 2
+
     if 32 <= rsi <= 48:
         return False, True, 2
+
     if rsi > 70:
         return False, True, 1
+
     if rsi < 30:
         return True, False, 1
+
     return False, False, 0
 
 
@@ -385,16 +587,23 @@ def bb_score(last):
     close = last["close"]
     upper = last["bb_upper"]
     lower = last["bb_lower"]
+
     if pd.isna(upper) or pd.isna(lower):
         return False, False, 0
+
     width = upper - lower
+
     if width <= 0:
         return False, False, 0
+
     pos = (close - lower) / width
+
     if pos < 0.25:
         return True, False, 1
+
     if pos > 0.75:
         return False, True, 1
+
     return False, False, 0
 
 
@@ -404,79 +613,131 @@ def ichimoku_score(last):
     span_b = last["span_b"]
     tenkan = last["tenkan"]
     kijun = last["kijun"]
-    if any(pd.isna(x) for x in [span_a, span_b, tenkan, kijun]):
+
+    if any(
+        pd.isna(x)
+        for x in [
+            span_a,
+            span_b,
+            tenkan,
+            kijun,
+        ]
+    ):
         return False, False, 0
+
     cloud_top = max(span_a, span_b)
     cloud_bottom = min(span_a, span_b)
+
     if close > cloud_top and tenkan > kijun:
         return True, False, 2
+
     if close < cloud_bottom and tenkan < kijun:
         return False, True, 2
+
     return False, False, 0
 
 
 def fibonacci_score(df):
     recent = df.tail(80)
+
     hi = recent["high"].max()
     lo = recent["low"].min()
+
     if hi <= lo:
         return False, False, 0
+
     close = df.iloc[-1]["close"]
+
     span = hi - lo
+
     levels = [
         lo + span * 0.382,
         lo + span * 0.500,
         lo + span * 0.618,
     ]
-    distance = min(abs(close - x) for x in levels) / span
+
+    distance = (
+        min(abs(close - x) for x in levels)
+        / span
+    )
+
     if distance < 0.04 and close > lo:
         return True, False, 1
+
     if distance < 0.04 and close < hi:
         return False, True, 1
+
     return False, False, 0
 
 
 def sr_score(df):
     recent = df.tail(60)
+
     close = df.iloc[-1]["close"]
+
     resistance = recent["high"].quantile(0.90)
     support = recent["low"].quantile(0.10)
+
     if close <= support * 1.03:
         return True, False, 1
+
     if close >= resistance * 0.97:
         return False, True, 1
+
     return False, False, 0
 
 
 def brooks_score(df):
     recent = df.tail(8)
+
     body = recent["close"] - recent["open"]
-    bullish = int((body > 0).sum())
-    bearish = int((body < 0).sum())
+
+    bullish = int(
+        (body > 0).sum()
+    )
+
+    bearish = int(
+        (body < 0).sum()
+    )
+
     if bullish >= 6:
         return True, False, 1
+
     if bearish >= 6:
         return False, True, 1
+
     return False, False, 0
 
 
 def rtm_score(df):
     if len(df) < 12:
         return False, False, 0
+
     recent = df.tail(12)
-    returns = recent["close"].pct_change().dropna()
+
+    returns = (
+        recent["close"]
+        .pct_change()
+        .dropna()
+    )
+
     positive = returns.tail(4).sum()
     negative = returns.tail(4).sum()
+
     if positive > 0.025:
         return True, False, 1
+
     if negative < -0.025:
         return False, True, 1
+
     return False, False, 0
 
 
 def compute_4h_score(df):
     last = df.iloc[-1]
+
     components = {}
+
     bull = 0
     bear = 0
 
@@ -491,41 +752,82 @@ def compute_4h_score(df):
         ("rtm", rtm_score(df)),
     ]
 
-    for name, (is_bull, is_bear, score) in checks:
+    for name, (
+        is_bull,
+        is_bear,
+        score,
+    ) in checks:
+
         components[name] = score
+
         if is_bull:
             bull += score
+
         if is_bear:
             bear += score
 
     return bull, bear, components
 
 
-def daily_trend(manager, exchange, symbol):
+def daily_trend(
+    manager,
+    exchange,
+    symbol,
+):
     try:
         raw = manager.fetch_ohlcv(
-            exchange, symbol,
+            exchange,
+            symbol,
             timeframe=TREND_TIMEFRAME,
             limit=DAILY_LIMIT,
         )
+
         if not raw:
             return "UNKNOWN"
+
         df = closed_candles(raw)
+
         if len(df) < 60:
             return "UNKNOWN"
-        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+
+        df["ema50"] = (
+            df["close"]
+            .ewm(
+                span=50,
+                adjust=False,
+            )
+            .mean()
+        )
+
         last = df.iloc[-1]
+
         if last["close"] > last["ema50"]:
             return "BULL"
+
         if last["close"] < last["ema50"]:
             return "BEAR"
+
         return "NEUTRAL"
+
     except Exception as exc:
-        print("[WARN] daily trend failed " + exchange.id + " " + symbol + ": " + type(exc).__name__ + ": " + str(exc))
+        print(
+            "[WARN] daily trend failed "
+            + exchange.id
+            + " "
+            + symbol
+            + ": "
+            + type(exc).__name__
+            + ": "
+            + str(exc)
+        )
+
         return "UNKNOWN"
 
 
-def fundamental_data(manager, symbol):
+def fundamental_data(
+    manager,
+    symbol,
+):
     result = {
         "funding": None,
         "open_interest": None,
@@ -535,81 +837,140 @@ def fundamental_data(manager, symbol):
 
     for name in FUNDING_SOURCES:
         exchange = manager.get_exchange(name)
+
         if not exchange:
             continue
+
         if symbol not in exchange.markets:
             continue
 
         market = exchange.markets[symbol]
+
         is_derivative = bool(
-            market.get("swap") or market.get("future") or market.get("contract")
+            market.get("swap")
+            or market.get("future")
+            or market.get("contract")
         )
+
         if not is_derivative:
             continue
 
         try:
-            if exchange.has.get("fetchFundingRate"):
-                data = exchange.fetch_funding_rate(symbol)
-                result["funding"] = safe_float(data.get("fundingRate"))
+            if exchange.has.get(
+                "fetchFundingRate"
+            ):
+                data = exchange.fetch_funding_rate(
+                    symbol
+                )
+
+                result["funding"] = safe_float(
+                    data.get("fundingRate")
+                )
+
                 result["source"] = name
+
         except Exception:
             pass
 
         try:
-            if exchange.has.get("fetchOpenInterest"):
-                oi = exchange.fetch_open_interest(symbol)
-                result["open_interest"] = safe_float(
-                    oi.get("openInterestValue") or oi.get("openInterestAmount")
+            if exchange.has.get(
+                "fetchOpenInterest"
+            ):
+                oi = exchange.fetch_open_interest(
+                    symbol
                 )
+
+                result["open_interest"] = safe_float(
+                    oi.get("openInterestValue")
+                    or oi.get("openInterestAmount")
+                )
+
         except Exception:
             pass
 
-        if result["funding"] is not None or result["open_interest"] is not None:
+        if (
+            result["funding"] is not None
+            or result["open_interest"] is not None
+        ):
             break
 
     return result
 
 
-def fundamental_score(data, side):
+def fundamental_score(
+    data,
+    side,
+):
     funding = data.get("funding")
+
     if funding is None:
         return 0
+
     if side == "BUY" and funding < 0:
         return 1
+
     if side == "SELL" and funding > 0:
         return 1
+
     return 0
 
 
-def calculate_levels(side, entry, atr, sr_support, sr_resistance):
+def calculate_levels(
+    side,
+    entry,
+    atr,
+    sr_support,
+    sr_resistance,
+):
     entry = safe_float(entry)
     atr = safe_float(atr)
-    if not entry or not atr or atr <= 0:
+
+    if (
+        not entry
+        or not atr
+        or atr <= 0
+    ):
         return None
 
-    stop_distance = max(atr * 1.8, entry * 0.015)
+    stop_distance = max(
+        atr * 1.8,
+        entry * 0.015,
+    )
 
     if side == "BUY":
         sl = entry - stop_distance
+
         tp1 = entry + stop_distance * 1.0
         tp2 = entry + stop_distance * 1.8
         tp3 = entry + stop_distance * 2.6
+
     else:
         sl = entry + stop_distance
+
         tp1 = entry - stop_distance * 1.0
         tp2 = entry - stop_distance * 1.8
         tp3 = entry - stop_distance * 2.6
 
     if side == "BUY" and sr_support:
         candidate = sr_support * 0.995
-        if candidate < entry and candidate > sl:
+
+        if (
+            candidate < entry
+            and candidate > sl
+        ):
             sl = candidate
+
     elif side == "SELL" and sr_resistance:
         candidate = sr_resistance * 1.005
-        if candidate > entry and candidate < sl:
+
+        if (
+            candidate > entry
+            and candidate < sl
+        ):
             sl = candidate
 
     risk = abs(entry - sl)
+
     if risk <= 0:
         return None
 
@@ -640,31 +1001,63 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     }
 
 
-def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
+def try_build_signal(
+    symbol,
+    exchange_name,
+    df_4h,
+    manager,
+    exchange,
+    state,
+):
     if len(df_4h) < 205:
         return None
 
     df = add_indicators(df_4h)
-    bull_4h, bear_4h, components = compute_4h_score(df)
-    max_4h = max(bull_4h, bear_4h)
+
+    bull_4h, bear_4h, components = (
+        compute_4h_score(df)
+    )
+
+    max_4h = max(
+        bull_4h,
+        bear_4h,
+    )
 
     if max_4h < QUICK_THRESHOLD:
         STATS["skipped_quick"] += 1
         return None
 
-    trend = daily_trend(manager, exchange, symbol)
+    trend = daily_trend(
+        manager,
+        exchange,
+        symbol,
+    )
+
     STATS["daily_fetched"] += 1
 
     bull_total = bull_4h
     bear_total = bear_4h
+
     if trend == "BULL":
         bull_total += 2
+
     elif trend == "BEAR":
         bear_total += 2
 
-    fundamentals = fundamental_data(manager, symbol)
-    bull_total += fundamental_score(fundamentals, "BUY")
-    bear_total += fundamental_score(fundamentals, "SELL")
+    fundamentals = fundamental_data(
+        manager,
+        symbol,
+    )
+
+    bull_total += fundamental_score(
+        fundamentals,
+        "BUY",
+    )
+
+    bear_total += fundamental_score(
+        fundamentals,
+        "SELL",
+    )
 
     if bull_total >= bear_total:
         side = "BUY"
@@ -677,35 +1070,74 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         return None
 
     last = df.iloc[-1]
-    close = safe_float(last["close"])
-    atr = safe_float(last["atr"])
+
+    close = safe_float(
+        last["close"]
+    )
+
+    atr = safe_float(
+        last["atr"]
+    )
 
     recent = df.tail(60)
-    support = safe_float(recent["low"].quantile(0.10))
-    resistance = safe_float(recent["high"].quantile(0.90))
 
-    levels = calculate_levels(side, close, atr, support, resistance)
+    support = safe_float(
+        recent["low"].quantile(0.10)
+    )
+
+    resistance = safe_float(
+        recent["high"].quantile(0.90)
+    )
+
+    levels = calculate_levels(
+        side,
+        close,
+        atr,
+        support,
+        resistance,
+    )
+
     if not levels:
         return None
 
-    risk_pct = abs(levels["entry"] - levels["sl"]) / levels["entry"] * 100
+    risk_pct = (
+        abs(
+            levels["entry"]
+            - levels["sl"]
+        )
+        / levels["entry"]
+        * 100
+    )
+
     if risk_pct > 15:
         return None
 
-    if duplicate_exists(state, symbol, side):
+    if duplicate_exists(
+        state,
+        symbol,
+        side,
+    ):
         return None
 
     if score >= 18:
         strength = "قوی"
+
     elif score >= 15:
         strength = "متوسط"
+
     else:
         strength = "ضعیف"
 
     STATS["signal_created"] += 1
 
     return {
-        "id": symbol.replace("/", "_") + "_" + side + "_" + str(int(time.time())),
+        "id": (
+            symbol.replace("/", "_")
+            + "_"
+            + side
+            + "_"
+            + str(int(time.time()))
+        ),
         "symbol": symbol,
         "exchange": exchange_name,
         "side": side,
@@ -714,7 +1146,12 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         "score": int(score),
         "created_at": iso_now(),
         "updated_at": iso_now(),
-        "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
+        "expiry_at": (
+            utc_now()
+            + timedelta(
+                hours=SIGNAL_EXPIRY_HOURS
+            )
+        ).isoformat(),
         "entry": levels["entry"],
         "sl": levels["sl"],
         "tp1": levels["tp1"],
@@ -726,6 +1163,7 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         "rr3": levels["rr3"],
         "risk_pct": risk_pct,
         "risk_usd": RISK_USD,
+        "risk_per_unit": levels["risk_per_unit"],
         "components": components,
         "trend": trend,
         "fundamentals": fundamentals,
@@ -739,243 +1177,735 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     }
 
 
-def duplicate_exists(state, symbol, side):
-    cutoff = utc_now() - timedelta(hours=DUPLICATE_COOLDOWN_HOURS)
-    for sig in state.get("signals", []):
-        if sig.get("symbol") != symbol or sig.get("side") != side:
+def duplicate_exists(
+    state,
+    symbol,
+    side,
+):
+    cutoff = (
+        utc_now()
+        - timedelta(
+            hours=DUPLICATE_COOLDOWN_HOURS
+        )
+    )
+
+    for sig in state.get(
+        "signals",
+        [],
+    ):
+        if (
+            sig.get("symbol") != symbol
+            or sig.get("side") != side
+        ):
             continue
+
         if sig.get("status") == "ACTIVE":
             return True
-        ts_str = sig.get("updated_at") or sig.get("created_at")
+
+        ts_str = (
+            sig.get("updated_at")
+            or sig.get("created_at")
+        )
+
         if not ts_str:
             continue
+
         try:
-            ts = datetime.fromisoformat(ts_str)
+            ts = datetime.fromisoformat(
+                ts_str
+            )
+
             if ts > cutoff:
                 return True
+
         except Exception:
             continue
+
     return False
 
 
-def close_piece(signal, exit_price, fraction, label):
-    entry = safe_float(signal["entry"])
-    exit_price = safe_float(exit_price)
+def close_piece(
+    signal,
+    exit_price,
+    fraction,
+    label,
+):
+    entry = safe_float(
+        signal.get("entry")
+    )
+
+    exit_price = safe_float(
+        exit_price
+    )
+
     if not entry or not exit_price:
         return
-    risk_per_unit = abs(entry - safe_float(signal["sl"]))
-    if risk_per_unit <= 0:
-        return
-    quantity = RISK_USD / risk_per_unit
-    if signal["side"] == "BUY":
-        gross = (exit_price - entry) * quantity
-    else:
-        gross = (entry - exit_price) * quantity
-    piece_qty = quantity * fraction
-    gross_piece = gross * fraction
-    entry_fee = entry * piece_qty * FEE_RATE
-    exit_fee = exit_price * piece_qty * FEE_RATE
-    fees = entry_fee + exit_fee
-    net = gross_piece - fees
-    signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0) + net
-    signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0) + fees
-    signal["remaining_fraction"] = max(
-        0, safe_float(signal.get("remaining_fraction"), 1) - fraction
+
+    original_risk_per_unit = safe_float(
+        signal.get("risk_per_unit")
     )
+
+    if (
+        original_risk_per_unit is None
+        or original_risk_per_unit <= 0
+    ):
+        original_sl = safe_float(
+            signal.get("sl")
+        )
+
+        if original_sl is None:
+            return
+
+        original_risk_per_unit = abs(
+            entry - original_sl
+        )
+
+    quantity = (
+        RISK_USD
+        / original_risk_per_unit
+    )
+
+    piece_qty = quantity * fraction
+
+    if signal["side"] == "BUY":
+        gross_piece = (
+            exit_price - entry
+        ) * piece_qty
+
+    else:
+        gross_piece = (
+            entry - exit_price
+        ) * piece_qty
+
+    entry_fee = (
+        entry
+        * piece_qty
+        * FEE_RATE
+    )
+
+    exit_fee = (
+        exit_price
+        * piece_qty
+        * FEE_RATE
+    )
+
+    fees = (
+        entry_fee
+        + exit_fee
+    )
+
+    net = gross_piece - fees
+
+    signal["realized_pnl"] = (
+        safe_float(
+            signal.get(
+                "realized_pnl"
+            ),
+            0,
+        )
+        + net
+    )
+
+    signal["fees_paid"] = (
+        safe_float(
+            signal.get(
+                "fees_paid"
+            ),
+            0,
+        )
+        + fees
+    )
+
+    signal["remaining_fraction"] = max(
+        0,
+        safe_float(
+            signal.get(
+                "remaining_fraction"
+            ),
+            1,
+        )
+        - fraction,
+    )
+
     signal[label + "_hit"] = True
     signal["updated_at"] = iso_now()
 
 
-def price_hit(signal, price, level_name):
+def price_hit(
+    signal,
+    price,
+    level_name,
+):
     price = safe_float(price)
-    level = safe_float(signal.get(level_name))
-    if price is None or level is None:
+
+    level = safe_float(
+        signal.get(level_name)
+    )
+
+    if (
+        price is None
+        or level is None
+    ):
         return False
+
     if signal["side"] == "BUY":
         return price >= level
+
     return price <= level
 
 
-def stop_hit(signal, price):
+def stop_hit(
+    signal,
+    price,
+):
     price = safe_float(price)
-    sl = safe_float(signal.get("sl"))
-    if price is None or sl is None:
+
+    sl = safe_float(
+        signal.get("sl")
+    )
+
+    if (
+        price is None
+        or sl is None
+    ):
         return False
+
     if signal["side"] == "BUY":
         return price <= sl
+
     return price >= sl
 
 
-def manage_signal(signal, current_price):
+def manage_signal(
+    signal,
+    current_price,
+):
     if signal.get("status") != "ACTIVE":
         return False
+
     changed = False
 
-    created = signal.get("created_at")
+    created = signal.get(
+        "created_at"
+    )
+
     if created:
         try:
-            created_dt = datetime.fromisoformat(created)
-            if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
-                remaining = safe_float(signal.get("remaining_fraction"), 0)
+            created_dt = datetime.fromisoformat(
+                created
+            )
+
+            if (
+                utc_now() - created_dt
+                >= timedelta(
+                    hours=SIGNAL_EXPIRY_HOURS
+                )
+            ):
+                remaining = safe_float(
+                    signal.get(
+                        "remaining_fraction"
+                    ),
+                    0,
+                )
+
                 if remaining > 0:
-                    close_piece(signal, current_price, remaining, "expiry")
+                    close_piece(
+                        signal,
+                        current_price,
+                        remaining,
+                        "expiry",
+                    )
+
                 signal["status"] = "EXPIRED"
-                signal["closed_reason"] = "48h expiry"
+                signal["closed_reason"] = (
+                    "48h expiry"
+                )
                 signal["updated_at"] = iso_now()
+
                 return True
+
         except Exception:
             pass
 
-    if stop_hit(signal, current_price):
-        remaining = safe_float(signal.get("remaining_fraction"), 0)
+    if stop_hit(
+        signal,
+        current_price,
+    ):
+        remaining = safe_float(
+            signal.get(
+                "remaining_fraction"
+            ),
+            0,
+        )
+
         if remaining > 0:
-            close_piece(signal, current_price, remaining, "sl")
+            close_piece(
+                signal,
+                current_price,
+                remaining,
+                "sl",
+            )
+
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
+
         return True
 
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
+    if (
+        not signal.get("tp1_hit")
+        and price_hit(
+            signal,
+            current_price,
+            "tp1",
+        )
+    ):
+        close_piece(
+            signal,
+            signal["tp1"],
+            TP_WEIGHTS["tp1"],
+            "tp1",
+        )
+
         signal["sl"] = signal["entry"]
+
         changed = True
 
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
+    if (
+        not signal.get("tp2_hit")
+        and price_hit(
+            signal,
+            current_price,
+            "tp2",
+        )
+    ):
+        close_piece(
+            signal,
+            signal["tp2"],
+            TP_WEIGHTS["tp2"],
+            "tp2",
+        )
+
         changed = True
 
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
+    if (
+        not signal.get("tp3_hit")
+        and price_hit(
+            signal,
+            current_price,
+            "tp3",
+        )
+    ):
+        close_piece(
+            signal,
+            signal["tp3"],
+            TP_WEIGHTS["tp3"],
+            "tp3",
+        )
+
         changed = True
 
-    if signal.get("remaining_fraction", 0) <= 0.000001:
+    if (
+        signal.get(
+            "remaining_fraction",
+            0,
+        )
+        <= 0.000001
+    ):
         signal["remaining_fraction"] = 0
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "TP3"
         signal["updated_at"] = iso_now()
+
         changed = True
 
     return changed
 
 
-def update_open_signals(state, manager):
+def update_open_signals(
+    state,
+    manager,
+):
     changed = False
-    for signal in state.get("signals", []):
-        if signal.get("status") != "ACTIVE":
+
+    for signal in state.get(
+        "signals",
+        [],
+    ):
+        if signal.get(
+            "status"
+        ) != "ACTIVE":
             continue
-        symbol = signal.get("symbol")
-        exchange_name = signal.get("exchange")
-        exchange = manager.get_exchange(exchange_name)
+
+        symbol = signal.get(
+            "symbol"
+        )
+
+        exchange_name = signal.get(
+            "exchange"
+        )
+
+        exchange = manager.get_exchange(
+            exchange_name
+        )
+
         if not exchange:
             continue
+
         if symbol not in exchange.markets:
             continue
-        price = manager.ticker_price(exchange, symbol)
+
+        price = manager.ticker_price(
+            exchange,
+            symbol,
+        )
+
         if price is None:
             continue
+
         before = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
-        manage_signal(signal, price)
+
+        manage_signal(
+            signal,
+            price,
+        )
+
         after = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
+
         if before != after:
             changed = True
+
     return changed
 
 
 def performance_report(state):
-    signals = state.get("signals", [])
-    closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
+    signals = state.get(
+        "signals",
+        [],
+    )
+
+    closed = [
+        s
+        for s in signals
+        if s.get("status")
+        in {
+            "CLOSED",
+            "EXPIRED",
+        }
+    ]
+
     if not closed:
-        return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
-    wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
-    losses = len(closed) - wins
-    pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in closed)
-    fees = sum(safe_float(s.get("fees_paid"), 0) for s in closed)
-    win_rate = wins / len(closed) * 100
+        return (
+            "📊 <b>Performance</b>\n"
+            "هنوز معامله بسته‌شده‌ای ثبت نشده."
+        )
+
+    wins = sum(
+        1
+        for s in closed
+        if safe_float(
+            s.get("realized_pnl"),
+            0,
+        ) > 0
+    )
+
+    losses = (
+        len(closed)
+        - wins
+    )
+
+    pnl = sum(
+        safe_float(
+            s.get(
+                "realized_pnl"
+            ),
+            0,
+        )
+        for s in closed
+    )
+
+    fees = sum(
+        safe_float(
+            s.get(
+                "fees_paid"
+            ),
+            0,
+        )
+        for s in closed
+    )
+
+    win_rate = (
+        wins
+        / len(closed)
+        * 100
+    )
+
     return (
         "📊 <b>Performance</b>\n"
-        + "معاملات بسته: " + str(len(closed)) + "\n"
-        + "برد: " + str(wins) + " | باخت: " + str(losses) + "\n"
-        + "Win Rate: " + str(round(win_rate, 1)) + "%\n"
-        + "Net PnL: $" + str(round(pnl, 2)) + "\n"
-        + "Fees: $" + str(round(fees, 2))
+        + "معاملات بسته: "
+        + str(len(closed))
+        + "\n"
+        + "برد: "
+        + str(wins)
+        + " | باخت: "
+        + str(losses)
+        + "\n"
+        + "Win Rate: "
+        + str(round(win_rate, 1))
+        + "%\n"
+        + "Net PnL: $"
+        + str(round(pnl, 2))
+        + "\n"
+        + "Fees: $"
+        + str(round(fees, 2))
     )
 
 
 def format_signal(signal):
     side = signal["side"]
-    emoji = "🟢" if side == "BUY" else "🔴"
-    f = signal.get("fundamentals", {})
-    funding = f.get("funding")
-    oi = f.get("open_interest")
+
+    emoji = (
+        "🟢"
+        if side == "BUY"
+        else "🔴"
+    )
+
+    f = signal.get(
+        "fundamentals",
+        {},
+    )
+
+    funding = f.get(
+        "funding"
+    )
+
+    oi = f.get(
+        "open_interest"
+    )
+
     if funding is not None:
-        funding_text = str(round(funding * 100, 4)) + "%"
+        funding_text = (
+            str(
+                round(
+                    funding * 100,
+                    4,
+                )
+            )
+            + "%"
+        )
     else:
         funding_text = "N/A"
+
     if oi is not None:
-        oi_text = format(oi, ",.2f")
+        oi_text = format(
+            oi,
+            ",.2f",
+        )
     else:
         oi_text = "N/A"
-    components = signal.get("components", {})
+
+    components = signal.get(
+        "components",
+        {},
+    )
+
     return (
-        emoji + " <b>" + signal["symbol"] + " — " + side + "</b>\n"
-        + "صرافی: " + signal["exchange"] + "\n"
-        + "قدرت: <b>" + signal["strength"] + "</b> | Score: <b>" + str(signal["score"]) + "</b>\n"
-        + "روند روزانه: " + signal["trend"] + "\n\n"
-        + "🎯 Entry: <b>" + fmt_price(signal["entry"]) + "</b>\n"
-        + "🛑 SL: <b>" + fmt_price(signal["sl"]) + "</b> (" + str(round(signal["risk_pct"], 2)) + "%)\n"
-        + "🥇 TP1: <b>" + fmt_price(signal["tp1"]) + "</b> — 50%\n"
-        + "🥈 TP2: <b>" + fmt_price(signal["tp2"]) + "</b> — 30%\n"
-        + "🥉 TP3: <b>" + fmt_price(signal["tp3"]) + "</b> — 20%\n"
-        + "RR وزنی: <b>" + str(round(signal["rr"], 2)) + "</b>\n\n"
-        + "📐 EMA: " + str(components.get("ema", 0)) + "\n"
-        + "RSI: " + str(components.get("rsi", 0)) + "\n"
-        + "BB: " + str(components.get("bb", 0)) + "\n"
-        + "Ichimoku: " + str(components.get("ichi", 0)) + "\n"
-        + "Fibonacci: " + str(components.get("fib", 0)) + "\n"
-        + "S/R: " + str(components.get("sr", 0)) + "\n"
-        + "Brooks: " + str(components.get("brooks", 0)) + "\n"
-        + "RTM: " + str(components.get("rtm", 0)) + "\n\n"
-        + "💰 Funding: " + funding_text + "\n"
-        + "📊 OI: " + oi_text + "\n"
+        emoji
+        + " <b>"
+        + signal["symbol"]
+        + " — "
+        + side
+        + "</b>\n"
+        + "صرافی: "
+        + signal["exchange"]
+        + "\n"
+        + "قدرت: <b>"
+        + signal["strength"]
+        + "</b> | Score: <b>"
+        + str(signal["score"])
+        + "</b>\n"
+        + "روند روزانه: "
+        + signal["trend"]
+        + "\n\n"
+        + "🎯 Entry: <b>"
+        + fmt_price(signal["entry"])
+        + "</b>\n"
+        + "🛑 SL: <b>"
+        + fmt_price(signal["sl"])
+        + "</b> ("
+        + str(
+            round(
+                signal["risk_pct"],
+                2,
+            )
+        )
+        + "%)\n"
+        + "🥇 TP1: <b>"
+        + fmt_price(signal["tp1"])
+        + "</b> — 50%\n"
+        + "🥈 TP2: <b>"
+        + fmt_price(signal["tp2"])
+        + "</b> — 30%\n"
+        + "🥉 TP3: <b>"
+        + fmt_price(signal["tp3"])
+        + "</b> — 20%\n"
+        + "RR وزنی: <b>"
+        + str(
+            round(
+                signal["rr"],
+                2,
+            )
+        )
+        + "</b>\n\n"
+        + "📐 EMA: "
+        + str(
+            components.get(
+                "ema",
+                0,
+            )
+        )
+        + "\n"
+        + "RSI: "
+        + str(
+            components.get(
+                "rsi",
+                0,
+            )
+        )
+        + "\n"
+        + "BB: "
+        + str(
+            components.get(
+                "bb",
+                0,
+            )
+        )
+        + "\n"
+        + "Ichimoku: "
+        + str(
+            components.get(
+                "ichi",
+                0,
+            )
+        )
+        + "\n"
+        + "Fibonacci: "
+        + str(
+            components.get(
+                "fib",
+                0,
+            )
+        )
+        + "\n"
+        + "S/R: "
+        + str(
+            components.get(
+                "sr",
+                0,
+            )
+        )
+        + "\n"
+        + "Brooks: "
+        + str(
+            components.get(
+                "brooks",
+                0,
+            )
+        )
+        + "\n"
+        + "RTM: "
+        + str(
+            components.get(
+                "rtm",
+                0,
+            )
+        )
+        + "\n\n"
+        + "💰 Funding: "
+        + funding_text
+        + "\n"
+        + "📊 OI: "
+        + oi_text
+        + "\n"
         + "⏱ Expiry: 48h\n"
-        + "⚖️ ریسک اسمی: $" + str(round(signal["risk_usd"], 2))
+        + "⚖️ ریسک اسمی: $"
+        + str(
+            round(
+                signal["risk_usd"],
+                2,
+            )
+        )
     )
 
 
-def scan_market(manager, state):
+def scan_market(
+    manager,
+    state,
+):
     candidates = manager.scan_symbols()
+
     if not candidates:
         print("No markets found.")
         return []
 
     signals = []
 
-    for preferred_exchange_name, symbol in candidates:
-        exchange_names = [preferred_exchange_name]
+    for (
+        preferred_exchange_name,
+        symbol,
+    ) in candidates:
+
+        exchange_names = [
+            preferred_exchange_name
+        ]
+
         for fallback_name in EXCHANGE_NAMES:
-            if fallback_name not in exchange_names:
-                fb = manager.get_exchange(fallback_name)
-                if fb and symbol in fb.markets:
-                    exchange_names.append(fallback_name)
+            if fallback_name in exchange_names:
+                continue
+
+            fb = manager.get_exchange(
+                fallback_name
+            )
+
+            if (
+                fb
+                and symbol in fb.markets
+            ):
+                exchange_names.append(
+                    fallback_name
+                )
 
         for exchange_name in exchange_names:
-            exchange = manager.get_exchange(exchange_name)
-            if not exchange or manager.is_disabled(exchange):
+            exchange = manager.get_exchange(
+                exchange_name
+            )
+
+            if (
+                not exchange
+                or manager.is_disabled(exchange)
+            ):
                 continue
 
             try:
-                raw = manager.fetch_ohlcv(exchange, symbol)
-                df_4h = closed_candles(raw)
+                raw = manager.fetch_ohlcv(
+                    exchange,
+                    symbol,
+                )
+
+                df_4h = closed_candles(
+                    raw
+                )
+
                 if len(df_4h) < 210:
                     break
 
@@ -992,73 +1922,205 @@ def scan_market(manager, state):
 
                 if signal:
                     signals.append(signal)
-                    print("[SIGNAL] " + symbol + " " + signal["side"] + " score=" + str(signal["score"]) + " rr=" + str(round(signal["rr"], 2)) + " exchange=" + exchange_name)
+
+                    print(
+                        "[SIGNAL] "
+                        + symbol
+                        + " "
+                        + signal["side"]
+                        + " score="
+                        + str(
+                            signal["score"]
+                        )
+                        + " rr="
+                        + str(
+                            round(
+                                signal["rr"],
+                                2,
+                            )
+                        )
+                        + " exchange="
+                        + exchange_name
+                    )
+
                     break
 
                 break
 
             except Exception as exc:
-                print("[SCAN FAIL] " + exchange_name + " " + symbol + ": " + type(exc).__name__ + ": " + str(exc))
+                print(
+                    "[SCAN FAIL] "
+                    + exchange_name
+                    + " "
+                    + symbol
+                    + ": "
+                    + type(exc).__name__
+                    + ": "
+                    + str(exc)
+                )
+
                 continue
 
-        time.sleep(SLEEP_BETWEEN_SYMBOLS)
+        time.sleep(
+            SLEEP_BETWEEN_SYMBOLS
+        )
 
-    signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
+    signals.sort(
+        key=lambda x: (
+            x["score"],
+            x["rr"],
+        ),
+        reverse=True,
+    )
+
     return signals
 
 
 def main():
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT")
-    print("Started:", iso_now())
+
+    print(
+        "CRYPTO SIGNAL BOT"
+    )
+
+    print(
+        "Started:",
+        iso_now(),
+    )
+
     print("=" * 70)
 
     state = load_state()
 
     manager = ExchangeManager()
+
     if not manager.build():
-        telegram_send("❌ <b>Crypto Signal Bot</b>\nهیچ صرافی قابل دسترسی نبود.")
+        telegram_send(
+            "❌ <b>Crypto Signal Bot</b>\n"
+            "هیچ صرافی قابل دسترسی نبود."
+        )
         return
 
-    if update_open_signals(state, manager):
+    if update_open_signals(
+        state,
+        manager,
+    ):
         save_state(state)
 
-    new_signals = scan_market(manager, state)
+    new_signals = scan_market(
+        manager,
+        state,
+    )
 
-    state["signals"].extend(new_signals)
-    state = trim_state(state)
+    state["signals"].extend(
+        new_signals
+    )
+
+    state = trim_state(
+        state
+    )
+
     state["last_run"] = iso_now()
+
     save_state(state)
 
     if new_signals:
-        telegram_send("🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\nزمان: " + iso_now())
+        telegram_send(
+            "🚨 <b>"
+            + str(
+                len(new_signals)
+            )
+            + " سیگنال جدید</b>\n"
+            + "زمان: "
+            + iso_now()
+        )
+
         for signal in new_signals[:10]:
-            telegram_send(format_signal(signal))
+            telegram_send(
+                format_signal(
+                    signal
+                )
+            )
+
             time.sleep(0.4)
+
     else:
-        telegram_send("🔎 <b>Crypto Signal Bot</b>\nاین دور سیگنال جدیدی با امتیاز کافی پیدا نشد.")
+        telegram_send(
+            "🔎 <b>Crypto Signal Bot</b>\n"
+            "این دور سیگنال جدیدی با امتیاز کافی پیدا نشد."
+        )
 
-    telegram_send(performance_report(state))
+    telegram_send(
+        performance_report(
+            state
+        )
+    )
 
-    active = sum(1 for s in state["signals"] if s.get("status") == "ACTIVE")
+    active = sum(
+        1
+        for s in state["signals"]
+        if s.get("status")
+        == "ACTIVE"
+    )
 
     print("=" * 70)
-    print("New signals: " + str(len(new_signals)))
-    print("Active signals: " + str(active))
-    print("Total stored: " + str(len(state["signals"])))
+
+    print(
+        "New signals: "
+        + str(len(new_signals))
+    )
+
+    print(
+        "Active signals: "
+        + str(active)
+    )
+
+    print(
+        "Total stored: "
+        + str(len(state["signals"]))
+    )
+
     print("--- stats ---")
-    print("Evaluated (4h OK): " + str(STATS["evaluated"]))
-    print("Skipped by quick threshold: " + str(STATS["skipped_quick"]))
-    print("Daily fetched: " + str(STATS["daily_fetched"]))
-    print("Signals created: " + str(STATS["signal_created"]))
-    print("Finished:", iso_now())
+
+    print(
+        "Evaluated (4h OK): "
+        + str(STATS["evaluated"])
+    )
+
+    print(
+        "Skipped by quick threshold: "
+        + str(STATS["skipped_quick"])
+    )
+
+    print(
+        "Daily fetched: "
+        + str(STATS["daily_fetched"])
+    )
+
+    print(
+        "Signals created: "
+        + str(STATS["signal_created"])
+    )
+
+    print(
+        "Finished:",
+        iso_now(),
+    )
+
     print("=" * 70)
 
 
 if __name__ == "__main__":
     try:
         main()
+
     except Exception:
         traceback.print_exc()
-        telegram_send("❌ <b>Crypto Signal Bot Error</b>\nاجرای Bot با خطا متوقف شد. لاگ GitHub Actions را بررسی کن.")
+
+        telegram_send(
+            "❌ <b>Crypto Signal Bot Error</b>\n"
+            "اجرای Bot با خطا متوقف شد. "
+            "لاگ GitHub Actions را بررسی کن."
+        )
+
         raise
