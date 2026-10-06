@@ -52,6 +52,10 @@ MAX_FAILS_PER_EXCHANGE = 3
 # Storage
 MAX_STORED_SIGNALS = 100
 
+# Quick-scan threshold (بدون daily)
+# حداکثر بونوس از trend (+2) و fundamental (+1) می‌آید.
+QUICK_THRESHOLD = max(0, MIN_SCORE - 3)   # = 9
+
 DATA_FILE = "signals.json"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
@@ -60,7 +64,15 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
 DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.08
+SLEEP_BETWEEN_SYMBOLS = 0.12   # کمی بیشتر برای کاهش فشار
+
+# Stats
+STATS = {
+    "evaluated": 0,
+    "skipped_quick": 0,
+    "daily_fetched": 0,
+    "signal_created": 0,
+}
 
 
 # ============================================================
@@ -101,10 +113,6 @@ def fmt_price(value):
 
 
 def classify_error(exc):
-    """
-    exchange_fail : مشکل صرافی → شمارنده Circuit Breaker += 1
-    symbol_fail   : مشکل نماد → فقط skip، بدون شمارش
-    """
     if isinstance(exc, (
         ccxt.RateLimitExceeded,
         ccxt.DDoSProtection,
@@ -115,7 +123,6 @@ def classify_error(exc):
         return "exchange_fail"
 
     msg = str(exc).lower()
-
     if (
         "does not have market" in msg
         or "symbol not found" in msg
@@ -134,14 +141,11 @@ def classify_error(exc):
 def load_state():
     if not os.path.exists(DATA_FILE):
         return {"signals": [], "last_run": None}
-
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-
         if not isinstance(data, dict):
             return {"signals": [], "last_run": None}
-
         data.setdefault("signals", [])
         data.setdefault("last_run", None)
         return data
@@ -159,26 +163,15 @@ def save_state(state):
 
 def trim_state(state):
     """
-    signals.json:
-      - تمام سیگنال‌های ACTIVE نگه داشته می‌شوند
-      - فقط آخرین 100 سیگنال بسته‌شده نگه داشته می‌شود
+    تمام سیگنال‌های ACTIVE حفظ می‌شوند + فقط 100 بسته‌شده آخر.
     """
     signals = state.get("signals", [])
     if not signals:
         state["signals"] = []
         return state
 
-    active = [
-        s for s in signals
-        if s.get("status") == "ACTIVE"
-    ]
-    closed = [
-        s for s in signals
-        if s.get("status") != "ACTIVE"
-    ]
-
-    # همه ACTIVEها حفظ می‌شوند
-    # فقط 100 مورد آخر بسته‌شده باقی می‌ماند
+    active = [s for s in signals if s.get("status") == "ACTIVE"]
+    closed = [s for s in signals if s.get("status") != "ACTIVE"]
     closed = closed[-MAX_STORED_SIGNALS:]
 
     state["signals"] = active + closed
@@ -193,9 +186,7 @@ def telegram_send(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials are missing; message skipped.")
         return False
-
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
     try:
         r = requests.post(
             url,
@@ -223,7 +214,6 @@ def telegram_send(text):
 class ExchangeManager:
     def __init__(self):
         self.exchanges = {}
-        self.market_counts = {}
         self.fail_counts = {}
         self.disabled = set()
         self.name_by_id = {}
@@ -238,13 +228,11 @@ class ExchangeManager:
                 })
                 ex.load_markets()
                 self.exchanges[name] = ex
-                self.market_counts[name] = len(ex.markets)
                 self.fail_counts[name] = 0
                 self.name_by_id[id(ex)] = name
                 print(f"[OK] {name}: {len(ex.markets)} markets")
             except Exception as exc:
                 print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
-
         return bool(self.exchanges)
 
     def get_exchange(self, name):
@@ -291,29 +279,23 @@ class ExchangeManager:
     def scan_symbols(self):
         ordered = []
         seen = set()
-
         for name in EXCHANGE_NAMES:
             ex = self.exchanges.get(name)
             if not ex:
                 continue
-
             symbols = self.market_symbols(ex)
             print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
-
             for symbol in symbols:
                 if symbol not in seen:
                     ordered.append((name, symbol))
                     seen.add(symbol)
-
                 if len(ordered) >= MAX_COINS:
                     return ordered
-
         return ordered
 
     def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
         if self.is_disabled(exchange):
             return None
-
         try:
             data = exchange.fetch_ohlcv(
                 symbol,
@@ -331,7 +313,6 @@ class ExchangeManager:
     def ticker_price(self, exchange, symbol):
         if self.is_disabled(exchange):
             return None
-
         try:
             ticker = exchange.fetch_ticker(symbol)
             price = safe_float(ticker.get("last"))
@@ -350,7 +331,6 @@ class ExchangeManager:
 
 def add_indicators(df):
     df = df.copy()
-
     close = df["close"]
     high = df["high"]
     low = df["low"]
@@ -362,9 +342,8 @@ def add_indicators(df):
     delta = close.diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
+    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
@@ -377,7 +356,7 @@ def add_indicators(df):
         ],
         axis=1,
     ).max(axis=1)
-    df["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
+    df["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
 
     mid = close.rolling(20).mean()
     std = close.rolling(20).std(ddof=0)
@@ -387,7 +366,6 @@ def add_indicators(df):
 
     tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
     kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
-
     span_a = ((tenkan + kijun) / 2).shift(26)
     span_b = (
         (high.rolling(52).max() + low.rolling(52).min()) / 2
@@ -397,25 +375,19 @@ def add_indicators(df):
     df["kijun"] = kijun
     df["span_a"] = span_a
     df["span_b"] = span_b
-
     return df
 
 
 def closed_candles(raw):
     if not raw or len(raw) < 30:
         return pd.DataFrame()
-
     df = pd.DataFrame(
         raw,
         columns=["timestamp", "open", "high", "low", "close", "volume"],
     )
-
-    # همیشه کندل در حال تشکیل حذف می‌شود
     df = df.iloc[:-1].copy()
-
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-
     df.dropna(inplace=True)
     return df
 
@@ -432,17 +404,13 @@ def ema_score(last):
         score += 1
     if last["ema50"] > last["ema200"]:
         score += 1
-
-    bull = score >= 2
-    bear = score <= 1
-    return bull, bear, score
+    return (score >= 2), (score <= 1), score
 
 
 def rsi_score(last):
     rsi = safe_float(last["rsi"])
     if rsi is None:
         return False, False, 0
-
     if 52 <= rsi <= 68:
         return True, False, 2
     if 32 <= rsi <= 48:
@@ -451,7 +419,6 @@ def rsi_score(last):
         return False, True, 1
     if rsi < 30:
         return True, False, 1
-
     return False, False, 0
 
 
@@ -459,21 +426,16 @@ def bb_score(last):
     close = last["close"]
     upper = last["bb_upper"]
     lower = last["bb_lower"]
-
     if pd.isna(upper) or pd.isna(lower):
         return False, False, 0
-
     width = upper - lower
     if width <= 0:
         return False, False, 0
-
     pos = (close - lower) / width
-
     if pos < 0.25:
         return True, False, 1
     if pos > 0.75:
         return False, True, 1
-
     return False, False, 0
 
 
@@ -483,18 +445,14 @@ def ichimoku_score(last):
     span_b = last["span_b"]
     tenkan = last["tenkan"]
     kijun = last["kijun"]
-
     if any(pd.isna(x) for x in [span_a, span_b, tenkan, kijun]):
         return False, False, 0
-
     cloud_top = max(span_a, span_b)
     cloud_bottom = min(span_a, span_b)
-
     if close > cloud_top and tenkan > kijun:
         return True, False, 2
     if close < cloud_bottom and tenkan < kijun:
         return False, True, 2
-
     return False, False, 0
 
 
@@ -502,44 +460,32 @@ def fibonacci_score(df):
     recent = df.tail(80)
     hi = recent["high"].max()
     lo = recent["low"].min()
-
     if hi <= lo:
         return False, False, 0
-
     close = df.iloc[-1]["close"]
     span = hi - lo
-
     levels = [
         lo + span * 0.382,
         lo + span * 0.500,
         lo + span * 0.618,
     ]
-
     distance = min(abs(close - x) for x in levels) / span
-
     if distance < 0.04 and close > lo:
         return True, False, 1
     if distance < 0.04 and close < hi:
         return False, True, 1
-
     return False, False, 0
 
 
 def sr_score(df):
     recent = df.tail(60)
     close = df.iloc[-1]["close"]
-
     resistance = recent["high"].quantile(0.90)
     support = recent["low"].quantile(0.10)
-
-    bull = close <= support * 1.03
-    bear = close >= resistance * 0.97
-
-    if bull:
+    if close <= support * 1.03:
         return True, False, 1
-    if bear:
+    if close >= resistance * 0.97:
         return False, True, 1
-
     return False, False, 0
 
 
@@ -548,31 +494,58 @@ def brooks_score(df):
     body = recent["close"] - recent["open"]
     bullish = int((body > 0).sum())
     bearish = int((body < 0).sum())
-
     if bullish >= 6:
         return True, False, 1
     if bearish >= 6:
         return False, True, 1
-
     return False, False, 0
 
 
 def rtm_score(df):
     if len(df) < 12:
         return False, False, 0
-
     recent = df.tail(12)
     returns = recent["close"].pct_change().dropna()
-
     positive = returns.tail(4).sum()
     negative = returns.tail(4).sum()
-
     if positive > 0.025:
         return True, False, 1
     if negative < -0.025:
         return False, True, 1
-
     return False, False, 0
+
+
+# ============================================================
+# QUICK 4H-ONLY SCORE
+# ============================================================
+
+def compute_4h_score(df):
+    """محاسبه bull/bear تنها بر اساس داده 4h (بدون API اضافه)."""
+    last = df.iloc[-1]
+
+    components = {}
+    bull = 0
+    bear = 0
+
+    checks = [
+        ("ema", ema_score(last)),
+        ("rsi", rsi_score(last)),
+        ("bb", bb_score(last)),
+        ("ichi", ichimoku_score(last)),
+        ("fib", fibonacci_score(df)),
+        ("sr", sr_score(df)),
+        ("brooks", brooks_score(df)),
+        ("rtm", rtm_score(df)),
+    ]
+
+    for name, (is_bull, is_bear, score) in checks:
+        components[name] = score
+        if is_bull:
+            bull += score
+        if is_bear:
+            bear += score
+
+    return bull, bear, components
 
 
 # ============================================================
@@ -580,36 +553,24 @@ def rtm_score(df):
 # ============================================================
 
 def daily_trend(manager, exchange, symbol):
-    """
-    روند روزانه با استفاده از manager.fetch_ohlcv
-    تا Circuit Breaker رعایت شود.
-    """
     try:
         raw = manager.fetch_ohlcv(
-            exchange,
-            symbol,
+            exchange, symbol,
             timeframe=TREND_TIMEFRAME,
             limit=DAILY_LIMIT,
         )
         if not raw:
             return "UNKNOWN"
-
         df = closed_candles(raw)
         if len(df) < 60:
             return "UNKNOWN"
-
-        df["ema50"] = df["close"].ewm(
-            span=50,
-            adjust=False,
-        ).mean()
+        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
         last = df.iloc[-1]
-
         if last["close"] > last["ema50"]:
             return "BULL"
         if last["close"] < last["ema50"]:
             return "BEAR"
         return "NEUTRAL"
-
     except Exception as exc:
         print(
             f"[WARN] daily trend failed "
@@ -620,7 +581,7 @@ def daily_trend(manager, exchange, symbol):
 
 
 # ============================================================
-# FUNDAMENTALS  (Skip Spot)
+# FUNDAMENTALS
 # ============================================================
 
 def fundamental_data(manager, symbol):
@@ -635,13 +596,10 @@ def fundamental_data(manager, symbol):
         exchange = manager.get_exchange(name)
         if not exchange:
             continue
-
         if symbol not in exchange.markets:
             continue
 
         market = exchange.markets[symbol]
-
-        # فقط بازارهای مشتقه (swap / future) معنی funding/OI دارند
         is_derivative = bool(
             market.get("swap") or market.get("future") or market.get("contract")
         )
@@ -683,13 +641,12 @@ def fundamental_score(data, side):
 
 
 # ============================================================
-# SIGNAL ENGINE
+# LEVELS
 # ============================================================
 
 def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     entry = safe_float(entry)
     atr = safe_float(atr)
-
     if not entry or not atr or atr <= 0:
         return None
 
@@ -706,7 +663,6 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         tp2 = entry - stop_distance * 1.8
         tp3 = entry - stop_distance * 2.6
 
-    # اجازه نده S/R استاپ را به نقطه‌ی ناامن بکشد
     if side == "BUY" and sr_support:
         candidate = sr_support * 0.995
         if candidate < entry and candidate > sl:
@@ -724,7 +680,6 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     rr2 = abs(tp2 - entry) / risk
     rr3 = abs(tp3 - entry) / risk
 
-    # RR وزنی بر اساس مدل 50/30/20
     weighted_rr = (
         TP_WEIGHTS["tp1"] * rr1
         + TP_WEIGHTS["tp2"] * rr2
@@ -748,40 +703,43 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     }
 
 
-def build_signal(symbol, exchange_name, df, trend, fundamentals):
-    df = add_indicators(df)
-    if len(df) < 205:
+# ============================================================
+# TRY BUILD SIGNAL (با early-exit)
+# ============================================================
+
+def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
+    """
+    Early-exit pipeline:
+      Phase 1: 4h-only score        (0 API اضافه)
+      Phase 2: daily trend          (فقط اگر quick کافی بود)
+      Phase 3: fundamental          (معمولاً بدون API برای Spot)
+      Phase 4: RR + Duplicate
+    """
+    if len(df_4h) < 205:
         return None
 
-    last = df.iloc[-1]
+    df = add_indicators(df_4h)
+    bull_4h, bear_4h, components = compute_4h_score(df)
+    max_4h = max(bull_4h, bear_4h)
 
-    components = {}
-    bull_total = 0
-    bear_total = 0
+    # Early exit: حتی با حداکثر بونوس هم به MIN_SCORE نمی‌رسد
+    if max_4h < QUICK_THRESHOLD:
+        STATS["skipped_quick"] += 1
+        return None
 
-    checks = [
-        ("ema", ema_score(last)),
-        ("rsi", rsi_score(last)),
-        ("bb", bb_score(last)),
-        ("ichi", ichimoku_score(last)),
-        ("fib", fibonacci_score(df)),
-        ("sr", sr_score(df)),
-        ("brooks", brooks_score(df)),
-        ("rtm", rtm_score(df)),
-    ]
+    # Phase 2: daily
+    trend = daily_trend(manager, exchange, symbol)
+    STATS["daily_fetched"] += 1
 
-    for name, (bull, bear, score) in checks:
-        components[name] = score
-        if bull:
-            bull_total += score
-        if bear:
-            bear_total += score
-
+    bull_total = bull_4h
+    bear_total = bear_4h
     if trend == "BULL":
         bull_total += 2
     elif trend == "BEAR":
         bear_total += 2
 
+    # Phase 3: fundamental
+    fundamentals = fundamental_data(manager, symbol)
     bull_total += fundamental_score(fundamentals, "BUY")
     bear_total += fundamental_score(fundamentals, "SELL")
 
@@ -795,6 +753,8 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     if score < MIN_SCORE:
         return None
 
+    # Phase 4: levels + duplicate
+    last = df.iloc[-1]
     close = safe_float(last["close"])
     atr = safe_float(last["atr"])
 
@@ -810,11 +770,16 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     if risk_pct > 15:
         return None
 
+    if duplicate_exists(state, symbol, side):
+        return None
+
     strength = (
         "قوی" if score >= 18
         else "متوسط" if score >= 15
         else "ضعیف"
     )
+
+    STATS["signal_created"] += 1
 
     return {
         "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
@@ -856,19 +821,12 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
 # ============================================================
 
 def duplicate_exists(state, symbol, side):
-    """
-    - اگر سیگنال ACTIVE برای این نماد/جهت وجود دارد → True
-    - اگر سیگنالی در بازه DUPLICATE_COOLDOWN_HOURS بسته شده → True
-    """
     cutoff = utc_now() - timedelta(hours=DUPLICATE_COOLDOWN_HOURS)
-
     for sig in state.get("signals", []):
         if sig.get("symbol") != symbol or sig.get("side") != side:
             continue
-
         if sig.get("status") == "ACTIVE":
             return True
-
         ts_str = sig.get("updated_at") or sig.get("created_at")
         if not ts_str:
             continue
@@ -878,44 +836,34 @@ def duplicate_exists(state, symbol, side):
                 return True
         except Exception:
             continue
-
     return False
 
 
 def close_piece(signal, exit_price, fraction, label):
     entry = safe_float(signal["entry"])
     exit_price = safe_float(exit_price)
-
     if not entry or not exit_price:
         return
-
     risk_per_unit = abs(entry - safe_float(signal["sl"]))
     if risk_per_unit <= 0:
         return
-
     quantity = RISK_USD / risk_per_unit
     gross = (
         (exit_price - entry) * quantity
         if signal["side"] == "BUY"
         else (entry - exit_price) * quantity
     )
-
     piece_qty = quantity * fraction
     gross_piece = gross * fraction
-
     entry_fee = entry * piece_qty * FEE_RATE
     exit_fee = exit_price * piece_qty * FEE_RATE
     fees = entry_fee + exit_fee
-
     net = gross_piece - fees
-
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0) + net
     signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0) + fees
     signal["remaining_fraction"] = max(
-        0,
-        safe_float(signal.get("remaining_fraction"), 1) - fraction,
+        0, safe_float(signal.get("remaining_fraction"), 1) - fraction
     )
-
     signal[f"{label}_hit"] = True
     signal["updated_at"] = iso_now()
 
@@ -923,10 +871,8 @@ def close_piece(signal, exit_price, fraction, label):
 def price_hit(signal, price, level_name):
     price = safe_float(price)
     level = safe_float(signal.get(level_name))
-
     if price is None or level is None:
         return False
-
     if signal["side"] == "BUY":
         return price >= level
     return price <= level
@@ -935,10 +881,8 @@ def price_hit(signal, price, level_name):
 def stop_hit(signal, price):
     price = safe_float(price)
     sl = safe_float(signal.get("sl"))
-
     if price is None or sl is None:
         return False
-
     if signal["side"] == "BUY":
         return price <= sl
     return price >= sl
@@ -947,10 +891,8 @@ def stop_hit(signal, price):
 def manage_signal(signal, current_price):
     if signal.get("status") != "ACTIVE":
         return False
-
     changed = False
 
-    # Expiry
     created = signal.get("created_at")
     if created:
         try:
@@ -966,7 +908,6 @@ def manage_signal(signal, current_price):
         except Exception:
             pass
 
-    # SL قبل از TP
     if stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
         if remaining > 0:
@@ -978,7 +919,7 @@ def manage_signal(signal, current_price):
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        signal["sl"] = signal["entry"]  # Breakeven
+        signal["sl"] = signal["entry"]
         changed = True
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
@@ -1001,43 +942,34 @@ def manage_signal(signal, current_price):
 
 def update_open_signals(state, manager):
     changed = False
-
     for signal in state.get("signals", []):
         if signal.get("status") != "ACTIVE":
             continue
-
         symbol = signal.get("symbol")
         exchange_name = signal.get("exchange")
         exchange = manager.get_exchange(exchange_name)
-
         if not exchange:
             continue
         if symbol not in exchange.markets:
             continue
-
         price = manager.ticker_price(exchange, symbol)
         if price is None:
             continue
-
         before = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
-
         manage_signal(signal, price)
-
         after = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
-
         if before != after:
             changed = True
-
     return changed
 
 
@@ -1047,25 +979,14 @@ def update_open_signals(state, manager):
 
 def performance_report(state):
     signals = state.get("signals", [])
-    closed = [
-        s for s in signals
-        if s.get("status") in {"CLOSED", "EXPIRED"}
-    ]
-
+    closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
     if not closed:
         return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
-
-    wins = sum(
-        1 for s in closed
-        if safe_float(s.get("realized_pnl"), 0) > 0
-    )
+    wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
     losses = len(closed) - wins
-
     pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in closed)
     fees = sum(safe_float(s.get("fees_paid"), 0) for s in closed)
-
     win_rate = wins / len(closed) * 100
-
     return (
         "📊 <b>Performance</b>\n"
         f"معاملات بسته: {len(closed)}\n"
@@ -1079,22 +1000,17 @@ def performance_report(state):
 def format_signal(signal):
     side = signal["side"]
     emoji = "🟢" if side == "BUY" else "🔴"
-
     f = signal.get("fundamentals", {})
     funding = f.get("funding")
     oi = f.get("open_interest")
-
     funding_text = f"{funding * 100:.4f}%" if funding is not None else "N/A"
     oi_text = f"{oi:,.2f}" if oi is not None else "N/A"
-
     components = signal.get("components", {})
-
     return (
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
         f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
         f"روند روزانه: {signal['trend']}\n\n"
-
         f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
         f"({signal['risk_pct']:.2f}%)\n"
@@ -1102,7 +1018,6 @@ def format_signal(signal):
         f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
         f"RR وزنی: <b>{signal['rr']:.2f}</b>\n\n"
-
         f"📐 EMA: {components.get('ema', 0)}\n"
         f"RSI: {components.get('rsi', 0)}\n"
         f"BB: {components.get('bb', 0)}\n"
@@ -1111,7 +1026,6 @@ def format_signal(signal):
         f"S/R: {components.get('sr', 0)}\n"
         f"Brooks: {components.get('brooks', 0)}\n"
         f"RTM: {components.get('rtm', 0)}\n\n"
-
         f"💰 Funding: {funding_text}\n"
         f"📊 OI: {oi_text}\n"
         f"⏱ Expiry: 48h\n"
@@ -1146,35 +1060,32 @@ def scan_market(manager, state):
 
             try:
                 raw = manager.fetch_ohlcv(exchange, symbol)
-                df = closed_candles(raw)
-
-                if len(df) < 210:
+                df_4h = closed_candles(raw)
+                if len(df_4h) < 210:
                     break
 
-                trend = daily_trend(manager, exchange, symbol)
-                fundamentals = fundamental_data(manager, symbol)
+                STATS["evaluated"] += 1
 
-                signal = build_signal(
+                signal = try_build_signal(
                     symbol,
                     exchange_name,
-                    df,
-                    trend,
-                    fundamentals,
+                    df_4h,
+                    manager,
+                    exchange,
+                    state,
                 )
 
-                if not signal:
+                if signal:
+                    signals.append(signal)
+                    print(
+                        f"[SIGNAL] {symbol} {signal['side']} "
+                        f"score={signal['score']} "
+                        f"rr={signal['rr']:.2f} "
+                        f"exchange={exchange_name}"
+                    )
                     break
 
-                if duplicate_exists(state, symbol, signal["side"]):
-                    break
-
-                signals.append(signal)
-                print(
-                    f"[SIGNAL] {symbol} {signal['side']} "
-                    f"score={signal['score']} "
-                    f"rr={signal['rr']:.2f} "
-                    f"exchange={exchange_name}"
-                )
+                # بدون سیگنال → سراغ نماد بعدی
                 break
 
             except Exception as exc:
@@ -1203,7 +1114,6 @@ def main():
     state = load_state()
 
     manager = ExchangeManager()
-
     if not manager.build():
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
@@ -1211,7 +1121,6 @@ def main():
         )
         return
 
-    # مدیریت سیگنال‌های فعال قبلی
     if update_open_signals(state, manager):
         save_state(state)
 
@@ -1220,7 +1129,6 @@ def main():
     state["signals"].extend(new_signals)
     state = trim_state(state)
     state["last_run"] = iso_now()
-
     save_state(state)
 
     if new_signals:
@@ -1248,6 +1156,11 @@ def main():
     print(f"New signals: {len(new_signals)}")
     print(f"Active signals: {active}")
     print(f"Total stored: {len(state['signals'])}")
+    print("--- stats ---")
+    print(f"Evaluated (4h OK): {STATS['evaluated']}")
+    print(f"Skipped by quick threshold: {STATS['skipped_quick']}")
+    print(f"Daily fetched: {STATS['daily_fetched']}")
+    print(f"Signals created: {STATS['signal_created']}")
     print("Finished:", iso_now())
     print("=" * 70)
 
