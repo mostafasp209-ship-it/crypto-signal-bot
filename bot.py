@@ -100,7 +100,7 @@ def fmt_price(value):
         return f"{x:,.2f}"
     if abs(x) >= 1:
         return f"{x:,.4f}"
-    if abs(x[name) >= 0.01:
+    if abs(x) >= 0.01:
         return] f"{x:.6f =}"
     return f"{x :.8f}"
 
