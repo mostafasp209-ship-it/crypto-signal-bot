@@ -36,6 +36,7 @@ MIN_SCORE = 12
 MIN_RR = 1.50
 
 SIGNAL_EXPIRY_HOURS = 48
+DUPLICATE_COOLDOWN_HOURS = 24
 RISK_USD = 10.0
 FEE_RATE = 0.001
 
@@ -44,6 +45,12 @@ TP_WEIGHTS = {
     "tp2": 0.30,
     "tp3": 0.20,
 }
+
+# Circuit Breaker
+MAX_FAILS_PER_EXCHANGE = 3
+
+# Storage
+MAX_STORED_SIGNALS = 100
 
 DATA_FILE = "signals.json"
 
@@ -93,16 +100,31 @@ def fmt_price(value):
     return f"{x:.8f}"
 
 
-def pct(a, b):
-    a = safe_float(a)
-    b = safe_float(b)
-    if a is None or b in (None, 0):
-        return None
-    return (a / b - 1.0) * 100.0
+def classify_error(exc):
+    """
+    exchange_fail : مشکل صرافی → شمارنده Circuit Breaker += 1
+    symbol_fail   : مشکل نماد → فقط skip، بدون شمارش
+    """
+    if isinstance(exc, (
+        ccxt.RateLimitExceeded,
+        ccxt.DDoSProtection,
+        ccxt.NetworkError,
+        ccxt.RequestTimeout,
+        ccxt.ExchangeNotAvailable,
+    )):
+        return "exchange_fail"
 
+    msg = str(exc).lower()
 
-def clamp(x, lo, hi):
-    return max(lo, min(hi, x))
+    if (
+        "does not have market" in msg
+        or "symbol not found" in msg
+        or "invalid symbol" in msg
+        or "does not exist" in msg
+    ):
+        return "symbol_fail"
+
+    return "exchange_fail"
 
 
 # ============================================================
@@ -133,6 +155,34 @@ def save_state(state):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
     os.replace(tmp, DATA_FILE)
+
+
+def trim_state(state):
+    """
+    signals.json:
+      - تمام سیگنال‌های ACTIVE نگه داشته می‌شوند
+      - فقط آخرین 100 سیگنال بسته‌شده نگه داشته می‌شود
+    """
+    signals = state.get("signals", [])
+    if not signals:
+        state["signals"] = []
+        return state
+
+    active = [
+        s for s in signals
+        if s.get("status") == "ACTIVE"
+    ]
+    closed = [
+        s for s in signals
+        if s.get("status") != "ACTIVE"
+    ]
+
+    # همه ACTIVEها حفظ می‌شوند
+    # فقط 100 مورد آخر بسته‌شده باقی می‌ماند
+    closed = closed[-MAX_STORED_SIGNALS:]
+
+    state["signals"] = active + closed
+    return state
 
 
 # ============================================================
@@ -174,6 +224,9 @@ class ExchangeManager:
     def __init__(self):
         self.exchanges = {}
         self.market_counts = {}
+        self.fail_counts = {}
+        self.disabled = set()
+        self.name_by_id = {}
 
     def build(self):
         for name in EXCHANGE_NAMES:
@@ -186,6 +239,8 @@ class ExchangeManager:
                 ex.load_markets()
                 self.exchanges[name] = ex
                 self.market_counts[name] = len(ex.markets)
+                self.fail_counts[name] = 0
+                self.name_by_id[id(ex)] = name
                 print(f"[OK] {name}: {len(ex.markets)} markets")
             except Exception as exc:
                 print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
@@ -194,6 +249,30 @@ class ExchangeManager:
 
     def get_exchange(self, name):
         return self.exchanges.get(name)
+
+    def _name_of(self, exchange):
+        return self.name_by_id.get(id(exchange))
+
+    def mark_ok(self, exchange):
+        name = self._name_of(exchange)
+        if name:
+            self.fail_counts[name] = 0
+
+    def mark_fail(self, exchange):
+        name = self._name_of(exchange)
+        if not name:
+            return
+        self.fail_counts[name] = self.fail_counts.get(name, 0) + 1
+        if self.fail_counts[name] >= MAX_FAILS_PER_EXCHANGE:
+            self.disabled.add(name)
+            print(
+                f"[DISABLED] {name} بعد از "
+                f"{self.fail_counts[name]} خطای پیوسته"
+            )
+
+    def is_disabled(self, exchange):
+        name = self._name_of(exchange)
+        return name in self.disabled if name else False
 
     def market_symbols(self, exchange):
         result = []
@@ -210,7 +289,6 @@ class ExchangeManager:
         return sorted(set(result))
 
     def scan_symbols(self):
-        # Prefer Binance.US, then fill with fallback exchanges.
         ordered = []
         seen = set()
 
@@ -233,17 +311,36 @@ class ExchangeManager:
         return ordered
 
     def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
-        return exchange.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            limit=limit,
-        )
+        if self.is_disabled(exchange):
+            return None
+
+        try:
+            data = exchange.fetch_ohlcv(
+                symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
+            self.mark_ok(exchange)
+            return data
+        except Exception as exc:
+            kind = classify_error(exc)
+            if kind == "exchange_fail":
+                self.mark_fail(exchange)
+            raise
 
     def ticker_price(self, exchange, symbol):
+        if self.is_disabled(exchange):
+            return None
+
         try:
             ticker = exchange.fetch_ticker(symbol)
-            return safe_float(ticker.get("last"))
-        except Exception:
+            price = safe_float(ticker.get("last"))
+            self.mark_ok(exchange)
+            return price
+        except Exception as exc:
+            kind = classify_error(exc)
+            if kind == "exchange_fail":
+                self.mark_fail(exchange)
             return None
 
 
@@ -288,23 +385,12 @@ def add_indicators(df):
     df["bb_upper"] = mid + 2 * std
     df["bb_lower"] = mid - 2 * std
 
-    # Ichimoku
-    tenkan = (
-        high.rolling(9).max() +
-        low.rolling(9).min()
-    ) / 2
-
-    kijun = (
-        high.rolling(26).max() +
-        low.rolling(26).min()
-    ) / 2
+    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
+    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
 
     span_a = ((tenkan + kijun) / 2).shift(26)
     span_b = (
-        (
-            high.rolling(52).max() +
-            low.rolling(52).min()
-        ) / 2
+        (high.rolling(52).max() + low.rolling(52).min()) / 2
     ).shift(26)
 
     df["tenkan"] = tenkan
@@ -324,7 +410,7 @@ def closed_candles(raw):
         columns=["timestamp", "open", "high", "low", "close", "volume"],
     )
 
-    # Always ignore the currently forming candle.
+    # همیشه کندل در حال تشکیل حذف می‌شود
     df = df.iloc[:-1].copy()
 
     for col in ["open", "high", "low", "close", "volume"]:
@@ -406,7 +492,6 @@ def ichimoku_score(last):
 
     if close > cloud_top and tenkan > kijun:
         return True, False, 2
-
     if close < cloud_bottom and tenkan < kijun:
         return False, True, 2
 
@@ -434,7 +519,6 @@ def fibonacci_score(df):
 
     if distance < 0.04 and close > lo:
         return True, False, 1
-
     if distance < 0.04 and close < hi:
         return False, True, 1
 
@@ -460,7 +544,6 @@ def sr_score(df):
 
 
 def brooks_score(df):
-    # Price-action proxy inspired by trend/bar pressure.
     recent = df.tail(8)
     body = recent["close"] - recent["open"]
     bullish = int((body > 0).sum())
@@ -475,7 +558,6 @@ def brooks_score(df):
 
 
 def rtm_score(df):
-    # Supply/demand proxy: strong displacement after a short base.
     if len(df) < 12:
         return False, False, 0
 
@@ -497,18 +579,29 @@ def rtm_score(df):
 # TREND FILTER
 # ============================================================
 
-def daily_trend(exchange, symbol):
+def daily_trend(manager, exchange, symbol):
+    """
+    روند روزانه با استفاده از manager.fetch_ohlcv
+    تا Circuit Breaker رعایت شود.
+    """
     try:
-        raw = exchange.fetch_ohlcv(
+        raw = manager.fetch_ohlcv(
+            exchange,
             symbol,
             timeframe=TREND_TIMEFRAME,
             limit=DAILY_LIMIT,
         )
+        if not raw:
+            return "UNKNOWN"
+
         df = closed_candles(raw)
         if len(df) < 60:
             return "UNKNOWN"
 
-        df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
+        df["ema50"] = df["close"].ewm(
+            span=50,
+            adjust=False,
+        ).mean()
         last = df.iloc[-1]
 
         if last["close"] > last["ema50"]:
@@ -518,12 +611,16 @@ def daily_trend(exchange, symbol):
         return "NEUTRAL"
 
     except Exception as exc:
-        print(f"daily trend failed {symbol}: {exc}")
+        print(
+            f"[WARN] daily trend failed "
+            f"{exchange.id} {symbol}: "
+            f"{type(exc).__name__}: {exc}"
+        )
         return "UNKNOWN"
 
 
 # ============================================================
-# FUNDAMENTALS
+# FUNDAMENTALS  (Skip Spot)
 # ============================================================
 
 def fundamental_data(manager, symbol):
@@ -542,13 +639,19 @@ def fundamental_data(manager, symbol):
         if symbol not in exchange.markets:
             continue
 
-        # These are optional. Spot-only exchanges normally don't expose
-        # funding/OI, so N/A is expected rather than an error.
+        market = exchange.markets[symbol]
+
+        # فقط بازارهای مشتقه (swap / future) معنی funding/OI دارند
+        is_derivative = bool(
+            market.get("swap") or market.get("future") or market.get("contract")
+        )
+        if not is_derivative:
+            continue
+
         try:
             if exchange.has.get("fetchFundingRate"):
-                result["funding"] = safe_float(
-                    exchange.fetch_funding_rate(symbol).get("fundingRate")
-                )
+                data = exchange.fetch_funding_rate(symbol)
+                result["funding"] = safe_float(data.get("fundingRate"))
                 result["source"] = name
         except Exception:
             pass
@@ -570,17 +673,12 @@ def fundamental_data(manager, symbol):
 
 def fundamental_score(data, side):
     funding = data.get("funding")
-
     if funding is None:
         return 0
-
-    # Funding is a secondary confirmation only.
-    # Positive funding favors shorts; negative funding favors longs.
     if side == "BUY" and funding < 0:
         return 1
     if side == "SELL" and funding > 0:
         return 1
-
     return 0
 
 
@@ -595,7 +693,6 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     if not entry or not atr or atr <= 0:
         return None
 
-    # ATR-based stop with a safety floor.
     stop_distance = max(atr * 1.8, entry * 0.015)
 
     if side == "BUY":
@@ -609,7 +706,7 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         tp2 = entry - stop_distance * 1.8
         tp3 = entry - stop_distance * 2.6
 
-    # Don't use S/R to move SL into an unsafe position.
+    # اجازه نده S/R استاپ را به نقطه‌ی ناامن بکشد
     if side == "BUY" and sr_support:
         candidate = sr_support * 0.995
         if candidate < entry and candidate > sl:
@@ -620,10 +717,21 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
             sl = candidate
 
     risk = abs(entry - sl)
-    reward = abs(tp3 - entry)
-    rr = reward / risk if risk > 0 else 0
+    if risk <= 0:
+        return None
 
-    if rr < MIN_RR:
+    rr1 = abs(tp1 - entry) / risk
+    rr2 = abs(tp2 - entry) / risk
+    rr3 = abs(tp3 - entry) / risk
+
+    # RR وزنی بر اساس مدل 50/30/20
+    weighted_rr = (
+        TP_WEIGHTS["tp1"] * rr1
+        + TP_WEIGHTS["tp2"] * rr2
+        + TP_WEIGHTS["tp3"] * rr3
+    )
+
+    if weighted_rr < MIN_RR:
         return None
 
     return {
@@ -633,7 +741,10 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         "tp2": tp2,
         "tp3": tp3,
         "risk_per_unit": risk,
-        "rr": rr,
+        "rr1": rr1,
+        "rr2": rr2,
+        "rr3": rr3,
+        "weighted_rr": weighted_rr,
     }
 
 
@@ -671,11 +782,8 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     elif trend == "BEAR":
         bear_total += 2
 
-    buy_fund = fundamental_score(fundamentals, "BUY")
-    sell_fund = fundamental_score(fundamentals, "SELL")
-
-    bull_total += buy_fund
-    bear_total += sell_fund
+    bull_total += fundamental_score(fundamentals, "BUY")
+    bear_total += fundamental_score(fundamentals, "SELL")
 
     if bull_total >= bear_total:
         side = "BUY"
@@ -694,20 +802,11 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     support = safe_float(recent["low"].quantile(0.10))
     resistance = safe_float(recent["high"].quantile(0.90))
 
-    levels = calculate_levels(
-        side,
-        close,
-        atr,
-        support,
-        resistance,
-    )
-
+    levels = calculate_levels(side, close, atr, support, resistance)
     if not levels:
         return None
 
     risk_pct = abs(levels["entry"] - levels["sl"]) / levels["entry"] * 100
-
-    # Reject absurd stops.
     if risk_pct > 15:
         return None
 
@@ -733,7 +832,10 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
         "tp1": levels["tp1"],
         "tp2": levels["tp2"],
         "tp3": levels["tp3"],
-        "rr": levels["rr"],
+        "rr": levels["weighted_rr"],
+        "rr1": levels["rr1"],
+        "rr2": levels["rr2"],
+        "rr3": levels["rr3"],
         "risk_pct": risk_pct,
         "risk_usd": RISK_USD,
         "components": components,
@@ -754,10 +856,29 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
 # ============================================================
 
 def duplicate_exists(state, symbol, side):
-    for signal in state.get("signals", []):
-        if signal.get("symbol") == symbol and signal.get("side") == side:
-            if signal.get("status") == "ACTIVE":
+    """
+    - اگر سیگنال ACTIVE برای این نماد/جهت وجود دارد → True
+    - اگر سیگنالی در بازه DUPLICATE_COOLDOWN_HOURS بسته شده → True
+    """
+    cutoff = utc_now() - timedelta(hours=DUPLICATE_COOLDOWN_HOURS)
+
+    for sig in state.get("signals", []):
+        if sig.get("symbol") != symbol or sig.get("side") != side:
+            continue
+
+        if sig.get("status") == "ACTIVE":
+            return True
+
+        ts_str = sig.get("updated_at") or sig.get("created_at")
+        if not ts_str:
+            continue
+        try:
+            ts = datetime.fromisoformat(ts_str)
+            if ts > cutoff:
                 return True
+        except Exception:
+            continue
+
     return False
 
 
@@ -768,7 +889,6 @@ def close_piece(signal, exit_price, fraction, label):
     if not entry or not exit_price:
         return
 
-    # Position size is derived from fixed USD risk.
     risk_per_unit = abs(entry - safe_float(signal["sl"]))
     if risk_per_unit <= 0:
         return
@@ -830,12 +950,12 @@ def manage_signal(signal, current_price):
 
     changed = False
 
+    # Expiry
     created = signal.get("created_at")
     if created:
         try:
             created_dt = datetime.fromisoformat(created)
             if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
-                # Close remaining position at current price.
                 remaining = safe_float(signal.get("remaining_fraction"), 0)
                 if remaining > 0:
                     close_piece(signal, current_price, remaining, "expiry")
@@ -846,7 +966,7 @@ def manage_signal(signal, current_price):
         except Exception:
             pass
 
-    # Stop is checked before new TP levels.
+    # SL قبل از TP
     if stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
         if remaining > 0:
@@ -858,8 +978,7 @@ def manage_signal(signal, current_price):
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        # Breakeven after TP1.
-        signal["sl"] = signal["entry"]
+        signal["sl"] = signal["entry"]  # Breakeven
         changed = True
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
@@ -893,7 +1012,6 @@ def update_open_signals(state, manager):
 
         if not exchange:
             continue
-
         if symbol not in exchange.markets:
             continue
 
@@ -901,19 +1019,23 @@ def update_open_signals(state, manager):
         if price is None:
             continue
 
-        before_status = signal.get("status")
-        before_tp1 = signal.get("tp1_hit")
-        before_tp2 = signal.get("tp2_hit")
-        before_tp3 = signal.get("tp3_hit")
+        before = (
+            signal.get("status"),
+            signal.get("tp1_hit"),
+            signal.get("tp2_hit"),
+            signal.get("tp3_hit"),
+        )
 
         manage_signal(signal, price)
 
-        if (
-            signal.get("status") != before_status
-            or signal.get("tp1_hit") != before_tp1
-            or signal.get("tp2_hit") != before_tp2
-            or signal.get("tp3_hit") != before_tp3
-        ):
+        after = (
+            signal.get("status"),
+            signal.get("tp1_hit"),
+            signal.get("tp2_hit"),
+            signal.get("tp3_hit"),
+        )
+
+        if before != after:
             changed = True
 
     return changed
@@ -933,7 +1055,10 @@ def performance_report(state):
     if not closed:
         return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
 
-    wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
+    wins = sum(
+        1 for s in closed
+        if safe_float(s.get("realized_pnl"), 0) > 0
+    )
     losses = len(closed) - wins
 
     pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in closed)
@@ -959,14 +1084,8 @@ def format_signal(signal):
     funding = f.get("funding")
     oi = f.get("open_interest")
 
-    funding_text = (
-        f"{funding * 100:.4f}%"
-        if funding is not None else "N/A"
-    )
-    oi_text = (
-        f"{oi:,.2f}"
-        if oi is not None else "N/A"
-    )
+    funding_text = f"{funding * 100:.4f}%" if funding is not None else "N/A"
+    oi_text = f"{oi:,.2f}" if oi is not None else "N/A"
 
     components = signal.get("components", {})
 
@@ -982,7 +1101,7 @@ def format_signal(signal):
         f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
         f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
-        f"RR: <b>{signal['rr']:.2f}</b>\n\n"
+        f"RR وزنی: <b>{signal['rr']:.2f}</b>\n\n"
 
         f"📐 EMA: {components.get('ema', 0)}\n"
         f"RSI: {components.get('rsi', 0)}\n"
@@ -1006,28 +1125,23 @@ def format_signal(signal):
 
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
-
     if not candidates:
         print("No markets found.")
         return []
 
     signals = []
 
-    for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
-        # Try the preferred venue first, then any other configured venue
-        # that actually lists the same symbol.
+    for preferred_exchange_name, symbol in candidates:
         exchange_names = [preferred_exchange_name]
         for fallback_name in EXCHANGE_NAMES:
             if fallback_name not in exchange_names:
-                fallback_exchange = manager.get_exchange(fallback_name)
-                if fallback_exchange and symbol in fallback_exchange.markets:
+                fb = manager.get_exchange(fallback_name)
+                if fb and symbol in fb.markets:
                     exchange_names.append(fallback_name)
-
-        signal_created = False
 
         for exchange_name in exchange_names:
             exchange = manager.get_exchange(exchange_name)
-            if not exchange:
+            if not exchange or manager.is_disabled(exchange):
                 continue
 
             try:
@@ -1035,9 +1149,9 @@ def scan_market(manager, state):
                 df = closed_candles(raw)
 
                 if len(df) < 210:
-                    continue
+                    break
 
-                trend = daily_trend(exchange, symbol)
+                trend = daily_trend(manager, exchange, symbol)
                 fundamentals = fundamental_data(manager, symbol)
 
                 signal = build_signal(
@@ -1049,23 +1163,18 @@ def scan_market(manager, state):
                 )
 
                 if not signal:
-                    # A valid market but no qualifying setup; don't need
-                    # to retry the same symbol on every venue.
-                    signal_created = True
                     break
 
                 if duplicate_exists(state, symbol, signal["side"]):
-                    signal_created = True
                     break
 
                 signals.append(signal)
-
                 print(
                     f"[SIGNAL] {symbol} {signal['side']} "
-                    f"score={signal['score']} exchange={exchange_name}"
+                    f"score={signal['score']} "
+                    f"rr={signal['rr']:.2f} "
+                    f"exchange={exchange_name}"
                 )
-
-                signal_created = True
                 break
 
             except Exception as exc:
@@ -1073,15 +1182,11 @@ def scan_market(manager, state):
                     f"[SCAN FAIL] {exchange_name} {symbol}: "
                     f"{type(exc).__name__}: {exc}"
                 )
-                # Try the next exchange for this symbol.
+                continue
 
         time.sleep(SLEEP_BETWEEN_SYMBOLS)
 
-    signals.sort(
-        key=lambda x: (x["score"], x["rr"]),
-        reverse=True,
-    )
-
+    signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
     return signals
 
 
@@ -1106,17 +1211,14 @@ def main():
         )
         return
 
-    # First manage previous active trades.
+    # مدیریت سیگنال‌های فعال قبلی
     if update_open_signals(state, manager):
         save_state(state)
 
     new_signals = scan_market(manager, state)
 
-    # Keep the number of stored signals reasonable.
     state["signals"].extend(new_signals)
-
-    # Keep history but avoid unbounded growth.
-    state["signals"] = state["signals"][-1000:]
+    state = trim_state(state)
     state["last_run"] = iso_now()
 
     save_state(state)
@@ -1126,8 +1228,6 @@ def main():
             f"🚨 <b>{len(new_signals)} سیگنال جدید</b>\n"
             f"زمان: {iso_now()}"
         )
-
-        # Send strongest signals first.
         for signal in new_signals[:10]:
             telegram_send(format_signal(signal))
             time.sleep(0.4)
