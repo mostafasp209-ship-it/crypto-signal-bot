@@ -45,13 +45,9 @@ TP_WEIGHTS = {
     "tp3": 0.20,
 }
 
-# Circuit Breaker
 MAX_FAILS_PER_EXCHANGE = 3
-
-# Storage
 MAX_STORED_SIGNALS = 100
 
-# Quick-scan threshold (بدون daily)
 QUICK_THRESHOLD = max(0, MIN_SCORE - 3)
 
 DATA_FILE = "signals.json"
@@ -178,7 +174,7 @@ def telegram_send(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Telegram credentials are missing; message skipped.")
         return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
     try:
         r = requests.post(
             url,
@@ -219,12 +215,12 @@ class ExchangeManager:
                     "timeout": REQUEST_TIMEOUT_MS,
                 })
                 ex.load_markets()
-                self.exchanges[name] = ex close
-                self.fail_counts[name] = 0.sh
-                self.name_by_id[id(ex)] =ift name
-                print(f"[OK] {name}: {len(ex.markets)} markets")
+                self.exchanges[name] = ex
+                self.fail_counts[name] = 0
+                self.name_by_id[id(ex)] = name
+                print("[OK] " + name + ": " + str(len(ex.markets)) + " markets")
             except Exception as exc:
-                print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
+                print("[FAIL] " + name + ": " + type(exc).__name__ + ": " + str(exc))
         return bool(self.exchanges)
 
     def get_exchange(self, name):
@@ -245,14 +241,13 @@ class ExchangeManager:
         self.fail_counts[name] = self.fail_counts.get(name, 0) + 1
         if self.fail_counts[name] >= MAX_FAILS_PER_EXCHANGE:
             self.disabled.add(name)
-            print(
-                f"[DISABLED] {name} بعد از "
-                f"{self.fail_counts[name]} خطای پیوسته"
-            )
+            print("[DISABLED] " + name + " after " + str(self.fail_counts[name]) + " consecutive fails")
 
     def is_disabled(self, exchange):
         name = self._name_of(exchange)
-        return name in self.disabled if name else False
+        if name is None:
+            return False
+        return name in self.disabled
 
     def market_symbols(self, exchange):
         result = []
@@ -276,7 +271,7 @@ class ExchangeManager:
             if not ex:
                 continue
             symbols = self.market_symbols(ex)
-            print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
+            print(name + ": " + str(len(symbols)) + " " + QUOTE + " spot symbols")
             for symbol in symbols:
                 if symbol not in seen:
                     ordered.append((name, symbol))
@@ -336,10 +331,10 @@ def add_indicators(df):
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0,(1 np.nan)
+    rs = avg_gain / avg_loss.replace(0, np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    prev_close =)
+    prev_close = close.shift(1)
     tr = pd.concat(
         [
             high - low,
@@ -562,11 +557,7 @@ def daily_trend(manager, exchange, symbol):
             return "BEAR"
         return "NEUTRAL"
     except Exception as exc:
-        print(
-            f"[WARN] daily trend failed "
-            f"{exchange.id} {symbol}: "
-            f"{type(exc).__name__}: {exc}"
-        )
+        print("[WARN] daily trend failed " + exchange.id + " " + symbol + ": " + type(exc).__name__ + ": " + str(exc))
         return "UNKNOWN"
 
 
@@ -694,7 +685,7 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
 
 
 # ============================================================
-# TRY BUILD SIGNAL (با early-exit)
+# TRY BUILD SIGNAL
 # ============================================================
 
 def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
@@ -752,16 +743,17 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     if duplicate_exists(state, symbol, side):
         return None
 
-    strength = (
-        "قوی" if score >= 18
-        else "متوسط" if score >= 15
-        else "ضعیف"
-    )
+    if score >= 18:
+        strength = "قوی"
+    elif score >= 15:
+        strength = "متوسط"
+    else:
+        strength = "ضعیف"
 
     STATS["signal_created"] += 1
 
     return {
-        "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
+        "id": symbol.replace("/", "_") + "_" + side + "_" + str(int(time.time())),
         "symbol": symbol,
         "exchange": exchange_name,
         "side": side,
@@ -827,11 +819,10 @@ def close_piece(signal, exit_price, fraction, label):
     if risk_per_unit <= 0:
         return
     quantity = RISK_USD / risk_per_unit
-    gross = (
-        (exit_price - entry) * quantity
-        if signal["side"] == "BUY"
-        else (entry - exit_price) * quantity
-    )
+    if signal["side"] == "BUY":
+        gross = (exit_price - entry) * quantity
+    else:
+        gross = (entry - exit_price) * quantity
     piece_qty = quantity * fraction
     gross_piece = gross * fraction
     entry_fee = entry * piece_qty * FEE_RATE
@@ -843,7 +834,7 @@ def close_piece(signal, exit_price, fraction, label):
     signal["remaining_fraction"] = max(
         0, safe_float(signal.get("remaining_fraction"), 1) - fraction
     )
-    signal[f"{label}_hit"] = True
+    signal[label + "_hit"] = True
     signal["updated_at"] = iso_now()
 
 
@@ -968,11 +959,11 @@ def performance_report(state):
     win_rate = wins / len(closed) * 100
     return (
         "📊 <b>Performance</b>\n"
-        f"معاملات بسته: {len(closed)}\n"
-        f"برد: {wins} | باخت: {losses}\n"
-        f"Win Rate: {win_rate:.1f}%\n"
-        f"Net PnL: ${pnl:.2f}\n"
-        f"Fees: ${fees:.2f}"
+        + "معاملات بسته: " + str(len(closed)) + "\n"
+        + "برد: " + str(wins) + " | باخت: " + str(losses) + "\n"
+        + "Win Rate: " + str(round(win_rate, 1)) + "%\n"
+        + "Net PnL: $" + str(round(pnl, 2)) + "\n"
+        + "Fees: $" + str(round(fees, 2))
     )
 
 
@@ -982,33 +973,38 @@ def format_signal(signal):
     f = signal.get("fundamentals", {})
     funding = f.get("funding")
     oi = f.get("open_interest")
-    funding_text = f"{funding * 100:.4f}%" if funding is not None else "N/A"
-    oi_text = f"{oi:,.2f}" if oi is not None else "N/A"
+    if funding is not None:
+        funding_text = str(round(funding * 100, 4)) + "%"
+    else:
+        funding_text = "N/A"
+    if oi is not None:
+        oi_text = format(oi, ",.2f")
+    else:
+        oi_text = "N/A"
     components = signal.get("components", {})
     return (
-        f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
-        f"صرافی: {signal['exchange']}\n"
-        f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
-        f"روند روزانه: {signal['trend']}\n\n"
-        f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
-        f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
-        f"({signal['risk_pct']:.2f}%)\n"
-        f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
-        f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
-        f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
-        f"RR وزنی: <b>{signal['rr']:.2f}</b>\n\n"
-        f"📐 EMA: {components.get('ema', 0)}\n"
-        f"RSI: {components.get('rsi', 0)}\n"
-        f"BB: {components.get('bb', 0)}\n"
-        f"Ichimoku: {components.get('ichi', 0)}\n"
-        f"Fibonacci: {components.get('fib', 0)}\n"
-        f"S/R: {components.get('sr', 0)}\n"
-        f"Brooks: {components.get('brooks', 0)}\n"
-        f"RTM: {components.get('rtm', 0)}\n\n"
-        f"💰 Funding: {funding_text}\n"
-        f"📊 OI: {oi_text}\n"
-        f"⏱ Expiry: 48h\n"
-        f"⚖️ ریسک اسمی: ${signal['risk_usd']:.2f}"
+        emoji + " <b>" + signal["symbol"] + " — " + side + "</b>\n"
+        + "صرافی: " + signal["exchange"] + "\n"
+        + "قدرت: <b>" + signal["strength"] + "</b> | Score: <b>" + str(signal["score"]) + "</b>\n"
+        + "روند روزانه: " + signal["trend"] + "\n\n"
+        + "🎯 Entry: <b>" + fmt_price(signal["entry"]) + "</b>\n"
+        + "🛑 SL: <b>" + fmt_price(signal["sl"]) + "</b> (" + str(round(signal["risk_pct"], 2)) + "%)\n"
+        + "🥇 TP1: <b>" + fmt_price(signal["tp1"]) + "</b> — 50%\n"
+        + "🥈 TP2: <b>" + fmt_price(signal["tp2"]) + "</b> — 30%\n"
+        + "🥉 TP3: <b>" + fmt_price(signal["tp3"]) + "</b> — 20%\n"
+        + "RR وزنی: <b>" + str(round(signal["rr"], 2)) + "</b>\n\n"
+        + "📐 EMA: " + str(components.get("ema", 0)) + "\n"
+        + "RSI: " + str(components.get("rsi", 0)) + "\n"
+        + "BB: " + str(components.get("bb", 0)) + "\n"
+        + "Ichimoku: " + str(components.get("ichi", 0)) + "\n"
+        + "Fibonacci: " + str(components.get("fib", 0)) + "\n"
+        + "S/R: " + str(components.get("sr", 0)) + "\n"
+        + "Brooks: " + str(components.get("brooks", 0)) + "\n"
+        + "RTM: " + str(components.get("rtm", 0)) + "\n\n"
+        + "💰 Funding: " + funding_text + "\n"
+        + "📊 OI: " + oi_text + "\n"
+        + "⏱ Expiry: 48h\n"
+        + "⚖️ ریسک اسمی: $" + str(round(signal["risk_usd"], 2))
     )
 
 
@@ -1056,21 +1052,13 @@ def scan_market(manager, state):
 
                 if signal:
                     signals.append(signal)
-                    print(
-                        f"[SIGNAL] {symbol} {signal['side']} "
-                        f"score={signal['score']} "
-                        f"rr={signal['rr']:.2f} "
-                        f"exchange={exchange_name}"
-                    )
+                    print("[SIGNAL] " + symbol + " " + signal["side"] + " score=" + str(signal["score"]) + " rr=" + str(round(signal["rr"], 2)) + " exchange=" + exchange_name)
                     break
 
                 break
 
             except Exception as exc:
-                print(
-                    f"[SCAN FAIL] {exchange_name} {symbol}: "
-                    f"{type(exc).__name__}: {exc}"
-                )
+                print("[SCAN FAIL] " + exchange_name + " " + symbol + ": " + type(exc).__name__ + ": " + str(exc))
                 continue
 
         time.sleep(SLEEP_BETWEEN_SYMBOLS)
@@ -1093,10 +1081,7 @@ def main():
 
     manager = ExchangeManager()
     if not manager.build():
-        telegram_send(
-            "❌ <b>Crypto Signal Bot</b>\n"
-            "هیچ صرافی قابل دسترسی نبود."
-        )
+        telegram_send("❌ <b>Crypto Signal Bot</b>\nهیچ صرافی قابل دسترسی نبود.")
         return
 
     if update_open_signals(state, manager):
@@ -1110,35 +1095,26 @@ def main():
     save_state(state)
 
     if new_signals:
-        telegram_send(
-            f"🚨 <b>{len(new_signals)} سیگنال جدید</b>\n"
-            f"زمان: {iso_now()}"
-        )
+        telegram_send("🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\nزمان: " + iso_now())
         for signal in new_signals[:10]:
             telegram_send(format_signal(signal))
             time.sleep(0.4)
     else:
-        telegram_send(
-            "🔎 <b>Crypto Signal Bot</b>\n"
-            "این دور سیگنال جدیدی با امتیاز کافی پیدا نشد."
-        )
+        telegram_send("🔎 <b>Crypto Signal Bot</b>\nاین دور سیگنال جدیدی با امتیاز کافی پیدا نشد.")
 
     telegram_send(performance_report(state))
 
-    active = sum(
-        1 for s in state["signals"]
-        if s.get("status") == "ACTIVE"
-    )
+    active = sum(1 for s in state["signals"] if s.get("status") == "ACTIVE")
 
     print("=" * 70)
-    print(f"New signals: {len(new_signals)}")
-    print(f"Active signals: {active}")
-    print(f"Total stored: {len(state['signals'])}")
+    print("New signals: " + str(len(new_signals)))
+    print("Active signals: " + str(active))
+    print("Total stored: " + str(len(state["signals"])))
     print("--- stats ---")
-    print(f"Evaluated (4h OK): {STATS['evaluated']}")
-    print(f"Skipped by quick threshold: {STATS['skipped_quick']}")
-    print(f"Daily fetched: {STATS['daily_fetched']}")
-    print(f"Signals created: {STATS['signal_created']}")
+    print("Evaluated (4h OK): " + str(STATS["evaluated"]))
+    print("Skipped by quick threshold: " + str(STATS["skipped_quick"]))
+    print("Daily fetched: " + str(STATS["daily_fetched"]))
+    print("Signals created: " + str(STATS["signal_created"]))
     print("Finished:", iso_now())
     print("=" * 70)
 
@@ -1148,8 +1124,5 @@ if __name__ == "__main__":
         main()
     except Exception:
         traceback.print_exc()
-        telegram_send(
-            "❌ <b>Crypto Signal Bot Error</b>\n"
-            "اجرای Bot با خطا متوقف شد. لاگ GitHub Actions را بررسی کن."
-        )
+        telegram_send("❌ <b>Crypto Signal Bot Error</b>\nاجرای Bot با خطا متوقف شد. لاگ GitHub Actions را بررسی کن.")
         raise
