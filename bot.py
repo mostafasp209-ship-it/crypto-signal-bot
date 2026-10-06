@@ -18,7 +18,6 @@ import requests
 EXCHANGE_NAMES = [
     "binanceus",
     "bitstamp",
-    "bitfinex",
     "cryptocom",
 ]
 
@@ -32,7 +31,7 @@ TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = 300
-MIN_SCORE = 12
+MIN_SCORE = 13
 MIN_RR = 1.50
 
 SIGNAL_EXPIRY_HOURS = 48
@@ -53,8 +52,7 @@ MAX_FAILS_PER_EXCHANGE = 3
 MAX_STORED_SIGNALS = 100
 
 # Quick-scan threshold (بدون daily)
-# حداکثر بونوس از trend (+2) و fundamental (+1) می‌آید.
-QUICK_THRESHOLD = max(0, MIN_SCORE - 3)   # = 9
+QUICK_THRESHOLD = max(0, MIN_SCORE - 3)
 
 DATA_FILE = "signals.json"
 
@@ -64,9 +62,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
 DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.12   # کمی بیشتر برای کاهش فشار
+SLEEP_BETWEEN_SYMBOLS = 0.12
 
-# Stats
 STATS = {
     "evaluated": 0,
     "skipped_quick": 0,
@@ -162,18 +159,13 @@ def save_state(state):
 
 
 def trim_state(state):
-    """
-    تمام سیگنال‌های ACTIVE حفظ می‌شوند + فقط 100 بسته‌شده آخر.
-    """
     signals = state.get("signals", [])
     if not signals:
         state["signals"] = []
         return state
-
     active = [s for s in signals if s.get("status") == "ACTIVE"]
     closed = [s for s in signals if s.get("status") != "ACTIVE"]
     closed = closed[-MAX_STORED_SIGNALS:]
-
     state["signals"] = active + closed
     return state
 
@@ -227,9 +219,9 @@ class ExchangeManager:
                     "timeout": REQUEST_TIMEOUT_MS,
                 })
                 ex.load_markets()
-                self.exchanges[name] = ex
-                self.fail_counts[name] = 0
-                self.name_by_id[id(ex)] = name
+                self.exchanges[name] = ex close
+                self.fail_counts[name] = 0.sh
+                self.name_by_id[id(ex)] =ift name
                 print(f"[OK] {name}: {len(ex.markets)} markets")
             except Exception as exc:
                 print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
@@ -344,10 +336,10 @@ def add_indicators(df):
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
     avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
+    rs = avg_gain / avg_loss.replace(0,(1 np.nan)
     df["rsi"] = 100 - (100 / (1 + rs))
 
-    prev_close = close.shift(1)
+    prev_close =)
     tr = pd.concat(
         [
             high - low,
@@ -520,9 +512,7 @@ def rtm_score(df):
 # ============================================================
 
 def compute_4h_score(df):
-    """محاسبه bull/bear تنها بر اساس داده 4h (بدون API اضافه)."""
     last = df.iloc[-1]
-
     components = {}
     bull = 0
     bear = 0
@@ -708,13 +698,6 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
 # ============================================================
 
 def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
-    """
-    Early-exit pipeline:
-      Phase 1: 4h-only score        (0 API اضافه)
-      Phase 2: daily trend          (فقط اگر quick کافی بود)
-      Phase 3: fundamental          (معمولاً بدون API برای Spot)
-      Phase 4: RR + Duplicate
-    """
     if len(df_4h) < 205:
         return None
 
@@ -722,12 +705,10 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     bull_4h, bear_4h, components = compute_4h_score(df)
     max_4h = max(bull_4h, bear_4h)
 
-    # Early exit: حتی با حداکثر بونوس هم به MIN_SCORE نمی‌رسد
     if max_4h < QUICK_THRESHOLD:
         STATS["skipped_quick"] += 1
         return None
 
-    # Phase 2: daily
     trend = daily_trend(manager, exchange, symbol)
     STATS["daily_fetched"] += 1
 
@@ -738,7 +719,6 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     elif trend == "BEAR":
         bear_total += 2
 
-    # Phase 3: fundamental
     fundamentals = fundamental_data(manager, symbol)
     bull_total += fundamental_score(fundamentals, "BUY")
     bear_total += fundamental_score(fundamentals, "SELL")
@@ -753,7 +733,6 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     if score < MIN_SCORE:
         return None
 
-    # Phase 4: levels + duplicate
     last = df.iloc[-1]
     close = safe_float(last["close"])
     atr = safe_float(last["atr"])
@@ -1085,7 +1064,6 @@ def scan_market(manager, state):
                     )
                     break
 
-                # بدون سیگنال → سراغ نماد بعدی
                 break
 
             except Exception as exc:
