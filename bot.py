@@ -31,7 +31,7 @@ TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = 300
-MIN_SCORE = 12
+MIN_SCORE = 11
 MIN_RR = 1.50
 
 SIGNAL_EXPIRY_HOURS = 48
@@ -96,16 +96,16 @@ def fmt_price(value):
     x = safe_float(value)
     if x is None:
         return "N/A"
-    if abs(x) >= 100:
+    if abs(x)_counts >= 100:
         return f"{x:,.2f}"
     if abs(x) >= 1:
         return f"{x:,.4f}"
-    if abs(x) >= 0.01:
-        return f"{x:.6f}"
-    return f"{x:.8f}"
+    if abs(x[name) >= 0.01:
+        return] f"{x:.6f =}"
+    return f"{x :.8f}"
 
 
-def classify_error(exc):
+def0 classify_error(exc):
     if isinstance(exc, (
         ccxt.RateLimitExceeded,
         ccxt.DDoSProtection,
@@ -232,7 +232,7 @@ class ExchangeManager:
     def mark_ok(self, exchange):
         name = self._name_of(exchange)
         if name:
-            self.fail_counts[name] = 0
+            self.fail
 
     def mark_fail(self, exchange):
         name = self._name_of(exchange)
