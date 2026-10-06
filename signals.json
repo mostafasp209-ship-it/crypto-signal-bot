@@ -617,10 +617,10 @@
       "strength": "ضعیف",
       "score": 10,
       "created_at": "2026-10-06T01:50:08.802523+00:00",
-      "updated_at": "2026-10-06T01:50:08.802531+00:00",
+      "updated_at": "2026-10-06T08:05:28.911200+00:00",
       "expiry_at": "2026-10-08T01:50:08.802534+00:00",
       "entry": 1.772,
-      "sl": 1.7184933322769118,
+      "sl": 1.772,
       "tp1": 1.8255066677230882,
       "tp2": 1.8683120019015587,
       "tp3": 1.9111173360800293,
@@ -647,12 +647,12 @@
         "long_short": null,
         "source": null
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 4.663826321016552,
+      "fees_paid": 0.33617367898344735,
       "closed_reason": null
     },
     {
@@ -938,6 +938,54 @@
       "closed_reason": null
     },
     {
+      "id": "AVAX_USDT_BUY_1791273937",
+      "symbol": "AVAX/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-06T08:05:37.010123+00:00",
+      "updated_at": "2026-10-06T08:05:37.010130+00:00",
+      "expiry_at": "2026-10-08T08:05:37.010133+00:00",
+      "entry": 11.359,
+      "sl": 11.029505013904958,
+      "tp1": 11.688494986095042,
+      "tp2": 11.952090974971076,
+      "tp3": 12.21568696384711,
+      "rr": 1.56,
+      "rr1": 1.0,
+      "rr2": 1.8,
+      "rr3": 2.6,
+      "risk_pct": 2.900739379303129,
+      "risk_usd": 10.0,
+      "risk_per_unit": 0.32949498609504246,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 1,
+        "ichi": 2,
+        "fib": 0,
+        "sr": 1,
+        "brooks": 1,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
+    },
+    {
       "id": "THETA_USDT_BUY_1791251426",
       "symbol": "THETA/USDT",
       "exchange": "binanceus",
@@ -986,5 +1034,5 @@
       "sl_hit": true
     }
   ],
-  "last_run": "2026-10-06T04:06:24.070435+00:00"
+  "last_run": "2026-10-06T08:06:41.492782+00:00"
 }
