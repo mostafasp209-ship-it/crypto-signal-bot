@@ -209,15 +209,19 @@ def migrate_old_signals(state):
         else:
             new_signals.append(s)
 
-    if len(new_signals) > MAX_STORED_SIGNALS:
-        active = [s for s in new_signals if s.get("status") == "ACTIVE"]
-        closed = [s for s in new_signals if s.get("status") != "ACTIVE"]
-        closed.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
-        keep_closed = max(0, MAX_STORED_SIGNALS - len(active))
-        new_signals = active + closed[:keep_closed]
-
     state["signals"] = new_signals
     return migrated
+
+
+def cap_signals(state):
+    signals = state.get("signals", [])
+    if len(signals) <= MAX_STORED_SIGNALS:
+        return
+    active = [s for s in signals if s.get("status") == "ACTIVE"]
+    closed = [s for s in signals if s.get("status") != "ACTIVE"]
+    closed.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
+    keep_closed = max(0, MAX_STORED_SIGNALS - len(active))
+    state["signals"] = active + closed[:keep_closed]
 
 
 def telegram_send(text):
@@ -1270,6 +1274,7 @@ def main():
 
     new_signals = scan_market(manager, state)
     state["signals"].extend(new_signals)
+    cap_signals(state)
     state["last_run"] = iso_now()
     save_state(state)
 
