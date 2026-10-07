@@ -409,8 +409,10 @@ def fibonacci_score(df):
     close = df.iloc[-1]["close"]; span = hi - lo
     levels = [lo + span * 0.382, lo + span * 0.500, lo + span * 0.618]
     distance = min(abs(close - x) for x in levels) / span
-    if distance < 0.04 and close > lo: return True, False, 1
-    if distance < 0.04 and close < hi: return False, True, 1
+    if distance >= 0.04: return False, False, 0
+    mid = lo + span * 0.5
+    if close < mid: return True, False, 1
+    if close > mid: return False, True, 1
     return False, False, 0
 
 
@@ -900,8 +902,9 @@ def manage_signal(signal, current_price):
                 remaining = safe_float(signal.get("remaining_fraction"), 0)
                 if remaining > 0:
                     close_piece(signal, current_price, remaining, "expiry")
-                signal["status"] = "EXPIRED"
-                signal["closed_reason"] = "48h expiry"
+                if signal.get("status") != "CLOSED":
+                    signal["status"] = "EXPIRED"
+                    signal["closed_reason"] = "48h expiry"
                 signal["closed_at"] = iso_now()
                 signal["updated_at"] = iso_now()
                 return True
@@ -912,22 +915,33 @@ def manage_signal(signal, current_price):
         if remaining > 0:
             sl_fill_price = compute_sl_fill_price(signal, current_price)
             close_piece(signal, sl_fill_price, remaining, "sl")
-        signal["status"] = "CLOSED"
-        signal["closed_reason"] = "SL"
+        if signal.get("status") != "CLOSED":
+            signal["status"] = "CLOSED"
+            signal["closed_reason"] = "SL"
         signal["closed_at"] = iso_now()
         signal["updated_at"] = iso_now()
         return True
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
+        if signal.get("status") == "CLOSED":
+            return True
         old_sl = signal.get("sl")
         signal["sl"] = signal["entry"]
         add_event(signal, "SL_MOVED_TO_BE", price=signal["entry"], extra={"old_sl": old_sl})
         changed = True
 
+    if signal.get("status") == "CLOSED":
+        return changed
+
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
         close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
+        if signal.get("status") == "CLOSED":
+            return True
         changed = True
+
+    if signal.get("status") == "CLOSED":
+        return changed
 
     if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
         close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
@@ -1283,6 +1297,7 @@ def main():
     print("--- stats ---")
     print("Evaluated: " + str(STATS["evaluated"]))
     print("Skipped quick: " + str(STATS["skipped_quick"]))
+    print("Daily fetched: " + str(STATS["daily_fetched"]))
     print("Signals created: " + str(STATS["signal_created"]))
     print("Rejected SL: " + str(STATS["rejected_sl"]))
     print("Rejected RR: " + str(STATS["rejected_rr"]))
