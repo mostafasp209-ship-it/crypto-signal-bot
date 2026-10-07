@@ -34,6 +34,7 @@ SIGNAL_EXPIRY_HOURS = 48
 DUPLICATE_COOLDOWN_HOURS = 24
 RISK_USD = 10.0
 FEE_RATE = 0.001
+SL_FILL_SLIPPAGE = 0.001
 
 TP_WEIGHTS = {
     "tp1": 0.50,
@@ -705,6 +706,8 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
 
     STATS["signal_created"] += 1
 
+    now_iso = iso_now()
+
     return {
         "id": symbol.replace("/", "_") + "_" + side + "_" + str(int(time.time())),
         "symbol": symbol,
@@ -713,8 +716,8 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         "status": "ACTIVE",
         "strength": strength,
         "score": int(score),
-        "created_at": iso_now(),
-        "updated_at": iso_now(),
+        "created_at": now_iso,
+        "updated_at": now_iso,
         "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
         "entry": levels["entry"],
         "sl": levels["sl"],
@@ -739,6 +742,9 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
         "realized_pnl": 0.0,
         "fees_paid": 0.0,
         "closed_reason": None,
+        "event_history": [
+            {"event": "ENTRY", "price": levels["entry"], "time": now_iso}
+        ],
     }
 
 
@@ -761,6 +767,20 @@ def duplicate_exists(state, symbol, side):
     return False
 
 
+def add_event(signal, event_name, price=None, extra=None):
+    if "event_history" not in signal or not isinstance(signal["event_history"], list):
+        signal["event_history"] = []
+    ev = {
+        "event": event_name,
+        "time": iso_now(),
+    }
+    if price is not None:
+        ev["price"] = price
+    if extra:
+        ev.update(extra)
+    signal["event_history"].append(ev)
+
+
 def close_piece(signal, exit_price, fraction, label):
     entry = safe_float(signal.get("entry"))
     exit_price = safe_float(exit_price)
@@ -774,12 +794,8 @@ def close_piece(signal, exit_price, fraction, label):
         signal["updated_at"] = iso_now()
         return
 
-    # ---------------------------------------------------------
-    # Fixed original risk per unit
-    # ---------------------------------------------------------
     risk_per_unit = safe_float(signal.get("risk_per_unit"))
 
-    # Old signals may not have risk_per_unit
     if risk_per_unit is None or risk_per_unit <= 0:
         original_sl = safe_float(signal.get("original_sl"))
         if (
@@ -789,7 +805,6 @@ def close_piece(signal, exit_price, fraction, label):
         ):
             risk_per_unit = abs(entry - original_sl)
 
-    # Fallback to current SL only if it is different from entry
     if risk_per_unit is None or risk_per_unit <= 0:
         current_sl = safe_float(signal.get("sl"))
         if (
@@ -799,30 +814,19 @@ def close_piece(signal, exit_price, fraction, label):
         ):
             risk_per_unit = abs(entry - current_sl)
 
-    # Final safety guard
     if risk_per_unit is None or risk_per_unit <= 0:
         print(
             "[ERROR] close_piece: Cannot calculate risk_per_unit for "
             + str(signal.get("symbol"))
-            + " | entry="
-            + str(entry)
-            + " | original_sl="
-            + str(signal.get("original_sl"))
-            + " | sl="
-            + str(signal.get("sl"))
-            + " | stored_risk="
-            + str(signal.get("risk_per_unit"))
         )
         signal["remaining_fraction"] = 0
         signal[label + "_hit"] = True
         signal["status"] = "CLOSED"
         signal["closed_reason"] = label.upper() + "_NO_RISK_DATA"
         signal["updated_at"] = iso_now()
+        add_event(signal, label.upper() + "_NO_RISK_DATA")
         return
 
-    # ---------------------------------------------------------
-    # Position size
-    # ---------------------------------------------------------
     quantity = RISK_USD / risk_per_unit
     piece_qty = quantity * fraction
 
@@ -849,6 +853,17 @@ def close_piece(signal, exit_price, fraction, label):
     signal[label + "_hit"] = True
     signal["updated_at"] = iso_now()
 
+    add_event(
+        signal,
+        label.upper(),
+        price=exit_price,
+        extra={
+            "fraction": fraction,
+            "pnl_piece": round(net, 4),
+            "fees": round(fees, 4),
+        },
+    )
+
 
 def price_hit(signal, price, level_name):
     price = safe_float(price)
@@ -868,6 +883,26 @@ def stop_hit(signal, price):
     if signal["side"] == "BUY":
         return price <= sl
     return price >= sl
+
+
+def compute_sl_fill_price(signal, current_price):
+    sl = safe_float(signal.get("sl"))
+    if sl is None or sl <= 0:
+        return current_price
+
+    side = signal["side"]
+
+    if side == "BUY":
+        overshoot = (sl - current_price) / sl
+    else:
+        overshoot = (current_price - sl) / sl
+
+    if overshoot <= SL_FILL_SLIPPAGE:
+        return current_price
+
+    if side == "BUY":
+        return sl * (1 - SL_FILL_SLIPPAGE)
+    return sl * (1 + SL_FILL_SLIPPAGE)
 
 
 def manage_signal(signal, current_price):
@@ -893,7 +928,8 @@ def manage_signal(signal, current_price):
     if stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
         if remaining > 0:
-            close_piece(signal, current_price, remaining, "sl")
+            sl_fill_price = compute_sl_fill_price(signal, current_price)
+            close_piece(signal, sl_fill_price, remaining, "sl")
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
@@ -901,7 +937,14 @@ def manage_signal(signal, current_price):
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
+        old_sl = signal.get("sl")
         signal["sl"] = signal["entry"]
+        add_event(
+            signal,
+            "SL_MOVED_TO_BE",
+            price=signal["entry"],
+            extra={"old_sl": old_sl},
+        )
         changed = True
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
@@ -955,24 +998,126 @@ def update_open_signals(state, manager):
     return changed
 
 
+def categorize_outcome(signal):
+    status = signal.get("status")
+    closed_reason = signal.get("closed_reason") or ""
+    tp1 = signal.get("tp1_hit", False)
+    tp2 = signal.get("tp2_hit", False)
+    tp3 = signal.get("tp3_hit", False)
+
+    if status == "ACTIVE":
+        if tp1 and not tp2:
+            return "OPEN_AFTER_TP1"
+        if tp2 and not tp3:
+            return "OPEN_AFTER_TP2"
+        return "OPEN"
+
+    if status == "EXPIRED":
+        if tp1 or tp2 or tp3:
+            return "EXPIRED_WITH_TP"
+        return "EXPIRED_NO_TP"
+
+    if "NO_RISK_DATA" in closed_reason:
+        return "NO_RISK_DATA"
+
+    if closed_reason == "SL" or closed_reason == "SL_HIT":
+        if tp2:
+            return "TP2_THEN_SL"
+        if tp1:
+            return "TP1_THEN_SL"
+        return "SL_DIRECT"
+
+    if closed_reason == "TP3":
+        return "TP3_FULL"
+
+    return "OTHER"
+
+
 def performance_report(state):
     signals = state.get("signals", [])
-    closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
-    if not closed:
-        return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
-    wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
-    losses = len(closed) - wins
-    pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in closed)
-    fees = sum(safe_float(s.get("fees_paid"), 0) for s in closed)
-    win_rate = wins / len(closed) * 100
-    return (
-        "📊 <b>Performance</b>\n"
-        + "معاملات بسته: " + str(len(closed)) + "\n"
-        + "برد: " + str(wins) + " | باخت: " + str(losses) + "\n"
-        + "Win Rate: " + str(round(win_rate, 1)) + "%\n"
-        + "Net PnL: $" + str(round(pnl, 2)) + "\n"
-        + "Fees: $" + str(round(fees, 2))
+    if not signals:
+        return "📊 <b>Performance</b>\nهنوز سیگنالی ثبت نشده."
+
+    total = len(signals)
+
+    buckets = {
+        "OPEN": [],
+        "OPEN_AFTER_TP1": [],
+        "OPEN_AFTER_TP2": [],
+        "SL_DIRECT": [],
+        "TP1_THEN_SL": [],
+        "TP2_THEN_SL": [],
+        "TP3_FULL": [],
+        "EXPIRED_NO_TP": [],
+        "EXPIRED_WITH_TP": [],
+        "NO_RISK_DATA": [],
+        "OTHER": [],
+    }
+
+    for s in signals:
+        cat = categorize_outcome(s)
+        buckets.get(cat, buckets["OTHER"]).append(s)
+
+    open_count = (
+        len(buckets["OPEN"])
+        + len(buckets["OPEN_AFTER_TP1"])
+        + len(buckets["OPEN_AFTER_TP2"])
     )
+    closed_count = total - open_count
+
+    pnl = sum(safe_float(s.get("realized_pnl"), 0) for s in signals)
+    fees = sum(safe_float(s.get("fees_paid"), 0) for s in signals)
+
+    lines = []
+    lines.append("📊 <b>Performance</b>")
+    lines.append("کل سیگنال‌ها: " + str(total))
+    lines.append("🟢 باز: " + str(open_count))
+    lines.append("🔴 بسته: " + str(closed_count))
+    lines.append("")
+    lines.append("<b>نتیجه معاملات بسته:</b>")
+    lines.append("❌ استاپ مستقیم: " + str(len(buckets["SL_DIRECT"])))
+    lines.append("🟡 TP1 → سپس استاپ: " + str(len(buckets["TP1_THEN_SL"])))
+    lines.append("🟠 TP1 → TP2 → سپس استاپ: " + str(len(buckets["TP2_THEN_SL"])))
+    lines.append("🏆 TP3 کامل: " + str(len(buckets["TP3_FULL"])))
+    lines.append("⏰ Expiry (بدون TP): " + str(len(buckets["EXPIRED_NO_TP"])))
+    lines.append("⏰ Expiry (با TP): " + str(len(buckets["EXPIRED_WITH_TP"])))
+    if len(buckets["NO_RISK_DATA"]) > 0:
+        lines.append("⚠️ بدون داده ریسک: " + str(len(buckets["NO_RISK_DATA"])))
+    if len(buckets["OTHER"]) > 0:
+        lines.append("❓ نامشخص: " + str(len(buckets["OTHER"])))
+    lines.append("")
+    lines.append("💰 Net PnL: $" + str(round(pnl, 2)))
+    lines.append("💸 Fees: $" + str(round(fees, 2)))
+
+    return "\n".join(lines)
+
+
+def format_signal_path(signal):
+    history = signal.get("event_history", [])
+    if not history:
+        return "مسیر ثبت نشده"
+
+    parts = []
+    for ev in history:
+        name = ev.get("event", "?")
+        if name == "ENTRY":
+            parts.append("ENTRY")
+        elif name == "TP1":
+            parts.append("TP1")
+        elif name == "TP2":
+            parts.append("TP2")
+        elif name == "TP3":
+            parts.append("TP3")
+        elif name == "SL_MOVED_TO_BE":
+            parts.append("SL→BE")
+        elif name == "SL":
+            parts.append("SL")
+        elif name == "EXPIRY":
+            parts.append("EXPIRED")
+        else:
+            parts.append(name)
+
+    return " → ".join(parts)
 
 
 def format_signal(signal):
@@ -1014,6 +1159,54 @@ def format_signal(signal):
         + "⏱ Expiry: 48h\n"
         + "⚖️ ریسک اسمی: $" + str(round(signal["risk_usd"], 2))
     )
+
+
+def send_detailed_report(state, max_items=15):
+    signals = state.get("signals", [])
+    if not signals:
+        return
+
+    closed = [s for s in signals if s.get("status") != "ACTIVE"]
+    open_sigs = [s for s in signals if s.get("status") == "ACTIVE"]
+
+    ordered = closed + open_sigs
+    if len(ordered) > max_items:
+        ordered = ordered[-max_items:]
+
+    header = "📋 <b>جزئیات سیگنال‌ها</b>\n" + "━" * 15
+    telegram_send(header)
+    time.sleep(0.4)
+
+    for s in ordered:
+        path = format_signal_path(s)
+        cat = categorize_outcome(s)
+        pnl_val = safe_float(s.get("realized_pnl"), 0)
+
+        emoji = "🟢" if s.get("side") == "BUY" else "🔴"
+        status_emoji = {
+            "OPEN": "🔵",
+            "OPEN_AFTER_TP1": "🟢",
+            "OPEN_AFTER_TP2": "🟢",
+            "SL_DIRECT": "❌",
+            "TP1_THEN_SL": "🟡",
+            "TP2_THEN_SL": "🟠",
+            "TP3_FULL": "🏆",
+            "EXPIRED_NO_TP": "⏰",
+            "EXPIRED_WITH_TP": "⏰",
+            "NO_RISK_DATA": "⚠️",
+            "OTHER": "❓",
+        }.get(cat, "❓")
+
+        msg = (
+            status_emoji + " " + emoji + " <b>" + s["symbol"] + "</b>\n"
+            + "Entry: " + fmt_price(s["entry"]) + "\n"
+            + "SL: " + fmt_price(s["sl"]) + "\n"
+            + "مسیر: <code>" + path + "</code>\n"
+            + "PnL: $" + str(round(pnl_val, 2)) + "\n"
+            + "وضعیت: " + str(s.get("status", "?"))
+        )
+        telegram_send(msg)
+        time.sleep(0.4)
 
 
 def scan_market(manager, state):
@@ -1103,6 +1296,7 @@ def main():
         telegram_send("🔎 <b>Crypto Signal Bot</b>\nاین دور سیگنال جدیدی با امتیاز کافی پیدا نشد.")
 
     telegram_send(performance_report(state))
+    send_detailed_report(state, max_items=15)
 
     active = sum(1 for s in state["signals"] if s.get("status") == "ACTIVE")
 
