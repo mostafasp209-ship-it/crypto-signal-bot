@@ -1272,6 +1272,11 @@ def main():
     print("[EVENTS] " + str(n_events))
     save_state(state)
 
+    telegram_send(
+        "🔎 <b>در حال جستجوی سیگنال...</b>\n"
+        "بازار در حال بررسی است، لطفاً منتظر بمانید."
+    )
+
     new_signals = scan_market(manager, state)
     state["signals"].extend(new_signals)
     cap_signals(state)
@@ -1279,10 +1284,18 @@ def main():
     save_state(state)
 
     if new_signals:
-        telegram_send("🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\n" + iso_now())
+        telegram_send(
+            "🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\n"
+            + iso_now()
+        )
         for signal in new_signals[:10]:
             telegram_send(format_signal(signal))
             time.sleep(0.4)
+    else:
+        telegram_send(
+            "❌ <b>سیگنال جدیدی یافت نشد.</b>\n\n"
+            "بازار بررسی شد اما هیچ سیگنالی با شرایط فعلی پیدا نشد."
+        )
 
     closed_count = sum(1 for s in state["signals"] if s.get("status") in {"CLOSED", "EXPIRED"})
     hist_closed = state.get("historical_stats", {}).get("closed", 0)
