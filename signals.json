@@ -99,14 +99,14 @@
       "symbol": "TURBO/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 10,
       "created_at": "2026-10-06T01:50:28.667212+00:00",
-      "updated_at": "2026-10-06T01:50:28.667220+00:00",
+      "updated_at": "2026-10-07T16:07:44.357488+00:00",
       "expiry_at": "2026-10-08T01:50:28.667223+00:00",
       "entry": 0.001056,
-      "sl": 0.00104016,
+      "sl": 0.001056,
       "tp1": 0.0010718400000000001,
       "tp2": 0.0010845120000000001,
       "tp3": 0.0010971840000000002,
@@ -133,24 +133,45 @@
         "long_short": null,
         "source": null
       },
-      "tp1_hit": false,
-      "tp2_hit": false,
-      "tp3_hit": false,
-      "remaining_fraction": 1.0,
+      "tp1_hit": true,
+      "tp2_hit": true,
+      "tp3_hit": true,
+      "remaining_fraction": 0,
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
-      "closed_reason": null
+      "closed_reason": "TP3",
+      "closed_at": "2026-10-07T16:07:44.357487+00:00",
+      "event_history": [
+        {
+          "event": "TP1_NO_RISK_DATA",
+          "time": "2026-10-07T16:07:44.357464+00:00"
+        },
+        {
+          "event": "SL_MOVED_TO_BE",
+          "time": "2026-10-07T16:07:44.357468+00:00",
+          "price": 0.001056,
+          "old_sl": 0.00104016
+        },
+        {
+          "event": "TP2_NO_RISK_DATA",
+          "time": "2026-10-07T16:07:44.357477+00:00"
+        },
+        {
+          "event": "TP3_NO_RISK_DATA",
+          "time": "2026-10-07T16:07:44.357485+00:00"
+        }
+      ]
     },
     {
       "id": "RARI_USDT_BUY_1791251446",
       "symbol": "RARI/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 10,
       "created_at": "2026-10-06T01:50:46.288689+00:00",
-      "updated_at": "2026-10-06T01:50:46.288696+00:00",
+      "updated_at": "2026-10-07T16:07:44.548418+00:00",
       "expiry_at": "2026-10-08T01:50:46.288699+00:00",
       "entry": 0.159768,
       "sl": 0.1369366167856286,
@@ -183,21 +204,29 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
+      "remaining_fraction": 0,
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
-      "closed_reason": null
+      "closed_reason": "SL",
+      "sl_hit": true,
+      "closed_at": "2026-10-07T16:07:44.548417+00:00",
+      "event_history": [
+        {
+          "event": "SL_NO_RISK_DATA",
+          "time": "2026-10-07T16:07:44.548414+00:00"
+        }
+      ]
     },
     {
       "id": "STX_USDT_BUY_1791360405",
       "symbol": "STX/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 11,
       "created_at": "2026-10-07T08:06:45.379538+00:00",
-      "updated_at": "2026-10-07T08:06:45.379546+00:00",
+      "updated_at": "2026-10-07T16:07:44.738131+00:00",
       "expiry_at": "2026-10-09T08:06:45.379548+00:00",
       "entry": 0.402,
       "sl": 0.3790820412435822,
@@ -232,10 +261,22 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -10.50605946749998,
+      "fees_paid": 0.3406511755693401,
+      "closed_reason": "SL",
+      "sl_hit": true,
+      "event_history": [
+        {
+          "event": "SL",
+          "time": "2026-10-07T16:07:44.738125+00:00",
+          "price": 0.3787029592023386,
+          "fraction": 1.0,
+          "pnl_piece": -10.5061,
+          "fees": 0.3407
+        }
+      ],
+      "closed_at": "2026-10-07T16:07:44.738129+00:00"
     },
     {
       "id": "ANKR_USDT_BUY_1791360347",
@@ -1196,10 +1237,94 @@
       "fees_paid": 0.6883953459766718,
       "closed_reason": "SL",
       "sl_hit": true
+    },
+    {
+      "id": "ORCA_USDT_BUY_1791389300",
+      "symbol": "ORCA/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-07T16:08:20.733793+00:00",
+      "updated_at": "2026-10-07T16:08:20.733793+00:00",
+      "expiry_at": "2026-10-09T16:08:20.733803+00:00",
+      "entry": 2.935,
+      "sl": 2.5074550834943667,
+      "original_sl": 2.5074550834943667,
+      "tp1": 3.3625449165056334,
+      "tp2": 4.3,
+      "tp3": 4.3086,
+      "tp_methods": [
+        "atr",
+        "structure",
+        "atr"
+      ],
+      "rr": 2.1003464749205705,
+      "rr1": 1.0,
+      "rr2": 3.1926470115848393,
+      "rr3": 3.2127618572255945,
+      "risk_pct": 14.567118109220898,
+      "risk_per_unit": 0.4275449165056333,
+      "sl_method": "atr",
+      "sl_candidates": {
+        "structure": 1.63374251,
+        "sr": 1.51174251,
+        "atr": 2.50745508,
+        "volatility": 1.44692214
+      },
+      "sl_meta": {
+        "score": 1,
+        "dist_pct": 14.567,
+        "all_scored": [
+          {
+            "method": "atr",
+            "price": 2.50745508,
+            "dist_pct": 14.567,
+            "score": 1
+          }
+        ]
+      },
+      "quantity": 23.38935539622593,
+      "position_value": 68.64775808792311,
+      "actual_risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "position_capped": false,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 0,
+        "ichi": 2,
+        "fib": 1,
+        "sr": 1,
+        "brooks": 0,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null,
+      "event_history": [
+        {
+          "event": "ENTRY",
+          "price": 2.935,
+          "time": "2026-10-07T16:08:20.733793+00:00"
+        }
+      ]
     }
   ],
-  "last_run": "2026-10-07T13:19:30.594827+00:00",
-  "last_event_report": "2026-10-07T13:18:26.416944+00:00",
+  "last_run": "2026-10-07T16:08:56.758297+00:00",
+  "last_event_report": "2026-10-07T16:07:45.669983+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
