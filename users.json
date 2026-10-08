@@ -1,4 +1,15 @@
 {
-  "users": {},
-  "last_update_id": 0
+  "users": {
+    "7653897303": {
+      "name": "Admin",
+      "joined_at": "2026-10-08T22:28:15.882642+00:00",
+      "blocked": false
+    },
+    "96944022": {
+      "name": "S.M.",
+      "joined_at": "2026-10-08T22:28:18.139455+00:00",
+      "blocked": false
+    }
+  },
+  "last_update_id": 25144502
 }
