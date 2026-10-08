@@ -1,11 +1,11 @@
-name: panel
+name: bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "0 */4 * * *"
   workflow_dispatch:
 
-# همین group باید توی workflow اصلی بات (bot.yml) هم باشه
+# همین group توی panel.yml هم هست تا دو job با هم commit نکنن
 concurrency:
   group: bot-state
   cancel-in-progress: false
@@ -14,9 +14,9 @@ permissions:
   contents: write
 
 jobs:
-  panel:
+  scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -26,8 +26,8 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - name: Process Telegram updates
-        run: python panel.py --once
+      - name: Run bot
+        run: python bot.py
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
@@ -36,13 +36,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
           GH_WORKFLOW: bot.yml
 
-      - name: Commit users.json
+      - name: Commit state
         run: |
           git config user.name "actions-user"
           git config user.email "actions@github.com"
-          git add users.json
+          git add signals.json users.json
           if ! git diff --cached --quiet; then
-            git commit -m "panel: update users"
+            git commit -m "bot: update state"
             git pull --rebase
             git push
           fi
