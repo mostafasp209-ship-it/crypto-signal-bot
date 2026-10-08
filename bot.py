@@ -11,6 +11,9 @@ import pandas as pd
 import requests
 
 
+# ============================================================
+# CONFIG
+# ============================================================
 EXCHANGE_NAMES = ["binanceus", "bitstamp", "cryptocom"]
 FUNDING_SOURCES = ["binanceus", "bitstamp"]
 
@@ -39,20 +42,21 @@ CLOSED_RETENTION_DAYS = 7
 MAX_STORED_SIGNALS = 200
 
 TP_WEIGHTS = {"tp1": 0.50, "tp2": 0.30, "tp3": 0.20}
-
 TP_MIN_MULTS = [1.0, 1.8, 2.6]
 TP_MAX_MULTS = [2.0, 3.5, 5.0]
 
 MIN_STRUCTURE_TPS = 1
-
 MAX_FAILS_PER_EXCHANGE = 3
-
 QUICK_THRESHOLD = max(0, MIN_SCORE - 3)
 
 DATA_FILE = "signals.json"
+USERS_FILE = "users.json"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+ADMIN_CHAT_ID = (
+    os.getenv("ADMIN_CHAT_ID", "").strip()
+    or os.getenv("TELEGRAM_CHAT_ID", "").strip()
+)
 
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
@@ -66,6 +70,9 @@ STATS = {
 }
 
 
+# ============================================================
+# HELPERS
+# ============================================================
 def utc_now(): return datetime.now(timezone.utc)
 def iso_now(): return utc_now().isoformat()
 
@@ -101,6 +108,233 @@ def classify_error(exc):
     return "exchange_fail"
 
 
+# ============================================================
+# USERS MANAGEMENT
+# ============================================================
+def load_users():
+    default = {"users": {}, "last_update_id": 0}
+    if not os.path.exists(USERS_FILE): return default
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict): return default
+        data.setdefault("users", {})
+        data.setdefault("last_update_id", 0)
+        return data
+    except Exception:
+        print("WARNING: users.json could not be read.")
+        return default
+
+
+def save_users(users):
+    tmp = USERS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, USERS_FILE)
+
+
+def ensure_user(users, chat_id, name=None):
+    cid = str(chat_id)
+    if cid not in users["users"]:
+        users["users"][cid] = {
+            "name": name or "",
+            "joined_at": iso_now(),
+            "blocked": False,
+        }
+        return True
+    if name and not users["users"][cid].get("name"):
+        users["users"][cid]["name"] = name
+    return False
+
+
+def is_admin(chat_id):
+    return str(chat_id) == str(ADMIN_CHAT_ID)
+
+
+def is_blocked(users, chat_id):
+    return users["users"].get(str(chat_id), {}).get("blocked", False)
+
+
+def get_active_user_ids(users):
+    result = []
+    for cid, u in users.get("users", {}).items():
+        if not u.get("blocked"):
+            result.append(cid)
+    return result
+
+
+def telegram_send_to(chat_id, text):
+    if not TELEGRAM_BOT_TOKEN or not chat_id: return False
+    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
+    try:
+        r = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }, timeout=20)
+        return r.ok
+    except Exception:
+        return False
+
+
+def telegram_broadcast(users, text):
+    count = 0
+    for cid in get_active_user_ids(users):
+        if telegram_send_to(cid, text):
+            count += 1
+        time.sleep(0.05)
+    return count
+
+
+def telegram_get_updates(offset=0):
+    if not TELEGRAM_BOT_TOKEN: return []
+    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getUpdates"
+    try:
+        r = requests.get(url, params={
+            "offset": offset, "timeout": 0, "limit": 100
+        }, timeout=20)
+        if r.ok:
+            return r.json().get("result", [])
+    except Exception as e:
+        print("[WARN] getUpdates: " + str(e)[:80])
+    return []
+
+
+WELCOME_MSG = (
+    "👋 سلام {name}!\n\n"
+    "به <b>Crypto Signal Pro</b> خوش اومدی 🚀\n\n"
+    "🤖 این ربات هر ۴ ساعت بازار رو اسکن می‌کنه\n"
+    "و سیگنال‌های باکیفیت رو برات می‌فرسته.\n\n"
+    "⏱ برای دریافت اولین سیگنال صبر کن..."
+)
+
+
+def handle_admin_command(users, chat_id, text):
+    if text == "/users":
+        total = len(users["users"])
+        active = len(get_active_user_ids(users))
+        blocked = total - active
+        lines = [
+            "👥 <b>کاربران</b>",
+            "کل: " + str(total),
+            "فعال: " + str(active),
+            "مسدود: " + str(blocked),
+            "",
+        ]
+        for cid, u in list(users["users"].items())[:30]:
+            status = "🚫" if u.get("blocked") else "✅"
+            lines.append(
+                status + " " + (u.get("name") or "?")
+                + " (<code>" + cid + "</code>)"
+            )
+        telegram_send_to(chat_id, "\n".join(lines))
+        return True
+
+    if text == "/stats":
+        msg = (
+            "📊 <b>وضعیت ربات</b>\n"
+            "کاربران: " + str(len(users["users"])) + "\n"
+            "فعال: " + str(len(get_active_user_ids(users)))
+        )
+        telegram_send_to(chat_id, msg)
+        return True
+
+    if text.startswith("/block "):
+        parts = text.split()
+        if len(parts) >= 2:
+            target = parts[1].strip()
+            if target in users["users"]:
+                users["users"][target]["blocked"] = True
+                telegram_send_to(chat_id, "🚫 کاربر <code>" + target + "</code> مسدود شد.")
+            else:
+                telegram_send_to(chat_id, "❌ کاربر پیدا نشد.")
+        return True
+
+    if text.startswith("/unblock "):
+        parts = text.split()
+        if len(parts) >= 2:
+            target = parts[1].strip()
+            if target in users["users"]:
+                users["users"][target]["blocked"] = False
+                telegram_send_to(chat_id, "✅ کاربر <code>" + target + "</code> رفع مسدودی شد.")
+            else:
+                telegram_send_to(chat_id, "❌ کاربر پیدا نشد.")
+        return True
+
+    if text.startswith("/broadcast "):
+        msg_text = text[len("/broadcast "):].strip()
+        if msg_text:
+            count = telegram_broadcast(users, "📣 " + msg_text)
+            telegram_send_to(chat_id, "📣 پیام به " + str(count) + " کاربر ارسال شد.")
+        return True
+
+    if text == "/help":
+        help_text = (
+            "🛠 <b>دستورات مدیریتی</b>\n\n"
+            "/users — لیست کاربران\n"
+            "/stats — آمار\n"
+            "/block &lt;id&gt; — مسدود\n"
+            "/unblock &lt;id&gt; — رفع مسدودی\n"
+            "/broadcast &lt;متن&gt; — پیام همگانی"
+        )
+        telegram_send_to(chat_id, help_text)
+        return True
+
+    return False
+
+
+def poll_and_handle_commands(users):
+    if not TELEGRAM_BOT_TOKEN: return
+    offset = users.get("last_update_id", 0) + 1
+    updates = telegram_get_updates(offset=offset)
+    if not updates: return
+
+    max_id = users.get("last_update_id", 0)
+
+    for u in updates:
+        uid = u.get("update_id", 0)
+        if uid > max_id: max_id = uid
+
+        msg = u.get("message")
+        if not msg: continue
+
+        chat = msg.get("chat", {})
+        chat_id = chat.get("id")
+        if not chat_id: continue
+
+        text = (msg.get("text") or "").strip()
+        from_user = msg.get("from", {})
+        name = from_user.get("first_name", "") or from_user.get("username", "")
+        chat_id_str = str(chat_id)
+
+        ensure_user(users, chat_id, name)
+
+        if text.startswith("/start"):
+            welcome = WELCOME_MSG.format(name=name or "دوست عزیز")
+            telegram_send_to(chat_id, welcome)
+            if ADMIN_CHAT_ID and not is_admin(chat_id):
+                notice = (
+                    "👤 <b>کاربر جدید</b>\n"
+                    "نام: " + (name or "?") + "\n"
+                    "Chat ID: <code>" + chat_idw_str + "</code>"
+                )
+                telegram_send_to",(ADMIN_CHAT_ID, notice)
+            continue
+
+ encoding        if is_blocked(users,=" chat_id):
+            continue
+
+        if is_admin(chatutf_id):
+            if handle_admin_command(users, chat_id, text):
+                continue
+
+    users["last_update_id"] = max_id
+
+
+# ============================================================
+# SIGNALS STATE
+# ============================================================
 def empty_historical_stats():
     return {
         "closed": 0, "tp3": 0, "tp2_then_sl": 0,
@@ -154,7 +388,7 @@ def load_state():
 
 def save_state(state):
     tmp = DATA_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
     os.replace(tmp, DATA_FILE)
 
@@ -215,8 +449,7 @@ def migrate_old_signals(state):
 
 def cap_signals(state):
     signals = state.get("signals", [])
-    if len(signals) <= MAX_STORED_SIGNALS:
-        return
+    if len(signals) <= MAX_STORED_SIGNALS: return
     active = [s for s in signals if s.get("status") == "ACTIVE"]
     closed = [s for s in signals if s.get("status") != "ACTIVE"]
     closed.sort(key=lambda x: x.get("closed_at") or "", reverse=True)
@@ -224,27 +457,9 @@ def cap_signals(state):
     state["signals"] = active + closed[:keep_closed]
 
 
-def telegram_send(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram credentials missing.")
-        return False
-    url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage"
-    try:
-        r = requests.post(url, json={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": text,
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }, timeout=20)
-        if not r.ok:
-            print("Telegram error:", r.status_code, r.text[:300])
-            return False
-        return True
-    except Exception as exc:
-        print("Telegram exception:", exc)
-        return False
-
-
+# ============================================================
+# EXCHANGE MANAGER
+# ============================================================
 class ExchangeManager:
     def __init__(self):
         self.exchanges = {}
@@ -328,6 +543,9 @@ class ExchangeManager:
             return None
 
 
+# ============================================================
+# INDICATORS
+# ============================================================
 def add_indicators(df):
     df = df.copy()
     close = df["close"]; high = df["high"]; low = df["low"]
@@ -515,6 +733,9 @@ def fundamental_score(data, side):
     return 0
 
 
+# ============================================================
+# SL / TP ENGINES
+# ============================================================
 def find_swing_points(df, lookback=80, wing=3):
     recent = df.tail(lookback).reset_index(drop=True)
     highs = []; lows = []
@@ -671,17 +892,14 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance, df):
 
     structure_count = sum(1 for m in tp_methods if m == "structure")
     if structure_count < MIN_STRUCTURE_TPS:
-        STATS["rejected_no_structure"] += 1
-        return None
+        STATS["rejected_no_structure"] += 1; return None
 
     if side == "BUY":
         if not (tp1 > entry and tp2 > tp1 and tp3 > tp2):
-            STATS["rejected_tp_order"] += 1
-            return None
+            STATS["rejected_tp_order"] += 1; return None
     else:
         if not (tp1 < entry and tp2 < tp1 and tp3 < tp2):
-            STATS["rejected_tp_order"] += 1
-            return None
+            STATS["rejected_tp_order"] += 1; return None
 
     rr1 = abs(tp1 - entry) / risk
     rr2 = abs(tp2 - entry) / risk
@@ -723,6 +941,9 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance, df):
     }
 
 
+# ============================================================
+# SIGNAL BUILDING
+# ============================================================
 def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     if len(df_4h) < 205: return None
 
@@ -813,6 +1034,9 @@ def duplicate_exists(state, symbol, side):
     return False
 
 
+# ============================================================
+# EVENTS / POSITION MANAGEMENT
+# ============================================================
 def add_event(signal, event_name, price=None, extra=None):
     if "event_history" not in signal or not isinstance(signal["event_history"], list):
         signal["event_history"] = []
@@ -928,24 +1152,20 @@ def manage_signal(signal, current_price):
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        if signal.get("status") == "CLOSED":
-            return True
+        if signal.get("status") == "CLOSED": return True
         old_sl = signal.get("sl")
         signal["sl"] = signal["entry"]
         add_event(signal, "SL_MOVED_TO_BE", price=signal["entry"], extra={"old_sl": old_sl})
         changed = True
 
-    if signal.get("status") == "CLOSED":
-        return changed
+    if signal.get("status") == "CLOSED": return changed
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
         close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
-        if signal.get("status") == "CLOSED":
-            return True
+        if signal.get("status") == "CLOSED": return True
         changed = True
 
-    if signal.get("status") == "CLOSED":
-        return changed
+    if signal.get("status") == "CLOSED": return changed
 
     if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
         close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
@@ -980,6 +1200,9 @@ def update_open_signals(state, manager):
     return changed
 
 
+# ============================================================
+# REPORTS
+# ============================================================
 def categorize_outcome(signal):
     status = signal.get("status")
     closed_reason = signal.get("closed_reason") or ""
@@ -1108,6 +1331,9 @@ def sl_method_report(state):
     return "\n".join(lines)
 
 
+# ============================================================
+# SIGNAL FORMATTER
+# ============================================================
 def format_signal(signal):
     side = signal["side"]
     emoji = "🟢" if side == "BUY" else "🔴"
@@ -1161,7 +1387,10 @@ def format_signal(signal):
     )
 
 
-def send_new_events_only(state):
+# ============================================================
+# EVENTS BROADCAST
+# ============================================================
+def send_new_events_only(state, users):
     last_report = state.get("last_event_report")
     cutoff_iso = last_report if last_report else (utc_now() - timedelta(hours=24)).isoformat()
 
@@ -1208,11 +1437,16 @@ def send_new_events_only(state):
 
     blocks.append("📊 <b>" + str(len(new_events)) + " رخداد جدید</b>")
     full_msg = "\n".join(blocks)
-    sent = telegram_send(full_msg)
-    if sent: state["last_event_report"] = iso_now()
-    return len(new_events) if sent else 0
+
+    sent_count = telegram_broadcast(users, full_msg)
+    if sent_count > 0:
+        state["last_event_report"] = iso_now()
+    return len(new_events) if sent_count > 0 else 0
 
 
+# ============================================================
+# MARKET SCANNER
+# ============================================================
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
     if not candidates: return []
@@ -1249,6 +1483,9 @@ def scan_market(manager, state):
     return signals
 
 
+# ============================================================
+# MAIN
+# ============================================================
 def main():
     print("=" * 70)
     print("CRYPTO SIGNAL BOT")
@@ -1256,10 +1493,22 @@ def main():
     print("=" * 70)
 
     state = load_state()
+    users = load_users()
+
+    if ADMIN_CHAT_ID:
+        ensure_user(users, ADMIN_CHAT_ID, "Admin")
+
     manager = ExchangeManager()
     if not manager.build():
-        telegram_send("❌ <b>Crypto Signal Bot</b>\nهیچ صرافی قابل دسترسی نبود.")
+        if ADMIN_CHAT_ID:
+            telegram_send_to(ADMIN_CHAT_ID, "❌ <b>Crypto Signal Bot</b>\nهیچ صرافی قابل دسترسی نبود.")
         return
+
+    try:
+        poll_and_handle_commands(users)
+        save_users(users)
+    except Exception as e:
+        print("[WARN] poll: " + str(e)[:100])
 
     migrated = migrate_old_signals(state)
     if migrated > 0:
@@ -1268,14 +1517,16 @@ def main():
     if update_open_signals(state, manager):
         save_state(state)
 
-    n_events = send_new_events_only(state)
+    n_events = send_new_events_only(state, users)
     print("[EVENTS] " + str(n_events))
     save_state(state)
 
-    telegram_send(
-        "🔎 <b>در حال جستجوی سیگنال...</b>\n"
-        "بازار در حال بررسی است، لطفاً منتظر بمانید."
-    )
+    if ADMIN_CHAT_ID:
+        telegram_send_to(
+            ADMIN_CHAT_ID,
+            "🔎 <b>در حال جستجوی سیگنال...</b>\n"
+            "بازار در حال بررسی است، لطفاً منتظر بمانید."
+        )
 
     new_signals = scan_market(manager, state)
     state["signals"].extend(new_signals)
@@ -1284,34 +1535,43 @@ def main():
     save_state(state)
 
     if new_signals:
-        telegram_send(
-            "🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\n"
-            + iso_now()
-        )
+        header = "🚨 <b>" + str(len(new_signals)) + " سیگنال جدید</b>\n" + iso_now()
+        telegram_broadcast(users, header)
         for signal in new_signals[:10]:
-            telegram_send(format_signal(signal))
-            time.sleep(0.4)
+            telegram_broadcast(users, format_signal(signal))
+            time.sleep(0.3)
     else:
-        telegram_send(
-            "❌ <b>سیگنال جدیدی یافت نشد.</b>\n\n"
-            "بازار بررسی شد اما هیچ سیگنالی با شرایط فعلی پیدا نشد."
-        )
+        if ADMIN_CHAT_ID:
+            telegram_send_to(
+                ADMIN_CHAT_ID,
+                "❌ <b>سیگنال جدیدی یافت نشد.</b>\n\n"
+                "بازار بررسی شد اما هیچ سیگنالی با شرایط فعلی پیدا نشد."
+            )
 
-    closed_count = sum(1 for s in state["signals"] if s.get("status") in {"CLOSED", "EXPIRED"})
-    hist_closed = state.get("historical_stats", {}).get("closed", 0)
-    if (closed_count + hist_closed) >= 3:
-        telegram_send(performance_report(state))
-        sl_rep = sl_method_report(state)
-        if sl_rep: telegram_send(sl_rep)
+    if ADMIN_CHAT_ID:
+        closed_count = sum(
+            1 for s in state["signals"]
+            if s.get("status") in {"CLOSED", "EXPIRED"}
+        )
+        hist_closed = state.get("historical_stats", {}).get("closed", 0)
+        if (closed_count + hist_closed) >= 3:
+            telegram_send_to(ADMIN_CHAT_ID, performance_report(state))
+            sl_rep = sl_method_report(state)
+            if sl_rep:
+                telegram_send_to(ADMIN_CHAT_ID, sl_rep)
 
     active = sum(1 for s in state["signals"] if s.get("status") == "ACTIVE")
+    total_users = len(users.get("users", {}))
+    active_users = len(get_active_user_ids(users))
 
     print("=" * 70)
     print("New signals: " + str(len(new_signals)))
     print("New events: " + str(n_events))
     print("Migrated: " + str(migrated))
-    print("Active: " + str(active))
-    print("Total stored: " + str(len(state["signals"])))
+    print("Active signals: " + str(active))
+    print("Total stored signals: " + str(len(state["signals"])))
+    print("Total users: " + str(total_users))
+    print("Active users: " + str(active_users))
     print("--- stats ---")
     print("Evaluated: " + str(STATS["evaluated"]))
     print("Skipped quick: " + str(STATS["skipped_quick"]))
@@ -1330,5 +1590,10 @@ if __name__ == "__main__":
         main()
     except Exception:
         traceback.print_exc()
-        telegram_send("❌ <b>Crypto Signal Bot Error</b>\nاجرای Bot با خطا متوقف شد.")
+        if ADMIN_CHAT_ID:
+            telegram_send_to(
+                ADMIN_CHAT_ID,
+                "❌ <b>Crypto Signal Bot Error</b>\n"
+                "اجرای Bot با خطا متوقف شد."
+            )
         raise
