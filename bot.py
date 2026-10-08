@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import math
@@ -169,7 +170,7 @@ def is_blocked(users, chat_id):
 def get_active_user_ids(users):
     result = []
     for cid, u in users.get("users", {}).items():
-        if not u.get("blocked"):
+        if not u.get("blocked") and u.get("notify", True):
             result.append(cid)
     return result
 
@@ -295,59 +296,6 @@ def handle_admin_command(users, chat_id, text):
         return True
 
     return False
-
-
-def poll_and_handle_commands(users):
-    if not TELEGRAM_BOT_TOKEN:
-        return
-    offset = users.get("last_update_id", 0) + 1
-    updates = telegram_get_updates(offset=offset)
-    if not updates:
-        return
-
-    max_id = users.get("last_update_id", 0)
-
-    for u in updates:
-        uid = u.get("update_id", 0)
-        if uid > max_id:
-            max_id = uid
-
-        msg = u.get("message")
-        if not msg:
-            continue
-
-        chat = msg.get("chat", {})
-        chat_id = chat.get("id")
-        if not chat_id:
-            continue
-
-        text = (msg.get("text") or "").strip()
-        from_user = msg.get("from", {})
-        name = from_user.get("first_name", "") or from_user.get("username", "")
-        chat_id_str = str(chat_id)
-
-        ensure_user(users, chat_id, name)
-
-        if text.startswith("/start"):
-            welcome = WELCOME_MSG.format(name=name or "دوست عزیز")
-            telegram_send_to(chat_id, welcome)
-            if ADMIN_CHAT_ID and not is_admin(chat_id):
-                notice = (
-                    "👤 <b>کاربر جدید</b>\n"
-                    "نام: " + (name or "?") + "\n"
-                    "Chat ID: <code>" + chat_id_str + "</code>"
-                )
-                telegram_send_to(ADMIN_CHAT_ID, notice)
-            continue
-
-        if is_blocked(users, chat_id):
-            continue
-
-        if is_admin(chat_id):
-            if handle_admin_command(users, chat_id, text):
-                continue
-
-    users["last_update_id"] = max_id
 
 
 # ============================================================
@@ -1901,11 +1849,14 @@ def main():
             )
         return
 
+    # پنل دکمه‌ای: پردازش پیام‌ها و کلیک‌های در انتظار (panel.py)
     try:
-        poll_and_handle_commands(users)
+        sys.modules.setdefault("bot", sys.modules[__name__])
+        import panel
+        panel.poll_and_handle(users, state)
         save_users(users)
     except Exception as e:
-        print("[WARN] poll: " + str(e)[:100])
+        print("[WARN] panel: " + str(e)[:100])
 
     migrated = migrate_old_signals(state)
     if migrated > 0:
@@ -1930,6 +1881,7 @@ def main():
     cap_signals(state)
     state["last_run"] = iso_now()
     save_state(state)
+    save_users(users)
 
     if new_signals:
         header = (
