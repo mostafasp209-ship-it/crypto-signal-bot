@@ -321,7 +321,8 @@ def _bump_sl_method_stats(hist, method, cat, pnl):
     if cat == "TP3_FULL":
         m["wins"] += 1
     elif cat in ("TP1_THEN_SL", "TP2_THEN_SL",
-                 "OPEN_AFTER_TP1", "OPEN_AFTER_TP2"):
+                 "OPEN_AFTER_TP1", "OPEN_AFTER_TP2",
+                 "EXPIRED_WITH_TP"):
         m["partials"] += 1
     elif cat in ("SL_DIRECT", "EXPIRED_NO_TP"):
         m["losses"] += 1
@@ -599,14 +600,23 @@ def closed_candles(raw):
 
 
 def ema_score(last):
-    s = 0
-    if last["close"] > last["ema20"]:
-        s += 1
-    if last["ema20"] > last["ema50"]:
-        s += 1
-    if last["ema50"] > last["ema200"]:
-        s += 1
-    return (s >= 2), (s <= 1), s
+    bull = 0
+    bear = 0
+    pairs = [
+        (last["close"], last["ema20"]),
+        (last["ema20"], last["ema50"]),
+        (last["ema50"], last["ema200"]),
+    ]
+    for a, b in pairs:
+        if a > b:
+            bull += 1
+        elif a < b:
+            bear += 1
+    if bull >= 2:
+        return True, False, bull
+    if bear >= 2:
+        return False, True, bear
+    return False, False, 0
 
 
 def rsi_score(last):
@@ -1154,9 +1164,9 @@ def try_build_signal(symbol, exchange_name, df_4h, manager, exchange, state):
     if duplicate_exists(state, symbol, side):
         return None
 
-    if score >= 18:
+    if score >= 13:
         strength = "قوی"
-    elif score >= 15:
+    elif score >= 12:
         strength = "متوسط"
     else:
         strength = "ضعیف"
@@ -1352,13 +1362,14 @@ def compute_sl_fill_price(signal, current_price):
     return sl * (1 + SL_FILL_SLIPPAGE)
 
 
-def manage_signal(signal, current_price):
+def manage_signal(signal, current_price,
+                  check_expiry=True, check_stop=True):
     if signal.get("status") != "ACTIVE":
         return False
     changed = False
 
     created = signal.get("created_at")
-    if created:
+    if check_expiry and created:
         try:
             created_dt = datetime.fromisoformat(created)
             if (utc_now() - created_dt
@@ -1379,7 +1390,7 @@ def manage_signal(signal, current_price):
         except Exception:
             pass
 
-    if stop_hit(signal, current_price):
+    if check_stop and stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
         if remaining > 0:
             sl_fill_price = compute_sl_fill_price(
@@ -1436,6 +1447,78 @@ def manage_signal(signal, current_price):
     return changed
 
 
+def candle_stop_fill(signal, candle_open):
+    sl = safe_float(signal.get("sl"))
+    if signal["side"] == "BUY":
+        return min(sl, candle_open) * (1 - SL_FILL_SLIPPAGE)
+    return max(sl, candle_open) * (1 + SL_FILL_SLIPPAGE)
+
+
+def process_candles(signal, candles):
+    """candles: [(ts, open, high, low, close)] closed, chronological.
+    در هر کندل اگر SL و TP هر دو لمس شده باشند، SL اول فرض می‌شود
+    (محافظه‌کارانه)."""
+    buy = signal["side"] == "BUY"
+    for ts, o, h, l, c in candles:
+        if signal.get("status") != "ACTIVE":
+            break
+        sl = safe_float(signal.get("sl"))
+        if sl is None:
+            break
+        touched = (l <= sl) if buy else (h >= sl)
+        if touched:
+            remaining = safe_float(signal.get("remaining_fraction"), 0)
+            if remaining > 0:
+                close_piece(
+                    signal, candle_stop_fill(signal, o), remaining, "sl"
+                )
+            if signal.get("status") != "CLOSED":
+                signal["status"] = "CLOSED"
+                signal["closed_reason"] = "SL"
+            signal["closed_at"] = iso_now()
+            signal["updated_at"] = iso_now()
+            break
+        manage_signal(
+            signal, h if buy else l,
+            check_expiry=False, check_stop=False,
+        )
+    if candles:
+        signal["last_check_ms"] = candles[-1][0] + 3600 * 1000
+
+
+def fetch_candles_since(manager, exchange, symbol, since_ms):
+    try:
+        raw = manager.fetch_ohlcv(
+            exchange, symbol, timeframe="1h", limit=72
+        )
+    except Exception:
+        return []
+    if not raw or len(raw) < 2:
+        return []
+    out = []
+    for row in raw[:-1]:  # آخرین کندل ناتمام است
+        ts = row[0]
+        if ts is None or ts < since_ms:
+            continue
+        vals = [safe_float(x) for x in row[1:5]]
+        if any(v is None for v in vals):
+            continue
+        out.append((ts, vals[0], vals[1], vals[2], vals[3]))
+    return out
+
+
+def signal_since_ms(signal):
+    last = safe_float(signal.get("last_check_ms"))
+    if last is not None:
+        return last
+    try:
+        return datetime.fromisoformat(
+            signal.get("created_at")
+        ).timestamp() * 1000
+    except Exception:
+        return 0
+
+
 def update_open_signals(state, manager):
     changed = False
     for signal in state.get("signals", []):
@@ -1445,23 +1528,28 @@ def update_open_signals(state, manager):
         exchange = manager.get_exchange(signal.get("exchange"))
         if not exchange or symbol not in exchange.markets:
             continue
-        price = manager.ticker_price(exchange, symbol)
-        if price is None:
-            continue
         before = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
-        manage_signal(signal, price)
+        candles = fetch_candles_since(
+            manager, exchange, symbol, signal_since_ms(signal)
+        )
+        if candles:
+            process_candles(signal, candles)
+        if signal.get("status") == "ACTIVE":
+            price = manager.ticker_price(exchange, symbol)
+            if price is not None:
+                manage_signal(signal, price)
         after = (
             signal.get("status"),
             signal.get("tp1_hit"),
             signal.get("tp2_hit"),
             signal.get("tp3_hit"),
         )
-        if before != after:
+        if before != after or candles:
             changed = True
     return changed
 
@@ -1602,6 +1690,7 @@ def sl_method_report(state):
             elif cat in (
                 "TP1_THEN_SL", "TP2_THEN_SL",
                 "OPEN_AFTER_TP1", "OPEN_AFTER_TP2",
+                "EXPIRED_WITH_TP",
             ):
                 cur_partials += 1
             elif cat in ("SL_DIRECT", "EXPIRED_NO_TP"):
