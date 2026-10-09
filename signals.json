@@ -1,7 +1,98 @@
 {
-  "signals": [],
-  "last_run": "2026-10-09T16:06:29.529420+00:00",
-  "last_event_report": "2026-10-09T16:05:18.130301+00:00",
+  "signals": [
+    {
+      "id": "CTSI_USDT_BUY_1791576148",
+      "symbol": "CTSI/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-09T20:02:28.422426+00:00",
+      "updated_at": "2026-10-09T20:02:28.422426+00:00",
+      "expiry_at": "2026-10-11T20:02:28.422438+00:00",
+      "entry": 0.03391,
+      "sl": 0.03132696671582139,
+      "original_sl": 0.03132696671582139,
+      "tp1": 0.03715,
+      "tp2": 0.04,
+      "tp3": 0.04062588653886439,
+      "tp_methods": [
+        "structure",
+        "structure",
+        "atr"
+      ],
+      "rr": 1.8544775776267735,
+      "rr1": 1.254339237455975,
+      "rr2": 2.3576931963292855,
+      "rr3": 2.600000000000001,
+      "risk_pct": 7.617320212853464,
+      "risk_per_unit": 0.0025830332841786097,
+      "sl_method": "atr",
+      "sl_candidates": {
+        "structure": 0.02900949,
+        "sr": 0.02808949,
+        "atr": 0.03132697,
+        "volatility": 0.02778646
+      },
+      "sl_meta": {
+        "score": 3,
+        "dist_pct": 7.617,
+        "all_scored": [
+          {
+            "method": "atr",
+            "price": 0.03132697,
+            "dist_pct": 7.617,
+            "score": 3
+          },
+          {
+            "method": "structure",
+            "price": 0.02900949,
+            "dist_pct": 14.452,
+            "score": 2
+          }
+        ]
+      },
+      "quantity": 3871.4173995554784,
+      "position_value": 131.27976401892627,
+      "actual_risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "position_capped": false,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 0,
+        "ichi": 2,
+        "fib": 1,
+        "sr": 1,
+        "brooks": 0,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null,
+      "event_history": [
+        {
+          "event": "ENTRY",
+          "price": 0.03391,
+          "time": "2026-10-09T20:02:28.422426+00:00"
+        }
+      ]
+    }
+  ],
+  "last_run": "2026-10-09T20:03:24.832930+00:00",
+  "last_event_report": "2026-10-09T20:02:13.304850+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
