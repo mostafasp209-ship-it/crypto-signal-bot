@@ -5,11 +5,11 @@
       "symbol": "CTSI/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 11,
       "created_at": "2026-10-09T20:02:28.422426+00:00",
-      "updated_at": "2026-10-09T20:02:28.422426+00:00",
+      "updated_at": "2026-10-10T12:02:22.409787+00:00",
       "expiry_at": "2026-10-11T20:02:28.422438+00:00",
       "entry": 0.03391,
       "sl": 0.03132696671582139,
@@ -78,22 +78,32 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null,
+      "remaining_fraction": 0,
+      "realized_pnl": -11.637012261558432,
+      "fees_paid": 0.2511736894657599,
+      "closed_reason": "SL",
       "event_history": [
         {
           "event": "ENTRY",
           "price": 0.03391,
           "time": "2026-10-09T20:02:28.422426+00:00"
+        },
+        {
+          "event": "SL",
+          "time": "2026-10-10T12:02:22.409780+00:00",
+          "price": 0.030969,
+          "fraction": 1.0,
+          "pnl_piece": -11.637,
+          "fees": 0.2512
         }
       ],
-      "last_check_ms": 1791619200000
+      "last_check_ms": 1791633600000,
+      "sl_hit": true,
+      "closed_at": "2026-10-10T12:02:22.409785+00:00"
     }
   ],
-  "last_run": "2026-10-10T08:08:46.166482+00:00",
-  "last_event_report": "2026-10-10T08:07:23.027859+00:00",
+  "last_run": "2026-10-10T12:03:28.900106+00:00",
+  "last_event_report": "2026-10-10T12:02:23.437810+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
