@@ -184,11 +184,101 @@
           "time": "2026-10-11T08:03:42.719044+00:00"
         }
       ],
-      "last_check_ms": 1791720000000
+      "last_check_ms": 1791734400000
+    },
+    {
+      "id": "WLD_USDT_BUY_1791734602",
+      "symbol": "WLD/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-11T16:03:22.904769+00:00",
+      "updated_at": "2026-10-11T16:03:22.904769+00:00",
+      "expiry_at": "2026-10-13T16:03:22.904785+00:00",
+      "entry": 0.5788,
+      "sl": 0.5573650561796734,
+      "original_sl": 0.5573650561796734,
+      "tp1": 0.61,
+      "tp2": 0.6173828988765879,
+      "tp3": 0.6345308539328492,
+      "tp_methods": [
+        "structure",
+        "atr",
+        "atr"
+      ],
+      "rr": 1.787783572971469,
+      "rr1": 1.4555671459429365,
+      "rr2": 1.800000000000001,
+      "rr3": 2.600000000000002,
+      "risk_pct": 3.7033420560343164,
+      "risk_per_unit": 0.021434943820326624,
+      "sl_method": "atr",
+      "sl_candidates": {
+        "structure": 0.46062751,
+        "sr": 0.49352751,
+        "atr": 0.55736506,
+        "volatility": 0.4862794
+      },
+      "sl_meta": {
+        "score": 3,
+        "dist_pct": 3.703,
+        "all_scored": [
+          {
+            "method": "atr",
+            "price": 0.55736506,
+            "dist_pct": 3.703,
+            "score": 3
+          },
+          {
+            "method": "sr",
+            "price": 0.49352751,
+            "dist_pct": 14.733,
+            "score": 2
+          }
+        ]
+      },
+      "quantity": 345.54250172771253,
+      "position_value": 200.0,
+      "actual_risk_usd": 7.406684112068634,
+      "risk_target_usd": 10.0,
+      "position_capped": true,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 1,
+        "ichi": 2,
+        "fib": 0,
+        "sr": 1,
+        "brooks": 1,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null,
+      "event_history": [
+        {
+          "event": "ENTRY",
+          "price": 0.5788,
+          "time": "2026-10-11T16:03:22.904769+00:00"
+        }
+      ]
     }
   ],
-  "last_run": "2026-10-11T12:04:06.070515+00:00",
-  "last_event_report": "2026-10-11T12:02:55.371981+00:00",
+  "last_run": "2026-10-11T16:03:41.654040+00:00",
+  "last_event_report": "2026-10-11T16:02:26.382535+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
