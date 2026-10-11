@@ -100,10 +100,94 @@
       "last_check_ms": 1791633600000,
       "sl_hit": true,
       "closed_at": "2026-10-10T12:02:22.409785+00:00"
+    },
+    {
+      "id": "OGN_USDT_BUY_1791705822",
+      "symbol": "OGN/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-11T08:03:42.719044+00:00",
+      "updated_at": "2026-10-11T08:03:42.719044+00:00",
+      "expiry_at": "2026-10-13T08:03:42.719055+00:00",
+      "entry": 0.036,
+      "sl": 0.03086981557070883,
+      "original_sl": 0.03086981557070883,
+      "tp1": 0.04497,
+      "tp2": 0.05204,
+      "tp3": 0.05214408,
+      "tp_methods": [
+        "structure",
+        "structure",
+        "atr"
+      ],
+      "rr": 2.4415917541839103,
+      "rr1": 1.7484751520403685,
+      "rr2": 3.1265932484646046,
+      "rr3": 3.1468810181217237,
+      "risk_pct": 14.250512303586579,
+      "risk_per_unit": 0.005130184429291168,
+      "sl_method": "atr",
+      "sl_candidates": {
+        "structure": 0.02170497,
+        "sr": 0.02011497,
+        "atr": 0.03086982,
+        "volatility": 0.01909931
+      },
+      "sl_meta": {
+        "score": 1,
+        "dist_pct": 14.251,
+        "all_scored": [
+          {
+            "method": "atr",
+            "price": 0.03086982,
+            "dist_pct": 14.251,
+            "score": 1
+          }
+        ]
+      },
+      "quantity": 1949.2476611375332,
+      "position_value": 70.17291580095119,
+      "actual_risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "position_capped": false,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 0,
+        "ichi": 2,
+        "fib": 1,
+        "sr": 0,
+        "brooks": 0,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null,
+      "event_history": [
+        {
+          "event": "ENTRY",
+          "price": 0.036,
+          "time": "2026-10-11T08:03:42.719044+00:00"
+        }
+      ]
     }
   ],
-  "last_run": "2026-10-11T04:04:58.190088+00:00",
-  "last_event_report": "2026-10-11T04:03:48.760598+00:00",
+  "last_run": "2026-10-11T08:04:15.676342+00:00",
+  "last_event_report": "2026-10-11T08:03:12.565153+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
