@@ -184,18 +184,18 @@
           "time": "2026-10-11T08:03:42.719044+00:00"
         }
       ],
-      "last_check_ms": 1791748800000
+      "last_check_ms": 1791763200000
     },
     {
       "id": "WLD_USDT_BUY_1791734602",
       "symbol": "WLD/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 11,
       "created_at": "2026-10-11T16:03:22.904769+00:00",
-      "updated_at": "2026-10-11T16:03:22.904769+00:00",
+      "updated_at": "2026-10-12T00:02:55.600155+00:00",
       "expiry_at": "2026-10-13T16:03:22.904785+00:00",
       "entry": 0.5788,
       "sl": 0.5573650561796734,
@@ -264,18 +264,28 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null,
+      "remaining_fraction": 0,
+      "realized_pnl": -9.186608880442305,
+      "fees_paid": 0.391204595715273,
+      "closed_reason": "SL",
       "event_history": [
         {
           "event": "ENTRY",
           "price": 0.5788,
           "time": "2026-10-11T16:03:22.904769+00:00"
+        },
+        {
+          "event": "SL",
+          "time": "2026-10-12T00:02:55.600150+00:00",
+          "price": 0.5533461,
+          "fraction": 1.0,
+          "pnl_piece": -9.1866,
+          "fees": 0.3912
         }
       ],
-      "last_check_ms": 1791748800000
+      "last_check_ms": 1791763200000,
+      "sl_hit": true,
+      "closed_at": "2026-10-12T00:02:55.600154+00:00"
     },
     {
       "id": "TIA_USDT_BUY_1791748947",
@@ -359,11 +369,12 @@
           "price": 0.5858,
           "time": "2026-10-11T20:02:27.817866+00:00"
         }
-      ]
+      ],
+      "last_check_ms": 1791763200000
     }
   ],
-  "last_run": "2026-10-11T20:02:50.912323+00:00",
-  "last_event_report": "2026-10-11T20:01:40.581833+00:00",
+  "last_run": "2026-10-12T00:04:07.503366+00:00",
+  "last_event_report": "2026-10-12T00:02:56.853437+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
