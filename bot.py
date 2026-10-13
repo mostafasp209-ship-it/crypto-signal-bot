@@ -49,11 +49,14 @@ DATA_FILE = "signals.json"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", TELEGRAM_CHAT_ID).strip()
+USERS_FILE = os.getenv("USERS_FILE", "users.json")
 
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
 DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.08
+SLEEP_BETWEEN_SYMBOLS = 0.20
+BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
 
 
 # ============================================================
@@ -139,31 +142,117 @@ def save_state(state):
 # TELEGRAM
 # ============================================================
 
+def telegram_recipients():
+    """Return admin plus opted-in users from users.json, without duplicate chat IDs.
+
+    Supported users.json shapes:
+      {"users": [{"chat_id": 123, "blocked": false, "notify": true}]}
+      [{"chat_id": 123, "blocked": false, "notify": true}]
+      {"123": {"blocked": false, "notify": true}, "456": true}
+      {"users": [123, 456]}
+    """
+    recipients = []
+    seen = set()
+
+    def add(chat_id):
+        if chat_id is None:
+            return
+        chat_id = str(chat_id).strip()
+        if not chat_id or chat_id in seen:
+            return
+        seen.add(chat_id)
+        recipients.append(chat_id)
+
+    # Keep the configured administrator/main chat as a recipient.
+    add(ADMIN_CHAT_ID or TELEGRAM_CHAT_ID)
+
+    if not os.path.exists(USERS_FILE):
+        print(f"[TELEGRAM] {USERS_FILE} not found; only the admin chat will receive messages.")
+        return recipients
+
+    try:
+        with open(USERS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"[TELEGRAM] Could not read {USERS_FILE}: {exc}; using admin only.")
+        return recipients
+
+    users = data.get("users", data) if isinstance(data, dict) else data
+    if isinstance(users, dict):
+        entries = []
+        for key, value in users.items():
+            # A dict keyed by chat ID is supported as well as a wrapper object.
+            if key == "users" and isinstance(value, list):
+                entries.extend(value)
+            else:
+                entries.append((key, value))
+    elif isinstance(users, list):
+        entries = users
+    else:
+        entries = []
+
+    for entry in entries:
+        chat_id = None
+        settings = {}
+        if isinstance(entry, (str, int)):
+            chat_id = entry
+        elif isinstance(entry, (list, tuple)) and len(entry) == 2:
+            chat_id, settings = entry
+            if not isinstance(settings, dict):
+                settings = {"notify": bool(settings)}
+        elif isinstance(entry, dict):
+            settings = entry
+            chat_id = entry.get("chat_id", entry.get("telegram_id", entry.get("user_id", entry.get("id"))))
+        if settings.get("blocked") is True or settings.get("is_blocked") is True:
+            continue
+        if settings.get("notify") is False or settings.get("notifications") is False or settings.get("active") is False:
+            continue
+        add(chat_id)
+
+    print(f"[TELEGRAM] recipients loaded: {len(recipients)}")
+    return recipients
+
+
 def telegram_send(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Telegram credentials are missing; message skipped.")
+    """Send a message to the administrator and all subscribed users."""
+    if not TELEGRAM_BOT_TOKEN:
+        print("Telegram bot token is missing; message skipped.")
+        return False
+
+    recipients = telegram_recipients()
+    if not recipients:
+        print("No Telegram recipients configured; message skipped.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    delivered = 0
+    failed = 0
 
-    try:
-        r = requests.post(
-            url,
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-            },
-            timeout=20,
-        )
-        if not r.ok:
-            print("Telegram error:", r.status_code, r.text[:500])
-            return False
-        return True
-    except Exception as exc:
-        print("Telegram exception:", exc)
-        return False
+    for chat_id in recipients:
+        try:
+            r = requests.post(
+                url,
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
+                timeout=20,
+            )
+            if r.ok:
+                delivered += 1
+            else:
+                failed += 1
+                # Telegram often returns 403 when a user has not started the bot or blocked it.
+                print(f"[TELEGRAM FAIL] chat_id={chat_id}: HTTP {r.status_code} {r.text[:250]}")
+        except Exception as exc:
+            failed += 1
+            print(f"[TELEGRAM FAIL] chat_id={chat_id}: {type(exc).__name__}: {exc}")
+        time.sleep(0.05)
+
+    print(f"[TELEGRAM] delivered={delivered} failed={failed} total={len(recipients)}")
+    return delivered > 0
 
 
 # ============================================================
@@ -518,7 +607,17 @@ def daily_trend(exchange, symbol):
         return "NEUTRAL"
 
     except Exception as exc:
-        print(f"daily trend failed {symbol}: {exc}")
+        message = str(exc).lower()
+        is_rate_limit = (
+            isinstance(exc, getattr(ccxt, "RateLimitExceeded", ()))
+            or "ratelimit" in message
+            or "rate limit" in message
+            or "11010" in message
+        )
+        if is_rate_limit:
+            print(f"[RATE LIMIT] {exchange.id} daily trend {symbol}: {exc}")
+            return "RATE_LIMIT"
+        print(f"daily trend failed {symbol}: {type(exc).__name__}: {exc}")
         return "UNKNOWN"
 
 
@@ -735,6 +834,7 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     if fund_score:
         score += 1; components["fundamental_confirmation"] = fund_score
     if score < MIN_SCORE:
+        print(f"[FILTER] {symbol} {side} setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
         return None
 
     recent = df.tail(60)
@@ -766,6 +866,9 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
         "tp3": levels["tp3"],
         "rr": levels["rr"],
         "risk_pct": risk_pct,
+        # Preserve the original stop distance for correct partial PnL after SL moves to breakeven.
+        "initial_risk_per_unit": abs(levels["entry"] - levels["sl"]),
+        "initial_sl": levels["sl"],
         "risk_usd": RISK_USD,
         "components": components,
         "trend": trend,
@@ -799,12 +902,25 @@ def close_piece(signal, exit_price, fraction, label):
     if not entry or not exit_price:
         return
 
-    # Position size is derived from fixed USD risk.
-    risk_per_unit = abs(entry - safe_float(signal["sl"]))
+    # Position size must use the ORIGINAL stop distance. The active SL may move
+    # to entry after TP1, which must not make remaining partial exits unaccounted.
+    risk_per_unit = safe_float(signal.get("initial_risk_per_unit"))
+    if not risk_per_unit or risk_per_unit <= 0:
+        original_sl = safe_float(signal.get("initial_sl"))
+        if original_sl is None:
+            # Compatibility for older signals: TP1 is one original risk unit away.
+            tp1 = safe_float(signal.get("tp1"))
+            risk_per_unit = abs(tp1 - entry) if tp1 is not None else 0.0
+        else:
+            risk_per_unit = abs(entry - original_sl)
     if risk_per_unit <= 0:
+        print(f"[PNL ERROR] Cannot determine initial risk for {signal.get('symbol')}")
         return
 
-    quantity = RISK_USD / risk_per_unit
+    quantity = safe_float(signal.get("position_quantity"))
+    if quantity is None or quantity <= 0:
+        quantity = RISK_USD / risk_per_unit
+        signal["position_quantity"] = quantity
     gross = (
         (exit_price - entry) * quantity
         if signal["side"] == "BUY"
@@ -1015,14 +1131,14 @@ def format_signal(signal):
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
         f"RR: <b>{signal['rr']:.2f}</b>\n\n"
 
-        f"🧠 Setup: {components.get('setup', 'N/A')}\n"
-        f"📈 تأیید روند روزانه: {components.get('daily_trend', signal.get('trend', 'N/A'))}\n"
-        f"📐 هم‌راستایی EMA: +{components.get('ema_alignment', 0)}\n"
-        f"🕯 قدرت کندل: +{components.get('close_strength', 0)}\n"
-        f"📊 تأیید حجم: +{components.get('volume_confirmation', 0)}\n"
-        f"⚡ مومنتوم RSI: +{components.get('momentum', 0)}\n"
-        f"💹 تأیید فاندامنتال: +{components.get('fundamental_confirmation', 0)}\n"
-        f"🧮 امتیاز پایه استراتژی: 8 | امتیاز نهایی: {signal['score']}\n\n"
+        f"📐 EMA: {components.get('ema', 0)}\n"
+        f"RSI: {components.get('rsi', 0)}\n"
+        f"BB: {components.get('bb', 0)}\n"
+        f"Ichimoku: {components.get('ichi', 0)}\n"
+        f"Fibonacci: {components.get('fib', 0)}\n"
+        f"S/R: {components.get('sr', 0)}\n"
+        f"Brooks: {components.get('brooks', 0)}\n"
+        f"RTM: {components.get('rtm', 0)}\n\n"
 
         f"💰 Funding: {funding_text}\n"
         f"📊 OI: {oi_text}\n"
@@ -1043,10 +1159,19 @@ def scan_market(manager, state):
         return []
 
     signals = []
+    stats = {
+        "candidates": len(candidates),
+        "checked": 0,
+        "signals": 0,
+        "no_setup_or_score": 0,
+        "unknown_trend": 0,
+        "duplicates": 0,
+        "rate_limited_exchanges": set(),
+        "errors": 0,
+    }
+    rate_limited_exchanges = set()
 
     for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
-        # Try the preferred venue first, then any other configured venue
-        # that actually lists the same symbol.
         exchange_names = [preferred_exchange_name]
         for fallback_name in EXCHANGE_NAMES:
             if fallback_name not in exchange_names:
@@ -1054,65 +1179,93 @@ def scan_market(manager, state):
                 if fallback_exchange and symbol in fallback_exchange.markets:
                     exchange_names.append(fallback_name)
 
-        signal_created = False
-
         for exchange_name in exchange_names:
+            # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
+            if exchange_name in rate_limited_exchanges:
+                continue
             exchange = manager.get_exchange(exchange_name)
             if not exchange:
                 continue
 
             try:
+                stats["checked"] += 1
                 raw = manager.fetch_ohlcv(exchange, symbol)
                 df = closed_candles(raw)
-
                 if len(df) < 210:
-                    continue
+                    stats["no_setup_or_score"] += 1
+                    break
 
                 trend = daily_trend(exchange, symbol)
-                fundamentals = fundamental_data(manager, symbol)
+                if trend == "RATE_LIMIT":
+                    rate_limited_exchanges.add(exchange_name)
+                    stats["rate_limited_exchanges"].add(exchange_name)
+                    print(f"[RATE LIMIT] {exchange_name}: skipping this venue for remaining scan")
+                    continue
+                if trend == "UNKNOWN":
+                    stats["unknown_trend"] += 1
+                    # Try another exchange for this symbol when the daily feed failed.
+                    continue
 
-                signal = build_signal(
-                    symbol,
-                    exchange_name,
-                    df,
-                    trend,
-                    fundamentals,
-                )
+                fundamentals = fundamental_data(manager, symbol)
+                signal = build_signal(symbol, exchange_name, df, trend, fundamentals)
 
                 if not signal:
-                    # A valid market but no qualifying setup; don't need
-                    # to retry the same symbol on every venue.
-                    signal_created = True
+                    stats["no_setup_or_score"] += 1
                     break
 
                 if duplicate_exists(state, symbol, signal["side"]):
-                    signal_created = True
+                    stats["duplicates"] += 1
                     break
 
                 signals.append(signal)
-
+                stats["signals"] += 1
                 print(
                     f"[SIGNAL] {symbol} {signal['side']} "
-                    f"score={signal['score']} exchange={exchange_name}"
+                    f"score={signal['score']} exchange={exchange_name} "
+                    f"setup={signal.get('components', {}).get('setup', 'N/A')}"
                 )
-
-                signal_created = True
                 break
 
             except Exception as exc:
-                print(
-                    f"[SCAN FAIL] {exchange_name} {symbol}: "
-                    f"{type(exc).__name__}: {exc}"
+                message = str(exc).lower()
+                is_rate_limit = (
+                    isinstance(exc, getattr(ccxt, "RateLimitExceeded", ()))
+                    or "ratelimit" in message
+                    or "rate limit" in message
+                    or '11010' in message
                 )
-                # Try the next exchange for this symbol.
+                if is_rate_limit:
+                    rate_limited_exchanges.add(exchange_name)
+                    stats["rate_limited_exchanges"].add(exchange_name)
+                    print(
+                        f"[RATE LIMIT] {exchange_name}: pausing this venue for the rest of this scan; "
+                        f"will try fallback exchanges."
+                    )
+                else:
+                    stats["errors"] += 1
+                    print(
+                        f"[SCAN FAIL] {exchange_name} {symbol}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                # Continue to a different configured venue for this symbol.
+                continue
 
+        if idx % 25 == 0 or idx == len(candidates):
+            print(
+                f"[SCAN PROGRESS] {idx}/{len(candidates)} symbols; "
+                f"signals={stats['signals']}; rate_limited={','.join(sorted(rate_limited_exchanges)) or 'none'}"
+            )
         time.sleep(SLEEP_BETWEEN_SYMBOLS)
 
-    signals.sort(
-        key=lambda x: (x["score"], x["rr"]),
-        reverse=True,
+    signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
+    print(
+        "[SCAN SUMMARY] "
+        f"candidates={stats['candidates']} checked={stats['checked']} "
+        f"signals={stats['signals']} no_setup_or_score={stats['no_setup_or_score']} "
+        f"unknown_trend={stats['unknown_trend']} duplicates={stats['duplicates']} "
+        f"errors={stats['errors']} "
+        f"rate_limited={','.join(sorted(stats['rate_limited_exchanges'])) or 'none'}"
     )
-
     return signals
 
 
