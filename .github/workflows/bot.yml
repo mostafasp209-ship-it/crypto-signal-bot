@@ -1,4 +1,4 @@
-name: FaraSignal Hybrid v3 Scanner
+name: Crypto Signal Pro
 
 on:
   schedule:
@@ -8,39 +8,48 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: crypto-signal-pro
+  cancel-in-progress: false
+
 jobs:
-  scan:
+  run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-      - name: Run scanner
+      - name: Run bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-          ENABLE_LIVE_SIGNALS: "false"
-          MIN_SCORE: "8"
-          FARASIGNAL_STATE_PATH: "signals.json"
-        run: python bot.py
+          PYTHONUNBUFFERED: "1"
+        run: python -u bot.py
 
-      - name: Commit state
+      - name: Save signal state
+        if: always()
         run: |
-          git config user.name "actions-user"
-          git config user.email "actions@github.com"
-          git add signals.json || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: update state [skip ci]"
+          if [ -f signals.json ] && [ -n "$(git status --porcelain -- signals.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add signals.json
+            git commit -m "Update signal state [skip ci]" || true
             git push
           fi
