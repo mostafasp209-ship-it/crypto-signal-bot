@@ -558,9 +558,50 @@
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
       "closed_reason": null
+    },
+    {
+      "id": "FIL_USDT_BUY_1791922533",
+      "symbol": "FIL/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "متوسط",
+      "score": 12,
+      "created_at": "2026-10-13T20:15:33.210042+00:00",
+      "updated_at": "2026-10-13T20:15:33.210053+00:00",
+      "expiry_at": "2026-10-15T20:15:33.210054+00:00",
+      "entry": 1.199,
+      "sl": 1.1258711498184448,
+      "tp1": 1.2721288501815553,
+      "tp2": 1.3306319303267997,
+      "tp3": 1.389135010472044,
+      "rr": 2.600000000000003,
+      "risk_pct": 6.099153476359902,
+      "risk_usd": 10.0,
+      "components": {
+        "setup": "EMA_PULLBACK",
+        "daily_trend": "BULL",
+        "ema_alignment": 2,
+        "close_strength": 1,
+        "momentum": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
-  "last_run": "2026-10-13T17:48:58.987019+00:00",
+  "last_run": "2026-10-13T20:17:13.140234+00:00",
   "last_event_report": "2026-10-13T16:07:24.277914+00:00",
   "historical_stats": {
     "closed": 0,
