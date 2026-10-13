@@ -302,11 +302,11 @@
       "symbol": "TIA/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "ضعیف",
       "score": 11,
       "created_at": "2026-10-11T20:02:27.817866+00:00",
-      "updated_at": "2026-10-11T20:02:27.817866+00:00",
+      "updated_at": "2026-10-13T00:04:54.977525+00:00",
       "expiry_at": "2026-10-13T20:02:27.817879+00:00",
       "entry": 0.5858,
       "sl": 0.5412709096242109,
@@ -369,6 +369,101 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
+      "remaining_fraction": 0,
+      "realized_pnl": -10.659382349702621,
+      "fees_paid": 0.2527022201674738,
+      "closed_reason": "SL",
+      "event_history": [
+        {
+          "event": "ENTRY",
+          "price": 0.5858,
+          "time": "2026-10-11T20:02:27.817866+00:00"
+        },
+        {
+          "event": "SL",
+          "time": "2026-10-13T00:04:54.977517+00:00",
+          "price": 0.53946,
+          "fraction": 1.0,
+          "pnl_piece": -10.6594,
+          "fees": 0.2527
+        }
+      ],
+      "last_check_ms": 1791849600000,
+      "sl_hit": true,
+      "closed_at": "2026-10-13T00:04:54.977523+00:00"
+    },
+    {
+      "id": "RSR_USDT_BUY_1791849961",
+      "symbol": "RSR/USDT",
+      "exchange": "cryptocom",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "ضعیف",
+      "score": 11,
+      "created_at": "2026-10-13T00:06:01.226178+00:00",
+      "updated_at": "2026-10-13T00:06:01.226178+00:00",
+      "expiry_at": "2026-10-15T00:06:01.226194+00:00",
+      "entry": 0.0021995,
+      "sl": 0.0018913020319940908,
+      "original_sl": 0.0018913020319940908,
+      "tp1": 0.0025076979680059095,
+      "tp2": 0.0029939,
+      "tp3": 0.003000814716815364,
+      "tp_methods": [
+        "atr",
+        "structure",
+        "atr"
+      ],
+      "rr": 1.7932692124544787,
+      "rr1": 1.0000000000000007,
+      "rr2": 2.5775640415149277,
+      "rr3": 2.6,
+      "risk_pct": 14.012183132798784,
+      "risk_per_unit": 0.0003081979680059092,
+      "sl_method": "atr",
+      "sl_candidates": {
+        "structure": 0.00148943,
+        "sr": 0.00148929,
+        "atr": 0.0018913,
+        "volatility": 0.00134754
+      },
+      "sl_meta": {
+        "score": 1,
+        "dist_pct": 14.012,
+        "all_scored": [
+          {
+            "method": "atr",
+            "price": 0.0018913,
+            "dist_pct": 14.012,
+            "score": 1
+          }
+        ]
+      },
+      "quantity": 32446.67725975489,
+      "position_value": 71.36646663283089,
+      "actual_risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "position_capped": false,
+      "components": {
+        "ema": 3,
+        "rsi": 2,
+        "bb": 1,
+        "ichi": 2,
+        "fib": 1,
+        "sr": 1,
+        "brooks": 0,
+        "rtm": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
       "remaining_fraction": 1.0,
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
@@ -376,15 +471,14 @@
       "event_history": [
         {
           "event": "ENTRY",
-          "price": 0.5858,
-          "time": "2026-10-11T20:02:27.817866+00:00"
+          "price": 0.0021995,
+          "time": "2026-10-13T00:06:01.226178+00:00"
         }
-      ],
-      "last_check_ms": 1791835200000
+      ]
     }
   ],
-  "last_run": "2026-10-12T20:05:56.585430+00:00",
-  "last_event_report": "2026-10-12T20:04:42.097573+00:00",
+  "last_run": "2026-10-13T00:06:05.896944+00:00",
+  "last_event_report": "2026-10-13T00:04:55.853245+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
