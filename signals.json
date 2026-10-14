@@ -564,11 +564,11 @@
       "symbol": "FIL/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-13T20:15:33.210042+00:00",
-      "updated_at": "2026-10-13T20:15:33.210053+00:00",
+      "updated_at": "2026-10-14T16:25:34.518808+00:00",
       "expiry_at": "2026-10-15T20:15:33.210054+00:00",
       "entry": 1.199,
       "sl": 1.1258711498184448,
@@ -595,10 +595,12 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -15.177224819541063,
+      "fees_paid": 0.31305018393102174,
+      "closed_reason": "SL",
+      "position_quantity": 136.74493685013834,
+      "sl_hit": true
     },
     {
       "id": "EUR_USDT_SELL_1791936714",
@@ -695,10 +697,10 @@
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-14T00:10:34.597331+00:00",
-      "updated_at": "2026-10-14T00:10:34.597342+00:00",
+      "updated_at": "2026-10-14T16:25:34.953041+00:00",
       "expiry_at": "2026-10-16T00:10:34.597345+00:00",
       "entry": 2499.21,
-      "sl": 2559.074073858646,
+      "sl": 2499.21,
       "tp1": 2439.345926141354,
       "tp2": 2391.454667054438,
       "tp3": 2343.563407967521,
@@ -721,13 +723,14 @@
         "long_short": null,
         "source": null
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 4.587519224150822,
+      "fees_paid": 0.41248077584917786,
+      "closed_reason": null,
+      "position_quantity": 0.16704509659019365
     },
     {
       "id": "ETC_USDT_SELL_1791951480",
@@ -738,10 +741,10 @@
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-14T04:18:00.557484+00:00",
-      "updated_at": "2026-10-14T04:18:00.557496+00:00",
+      "updated_at": "2026-10-14T16:25:35.071169+00:00",
       "expiry_at": "2026-10-16T04:18:00.557499+00:00",
       "entry": 8.1,
-      "sl": 8.275064328246375,
+      "sl": 8.1,
       "tp1": 7.924935671753625,
       "tp2": 7.784884209156525,
       "tp3": 7.644832746559426,
@@ -765,13 +768,14 @@
         "long_short": null,
         "source": null
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 4.542312936271029,
+      "fees_paid": 0.45768706372897133,
+      "closed_reason": null,
+      "position_quantity": 57.121859719626094
     },
     {
       "id": "CSPR_USDT_SELL_1791951586",
@@ -907,11 +911,11 @@
       "symbol": "RENDER/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-14T04:18:42.237067+00:00",
-      "updated_at": "2026-10-14T04:18:42.237078+00:00",
+      "updated_at": "2026-10-14T16:25:35.728572+00:00",
       "expiry_at": "2026-10-16T04:18:42.237082+00:00",
       "entry": 2.047,
       "sl": 1.9302940333965097,
@@ -940,10 +944,12 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -12.50595871382252,
+      "fees_paid": 0.3386287878002807,
+      "closed_reason": "SL",
+      "position_quantity": 85.68542201424106,
+      "sl_hit": true
     },
     {
       "id": "ASTER_USDT_SELL_1791965906",
@@ -1250,19 +1256,21 @@
       "closed_reason": null
     }
   ],
-  "last_run": "2026-10-14T12:19:58.818156+00:00",
+  "last_run": "2026-10-14T16:28:08.616895+00:00",
   "last_event_report": "2026-10-13T16:07:24.277914+00:00",
   "historical_stats": {
-    "closed": 0,
+    "closed": 6,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
-    "sl_direct": 0,
+    "sl_direct": 6,
     "expired": 0,
-    "no_risk": 0,
+    "no_risk": 1,
     "other": 0,
-    "net_pnl": 0.0,
-    "fees": 0.0,
-    "sl_methods": {}
+    "net_pnl": -69.356645599554,
+    "fees": 1.6770451357659106,
+    "sl_methods": {
+      "atr": 4
+    }
   }
 }
