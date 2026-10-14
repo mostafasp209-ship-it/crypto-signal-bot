@@ -37,6 +37,7 @@ MIN_RR = 1.50
 
 SIGNAL_EXPIRY_HOURS = 48
 RISK_USD = 10.0
+MAX_POSITION_USD = float(os.getenv("MAX_POSITION_USD", "200"))
 FEE_RATE = 0.001
 
 TP_WEIGHTS = {
@@ -718,9 +719,17 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         if candidate > entry and candidate < sl:
             sl = candidate
 
+    # Recalculate all targets from the FINAL stop distance. Previously, S/R
+    # could move the stop without moving targets, making rr1/rr2 inconsistent.
     risk = abs(entry - sl)
+    if risk <= 0:
+        return None
+    if side == "BUY":
+        tp1, tp2, tp3 = entry + risk * 1.0, entry + risk * 1.8, entry + risk * 2.6
+    else:
+        tp1, tp2, tp3 = entry - risk * 1.0, entry - risk * 1.8, entry - risk * 2.6
     reward = abs(tp3 - entry)
-    rr = reward / risk if risk > 0 else 0
+    rr = reward / risk
 
     if rr < MIN_RR:
         return None
@@ -815,7 +824,10 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     if buy_setup:
         side, setup = "BUY", buy_setup
     elif sell_setup:
-        side, setup = "SELL", sell_setup
+        # This project is spot-long only. A SELL entry is a short position and
+        # must not be advertised as an executable spot signal.
+        print(f"[FILTER] {symbol}: bearish setup ignored (spot-long only)")
+        return None
     else:
         return None
 
@@ -848,6 +860,14 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
         return None
 
     strength = "قوی" if score >= 13 else "متوسط" if score >= 11 else "ضعیف"
+    risk_per_unit = abs(levels["entry"] - levels["sl"])
+    if risk_per_unit <= 0:
+        return None
+    risk_sized_quantity = RISK_USD / risk_per_unit
+    cap_quantity = MAX_POSITION_USD / levels["entry"] if MAX_POSITION_USD > 0 else risk_sized_quantity
+    position_quantity = min(risk_sized_quantity, cap_quantity)
+    position_value = position_quantity * levels["entry"]
+    actual_risk_usd = position_quantity * risk_per_unit
     return {
         "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
         "symbol": symbol,
@@ -870,6 +890,12 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
         "initial_risk_per_unit": abs(levels["entry"] - levels["sl"]),
         "initial_sl": levels["sl"],
         "risk_usd": RISK_USD,
+        "risk_target_usd": RISK_USD,
+        "actual_risk_usd": actual_risk_usd,
+        "position_quantity": position_quantity,
+        "quantity": position_quantity,
+        "position_value": position_value,
+        "position_capped": position_quantity + 1e-12 < risk_sized_quantity,
         "components": components,
         "trend": trend,
         "fundamentals": fundamentals,
@@ -1028,7 +1054,8 @@ def manage_signal(signal, current_price):
 
 
 def update_open_signals(state, manager):
-    changed = False
+    """Update active signals and return one Telegram message per new event."""
+    events = []
 
     for signal in state.get("signals", []):
         if signal.get("status") != "ACTIVE":
@@ -1037,38 +1064,115 @@ def update_open_signals(state, manager):
         symbol = signal.get("symbol")
         exchange_name = signal.get("exchange")
         exchange = manager.get_exchange(exchange_name)
-
         if not exchange:
+            print(f"[MANAGE SKIP] {symbol}: exchange {exchange_name!r} unavailable")
             continue
-
-        if symbol not in exchange.markets:
+        if symbol not in getattr(exchange, "markets", {}):
+            print(f"[MANAGE SKIP] {symbol}: not listed on {exchange_name}")
             continue
 
         price = manager.ticker_price(exchange, symbol)
         if price is None:
+            print(f"[MANAGE SKIP] {symbol}: ticker price unavailable")
             continue
 
-        before_status = signal.get("status")
-        before_tp1 = signal.get("tp1_hit")
-        before_tp2 = signal.get("tp2_hit")
-        before_tp3 = signal.get("tp3_hit")
+        before = {
+            "status": signal.get("status"),
+            "tp1_hit": bool(signal.get("tp1_hit")),
+            "tp2_hit": bool(signal.get("tp2_hit")),
+            "tp3_hit": bool(signal.get("tp3_hit")),
+            "sl": safe_float(signal.get("sl")),
+        }
+        changed = manage_signal(signal, price)
+        if not changed:
+            continue
 
-        manage_signal(signal, price)
+        side = signal.get("side", "BUY")
+        header = f"<b>{symbol} — {side}</b>"
+        if not before["tp1_hit"] and signal.get("tp1_hit"):
+            events.append(
+                f"🎯 <b>TP1 فعال شد</b>\n{header}\n"
+                f"قیمت بررسی: <b>{fmt_price(price)}</b>\n"
+                f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\n"
+                f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
+            )
+        if not before["tp2_hit"] and signal.get("tp2_hit"):
+            events.append(
+                f"🥈 <b>TP2 فعال شد</b>\n{header}\n"
+                f"قیمت بررسی: <b>{fmt_price(price)}</b>\n۳۰٪ دیگر از موقعیت ثبت شد."
+            )
+        if not before["tp3_hit"] and signal.get("tp3_hit"):
+            events.append(
+                f"🥉 <b>TP3 فعال شد</b>\n{header}\n"
+                f"قیمت بررسی: <b>{fmt_price(price)}</b>\n۲۰٪ باقی‌مانده ثبت شد."
+            )
 
-        if (
-            signal.get("status") != before_status
-            or signal.get("tp1_hit") != before_tp1
-            or signal.get("tp2_hit") != before_tp2
-            or signal.get("tp3_hit") != before_tp3
-        ):
-            changed = True
+        if before["status"] == "ACTIVE" and signal.get("status") == "CLOSED":
+            reason = str(signal.get("closed_reason", "")).upper()
+            if reason == "SL":
+                title = "🛑 <b>حد ضرر (SL) فعال شد</b>"
+            elif reason == "TP3":
+                title = "✅ <b>موقعیت با TP3 بسته شد</b>"
+            else:
+                title = "📕 <b>موقعیت بسته شد</b>"
+            events.append(
+                f"{title}\n{header}\n"
+                f"قیمت بررسی/خروج: <b>{fmt_price(price)}</b>\n"
+                f"دلیل: <b>{reason or 'نامشخص'}</b>\n"
+                f"سود/زیان ثبت‌شده: <b>${safe_float(signal.get('realized_pnl'), 0):.2f}</b>\n"
+                f"کارمزد ثبت‌شده: <b>${safe_float(signal.get('fees_paid'), 0):.2f}</b>"
+            )
+        elif before["status"] == "ACTIVE" and signal.get("status") == "EXPIRED":
+            events.append(
+                f"⌛ <b>اعتبار سیگنال تمام شد</b>\n{header}\n"
+                f"قیمت بررسی/خروج: <b>{fmt_price(price)}</b>\n"
+                f"سود/زیان ثبت‌شده: <b>${safe_float(signal.get('realized_pnl'), 0):.2f}</b>"
+            )
 
-    return changed
+    return events
 
 
 # ============================================================
 # REPORTING
 # ============================================================
+
+def refresh_historical_stats(state):
+    """Rebuild cached historical_stats from signals; never trust stale counters."""
+    signals = state.get("signals", [])
+    closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
+    stats = {
+        "closed": len(closed), "tp3": 0, "tp2_then_sl": 0,
+        "tp1_then_sl": 0, "sl_direct": 0, "expired": 0,
+        "no_risk": 0, "other": 0, "net_pnl": 0.0,
+        "fees": 0.0, "sl_methods": {},
+    }
+    for s in closed:
+        reason = str(s.get("closed_reason") or "").lower()
+        tp1 = bool(s.get("tp1_hit"))
+        tp2 = bool(s.get("tp2_hit"))
+        tp3 = bool(s.get("tp3_hit"))
+        if tp3 or reason == "tp3":
+            stats["tp3"] += 1
+        elif "expir" in reason:
+            stats["expired"] += 1
+        elif reason == "sl" and tp2:
+            stats["tp2_then_sl"] += 1
+        elif reason == "sl" and tp1:
+            stats["tp1_then_sl"] += 1
+        elif reason == "sl":
+            stats["sl_direct"] += 1
+        else:
+            stats["other"] += 1
+        if safe_float(s.get("initial_risk_per_unit", s.get("risk_per_unit"))) in (None, 0):
+            stats["no_risk"] += 1
+        stats["net_pnl"] += safe_float(s.get("realized_pnl"), 0.0) or 0.0
+        stats["fees"] += safe_float(s.get("fees_paid"), 0.0) or 0.0
+        method = s.get("sl_method")
+        if method:
+            stats["sl_methods"][str(method)] = stats["sl_methods"].get(str(method), 0) + 1
+    state["historical_stats"] = stats
+    return stats
+
 
 def performance_report(state):
     signals = state.get("signals", [])
@@ -1290,9 +1394,17 @@ def main():
         )
         return
 
-    # First manage previous active trades.
-    if update_open_signals(state, manager):
+    # Manage existing signals first and notify Telegram about every new TP/SL/expiry event.
+    management_events = update_open_signals(state, manager)
+    if management_events:
+        refresh_historical_stats(state)
         save_state(state)
+        for event_message in management_events:
+            telegram_send(event_message)
+            time.sleep(0.25)
+    else:
+        # Keep the cached historical counters synchronized even if no signal changed.
+        refresh_historical_stats(state)
 
     new_signals = scan_market(manager, state)
 
@@ -1302,6 +1414,7 @@ def main():
     # Keep history but avoid unbounded growth.
     state["signals"] = state["signals"][-1000:]
     state["last_run"] = iso_now()
+    refresh_historical_stats(state)
 
     save_state(state)
 
