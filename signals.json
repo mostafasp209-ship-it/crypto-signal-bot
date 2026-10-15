@@ -1,5 +1,55 @@
 {
-  "signals": [],
+  "signals": [
+    {
+      "id": "RSR_USDT_BUY_1792037989",
+      "symbol": "RSR/USDT",
+      "exchange": "cryptocom",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "متوسط",
+      "score": 12,
+      "created_at": "2026-10-15T04:19:49.293871+00:00",
+      "updated_at": "2026-10-15T04:19:49.293882+00:00",
+      "expiry_at": "2026-10-17T04:19:49.293885+00:00",
+      "entry": 0.0020637,
+      "sl": 0.0018333581772788474,
+      "tp1": 0.0022940418227211526,
+      "tp2": 0.0024783152808980744,
+      "tp3": 0.0026625887390749965,
+      "rr": 2.6000000000000005,
+      "risk_pct": 11.161594355824612,
+      "initial_risk_per_unit": 0.0002303418227211525,
+      "initial_sl": 0.0018333581772788474,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 10.0,
+      "position_quantity": 43413.739988095054,
+      "quantity": 43413.739988095054,
+      "position_value": 89.59293521343176,
+      "position_capped": false,
+      "components": {
+        "setup": "EMA_PULLBACK",
+        "daily_trend": "BULL",
+        "ema_alignment": 2,
+        "volume_confirmation": 1,
+        "momentum": 1
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
+    }
+  ],
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
@@ -13,5 +63,5 @@
     "fees": 0.0,
     "sl_methods": {}
   },
-  "last_run": "2026-10-15T01:41:47.102087+00:00"
+  "last_run": "2026-10-15T04:19:56.276468+00:00"
 }
