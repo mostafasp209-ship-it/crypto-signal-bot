@@ -95,6 +95,38 @@ def load_users() -> dict:
 
 
 def load_state() -> dict:
+    """Read the latest signal state committed by GitHub Actions.
+
+    The panel usually runs on a different host from the Actions runner, so its
+    local signals.json may be stale. When GH_REPO is configured, fetch the file
+    from the configured branch; fall back to local state if GitHub is unavailable.
+    """
+    repo = os.getenv("GH_REPO", "").strip()
+    branch = os.getenv("GH_BRANCH", "main").strip() or "main"
+    pat = os.getenv("GH_PAT", "").strip()
+    if repo:
+        url = f"https://api.github.com/repos/{repo}/contents/{STATE_FILE}"
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        if pat:
+            headers["Authorization"] = f"Bearer {pat}"
+        try:
+            response = requests.get(
+                url, headers=headers, params={"ref": branch}, timeout=12
+            )
+            if response.ok:
+                payload = response.json()
+                import base64
+                raw = base64.b64decode(payload["content"]).decode("utf-8")
+                data = json.loads(raw)
+                if isinstance(data, dict) and isinstance(data.get("signals", []), list):
+                    data.setdefault("signals", [])
+                    data.setdefault("last_run", None)
+                    return data
+                print("[PANEL] GitHub signals.json has an unexpected format; using local state")
+            else:
+                print(f"[PANEL] Could not fetch remote signal state: HTTP {response.status_code}")
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            print(f"[PANEL] Remote signal state unavailable: {type(exc).__name__}: {str(exc)[:120]}")
     try:
         return bot.load_state()
     except Exception:
