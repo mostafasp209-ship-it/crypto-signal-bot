@@ -28,8 +28,8 @@ import requests
 import bot
 
 API = "https://api.telegram.org/bot"
-TOKEN = str(getattr(bot, "TELEGRAM_BOT_TOKEN", "") or "").strip()
-ADMIN_ID = str(getattr(bot, "ADMIN_CHAT_ID", "") or getattr(bot, "TELEGRAM_CHAT_ID", "") or "").strip()
+TOKEN = str(os.getenv("TELEGRAM_BOT_TOKEN", "") or getattr(bot, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+ADMIN_ID = str(os.getenv("ADMIN_CHAT_ID", "") or getattr(bot, "ADMIN_CHAT_ID", "") or getattr(bot, "TELEGRAM_CHAT_ID", "") or "").strip()
 USERS_FILE = Path(os.getenv("USERS_FILE", getattr(bot, "USERS_FILE", "users.json")))
 STATE_FILE = Path(getattr(bot, "DATA_FILE", "signals.json"))
 PAGE_SIZE = 6
@@ -425,7 +425,9 @@ def poll_and_handle(users: dict, state: dict) -> int:
         print("[PANEL] No token; skipped polling")
         return 0
     offset = int(users.get("last_update_id", 0)) + 1
-    result = api("getUpdates", offset=offset, timeout=0, allowed_updates=["message", "callback_query"])
+    # Long-poll in service mode; one-shot scheduled Actions still only checks once.
+    poll_timeout = 10 if "--loop" in sys.argv else 0
+    result = api("getUpdates", offset=offset, timeout=poll_timeout, allowed_updates=["message", "callback_query"])
     if not result or not result.get("ok"):
         return 0
     updates = result.get("result", [])
