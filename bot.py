@@ -3,6 +3,7 @@ import json
 import time
 import math
 import traceback
+import html
 import re
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
@@ -696,7 +697,7 @@ def fundamental_score(data, side):
 # ============================================================
 
 _NEGATIVE_NEWS_TERMS = (
-    "hack", "hacked", "exploit", "breach", "lawsuit", "charged", "ban",
+    "hack", "hacked", "exploit", "breach", "lawsuit", "charged",
     "banned", "probe", "investigation", "fraud", "insolvency", "bankrupt",
     "outage", "halt", "suspend", "delist", "liquidation", "attack",
     "sec sues", "withdrawals paused", "security flaw",
@@ -774,7 +775,9 @@ def news_context_for_symbol(symbol, headlines):
         )
         macro_terms = ("FED", "FEDERAL RESERVE", "INFLATION", "CPI", "INTEREST RATE",
                        "US ECONOMY", "SEC", "CRYPTO MARKET", "BITCOIN ETF")
-        if not matched and base in {"BTC", "ETH", "SOL", "XRP", "BNB"}:
+        # Macro/regulatory headlines may affect the broader crypto market,
+        # not only the largest tickers.
+        if not matched:
             matched = any(term in text for term in macro_terms)
         if not matched:
             continue
@@ -1341,7 +1344,12 @@ def format_signal(signal):
         f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
         f"روند روزانه: {signal['trend']}\n"
         f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
-        f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n\n"
+        f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n"
+        + "".join(
+            f"• {html.escape(str(item.get('title', ''))[:180])}\n"
+            for item in signal.get("news", {}).get("headlines", [])[:2]
+        )
+        + "\\n"
 
         f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
