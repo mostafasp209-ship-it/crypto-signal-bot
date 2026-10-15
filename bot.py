@@ -20,6 +20,7 @@ EXCHANGE_NAMES = [
     "bitstamp",
     "bitfinex",
     "cryptocom",
+    "bitget",
 ]
 
 FUNDING_SOURCES = [
@@ -31,7 +32,7 @@ QUOTE = "USDT"
 TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
-MAX_COINS = 180
+MAX_COINS = None  # Scan every eligible USDT spot symbol across configured exchanges
 MIN_SCORE = 12
 MIN_RR = 1.50
 
@@ -53,7 +54,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", TELEGRAM_CHAT_ID).strip()
 USERS_FILE = os.getenv("USERS_FILE", "users.json")
 
-REQUEST_TIMEOUT_MS = 10000
+REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
 DAILY_LIMIT = 120
 SLEEP_BETWEEN_SYMBOLS = 0.05
@@ -317,7 +318,7 @@ class ExchangeManager:
                     ordered.append((name, symbol))
                     seen.add(symbol)
 
-                if len(ordered) >= MAX_COINS:
+                if MAX_COINS is not None and len(ordered) >= MAX_COINS:
                     return ordered
 
         return ordered
