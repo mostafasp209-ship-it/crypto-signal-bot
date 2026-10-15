@@ -366,6 +366,20 @@ def handle_message(users: dict, state: dict, msg: dict) -> None:
     user.setdefault("notify", True)
     user["last_seen"] = int(time.time())
     text = (msg.get("text") or "").strip()
+    # Accept labels from older keyboards / Telegram clients as well.
+    button_aliases = {
+        "📊 آمار سیگنال‌ها": B_STATS,
+        "📊 آمار": B_STATS,
+        "🚫 مسدودسازی": B_BLOCK,
+        "🔎 اجرای اسکن": B_SCAN,
+        "📡 سیگنال‌های جدید": B_SIGNALS,
+        "سیگنال‌های جدید": B_SIGNALS,
+        "آمار سیگنال‌ها": B_STATS,
+        "مسدودسازی": B_BLOCK,
+        "اجرای اسکن": B_SCAN,
+        "راهنما": B_HELP,
+    }
+    text = button_aliases.get(text, text)
 
     if user.get("blocked") and not is_admin(chat_id):
         return
