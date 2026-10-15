@@ -129,7 +129,8 @@ def api(method: str, **payload) -> dict | None:
         print("[PANEL] TELEGRAM_BOT_TOKEN is missing")
         return None
     try:
-        response = requests.post(API + TOKEN + "/" + method, json=payload, timeout=20)
+        request_timeout = 35 if method == "getUpdates" else 20
+        response = requests.post(API + TOKEN + "/" + method, json=payload, timeout=request_timeout)
         try:
             data = response.json()
         except ValueError:
@@ -426,13 +427,18 @@ def poll_and_handle(users: dict, state: dict) -> int:
         return 0
     offset = int(users.get("last_update_id", 0)) + 1
     # Long-poll in service mode; one-shot scheduled Actions still only checks once.
-    poll_timeout = 10 if "--loop" in sys.argv else 0
+    poll_timeout = 25 if "--loop" in sys.argv else 0
     result = api("getUpdates", offset=offset, timeout=poll_timeout, allowed_updates=["message", "callback_query"])
     if not result or not result.get("ok"):
+        description = (result or {}).get("description", "no response")
+        print(f"[PANEL] getUpdates failed: {str(description)[:180]}")
+        if result and "webhook" in str(description).lower():
+            print("[PANEL] Telegram webhook is set; getUpdates cannot be used until the webhook is removed.")
         return 0
+
     updates = result.get("result", [])
-    max_id = int(users.get("last_update_id", 0))
     handled = 0
+    last_successful_id = int(users.get("last_update_id", 0))
     for update in updates:
         update_id = int(update.get("update_id", 0))
         try:
@@ -440,11 +446,14 @@ def poll_and_handle(users: dict, state: dict) -> int:
                 handle_message(users, state, update["message"])
             elif update.get("callback_query"):
                 handle_callback(users, update["callback_query"])
+            # Persist only through the last successfully handled update. If a
+            # handler raises, leave this update pending for the next poll.
+            last_successful_id = max(last_successful_id, update_id)
+            users["last_update_id"] = last_successful_id
             handled += 1
         except Exception as exc:
             print("[PANEL HANDLER ERROR]", type(exc).__name__, str(exc)[:180])
-        max_id = max(max_id, update_id)
-    users["last_update_id"] = max_id
+            break
     return handled
 
 
