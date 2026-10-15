@@ -3,6 +3,9 @@ import json
 import time
 import math
 import traceback
+import re
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone, timedelta
 
 import ccxt
@@ -59,6 +62,9 @@ OHLCV_LIMIT = 260
 DAILY_LIMIT = 120
 SLEEP_BETWEEN_SYMBOLS = 0.05
 BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
+NEWS_FEEDS = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
+NEWS_LOOKBACK_HOURS = 24
+NEWS_TIMEOUT_SECONDS = 8
 
 
 # ============================================================
@@ -686,6 +692,109 @@ def fundamental_score(data, side):
 
 
 # ============================================================
+# NEWS CONTEXT (lightweight fundamental risk filter)
+# ============================================================
+
+_NEGATIVE_NEWS_TERMS = (
+    "hack", "hacked", "exploit", "breach", "lawsuit", "charged", "ban",
+    "banned", "probe", "investigation", "fraud", "insolvency", "bankrupt",
+    "outage", "halt", "suspend", "delist", "liquidation", "attack",
+    "sec sues", "withdrawals paused", "security flaw",
+)
+_POSITIVE_NEWS_TERMS = (
+    "approved", "approval", "partnership", "integrates", "integration",
+    "launches", "launch", "upgrade", "adoption", "inflows", "etf inflows",
+    "mainnet", "funding round",
+)
+
+def fetch_news_context():
+    """Fetch recent headlines once per scan; unavailable feeds never stop scanning."""
+    now = utc_now()
+    items = []
+    seen = set()
+    for url in NEWS_FEEDS:
+        try:
+            response = requests.get(url, timeout=NEWS_TIMEOUT_SECONDS,
+                                    headers={"User-Agent": "crypto-signal-bot/1.0"})
+            response.raise_for_status()
+            root = ET.fromstring(response.content)
+            for node in root.findall(".//item"):
+                title = " ".join((node.findtext("title") or "").split())
+                description = " ".join((node.findtext("description") or "").split())
+                link = (node.findtext("link") or "").strip()
+                pub_date = node.findtext("pubDate")
+                if not title:
+                    continue
+                key = title.casefold()
+                if key in seen:
+                    continue
+                published = None
+                if pub_date:
+                    try:
+                        published = parsedate_to_datetime(pub_date)
+                        if published.tzinfo is None:
+                            published = published.replace(tzinfo=timezone.utc)
+                        published = published.astimezone(timezone.utc)
+                    except Exception:
+                        published = None
+                age_hours = (now - published).total_seconds() / 3600 if published else None
+                if age_hours is not None and (age_hours < -1 or age_hours > NEWS_LOOKBACK_HOURS):
+                    continue
+                seen.add(key)
+                items.append({"title": title[:300], "description": description[:500],
+                              "link": link, "published_at": published.isoformat() if published else None,
+                              "age_hours": round(age_hours, 1) if age_hours is not None else None})
+        except Exception as exc:
+            print(f"[NEWS] feed unavailable {url}: {type(exc).__name__}: {exc}")
+    print(f"[NEWS] recent headlines loaded: {len(items)}")
+    return items
+
+def news_context_for_symbol(symbol, headlines):
+    """Conservative keyword-based context; not an AI sentiment model."""
+    base = symbol.split("/")[0].upper()
+    aliases = {
+        "BTC": ("BITCOIN", "BTC"), "ETH": ("ETHEREUM", "ETH"),
+        "SOL": ("SOLANA", "SOL"), "XRP": ("RIPPLE", "XRP"),
+        "DOGE": ("DOGECOIN", "DOGE"), "ADA": ("CARDANO", "ADA"),
+        "AVAX": ("AVALANCHE", "AVAX"), "LINK": ("CHAINLINK", "LINK"),
+        "DOT": ("POLKADOT", "DOT"), "INJ": ("INJECTIVE", "INJ"),
+        "BNB": ("BINANCE COIN", "BNB"),
+    }
+    long_names = {"BITCOIN", "ETHEREUM", "SOLANA", "RIPPLE", "DOGECOIN",
+                  "CARDANO", "AVALANCHE", "CHAINLINK", "POLKADOT",
+                  "INJECTIVE", "BINANCE COIN"}
+    terms = aliases.get(base, (base,))
+    relevant = []
+    for item in headlines:
+        text = (item["title"] + " " + item.get("description", "")).upper()
+        matched = any(
+            (term in text if term in long_names else
+             bool(re.search(r"(?<![A-Z0-9])" + re.escape(term) + r"(?![A-Z0-9])", text)))
+            for term in terms
+        )
+        macro_terms = ("FED", "FEDERAL RESERVE", "INFLATION", "CPI", "INTEREST RATE",
+                       "US ECONOMY", "SEC", "CRYPTO MARKET", "BITCOIN ETF")
+        if not matched and base in {"BTC", "ETH", "SOL", "XRP", "BNB"}:
+            matched = any(term in text for term in macro_terms)
+        if not matched:
+            continue
+        lower = text.lower()
+        negative = any(term in lower for term in _NEGATIVE_NEWS_TERMS)
+        positive = any(term in lower for term in _POSITIVE_NEWS_TERMS)
+        sentiment = "negative" if negative and not positive else "positive" if positive and not negative else "mixed"
+        relevant.append({"title": item["title"], "link": item.get("link"),
+                         "published_at": item.get("published_at"),
+                         "sentiment": sentiment, "age_hours": item.get("age_hours")})
+    relevant.sort(key=lambda x: (x["age_hours"] is None, x["age_hours"] or 999))
+    recent_negative = [x for x in relevant if x["sentiment"] == "negative"
+                       and x.get("age_hours") is not None and x["age_hours"] <= 12]
+    penalty = min(2, len(recent_negative))
+    return {"score_adjustment": -penalty,
+            "label": "negative" if penalty else ("mixed/positive" if relevant else "no_relevant_news"),
+            "headlines": relevant[:3]}
+
+
+# ============================================================
 # SIGNAL ENGINE
 # ============================================================
 
@@ -746,7 +855,7 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     }
 
 
-def build_signal(symbol, exchange_name, df, trend, fundamentals):
+def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=None):
     """Hybrid price-action strategy: trend + breakout/retest or EMA pullback.
 
     Uses only the latest closed candle supplied by the scanner. The rest of the
@@ -846,6 +955,11 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
     fund_score = fundamental_score(fundamentals, side)
     if fund_score:
         score += 1; components["fundamental_confirmation"] = fund_score
+    news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
+    news_adjustment = int(news_context.get("score_adjustment", 0))
+    score += news_adjustment
+    components["news_context"] = news_context.get("label", "unavailable")
+    components["news_score_adjustment"] = news_adjustment
     if score < MIN_SCORE:
         print(f"[FILTER] {symbol} {side} setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
         return None
@@ -900,6 +1014,7 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals):
         "components": components,
         "trend": trend,
         "fundamentals": fundamentals,
+        "news": news_context,
         "tp1_hit": False,
         "tp2_hit": False,
         "tp3_hit": False,
@@ -1224,7 +1339,9 @@ def format_signal(signal):
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
         f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
-        f"روند روزانه: {signal['trend']}\n\n"
+        f"روند روزانه: {signal['trend']}\n"
+        f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
+        f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n\n"
 
         f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
@@ -1248,6 +1365,7 @@ def format_signal(signal):
 
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
+    headlines = fetch_news_context()
 
     if not candidates:
         print("No markets found.")
@@ -1302,7 +1420,8 @@ def scan_market(manager, state):
                     continue
 
                 fundamentals = fundamental_data(manager, symbol)
-                signal = build_signal(symbol, exchange_name, df, trend, fundamentals)
+                news_context = news_context_for_symbol(symbol, headlines)
+                signal = build_signal(symbol, exchange_name, df, trend, fundamentals, news_context)
 
                 if not signal:
                     stats["no_setup_or_score"] += 1
