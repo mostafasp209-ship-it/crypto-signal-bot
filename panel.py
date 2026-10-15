@@ -28,8 +28,8 @@ import requests
 import bot
 
 API = "https://api.telegram.org/bot"
-TOKEN = str(getattr(bot, "TELEGRAM_BOT_TOKEN", "") or "").strip()
-ADMIN_ID = str(getattr(bot, "ADMIN_CHAT_ID", "") or getattr(bot, "TELEGRAM_CHAT_ID", "") or "").strip()
+TOKEN = str(os.getenv("TELEGRAM_BOT_TOKEN", "") or getattr(bot, "TELEGRAM_BOT_TOKEN", "") or "").strip()
+ADMIN_ID = str(os.getenv("ADMIN_CHAT_ID", "") or getattr(bot, "ADMIN_CHAT_ID", "") or getattr(bot, "TELEGRAM_CHAT_ID", "") or "").strip()
 USERS_FILE = Path(os.getenv("USERS_FILE", getattr(bot, "USERS_FILE", "users.json")))
 STATE_FILE = Path(getattr(bot, "DATA_FILE", "signals.json"))
 PAGE_SIZE = 6
@@ -95,6 +95,38 @@ def load_users() -> dict:
 
 
 def load_state() -> dict:
+    """Read the latest signal state committed by GitHub Actions.
+
+    The panel usually runs on a different host from the Actions runner, so its
+    local signals.json may be stale. When GH_REPO is configured, fetch the file
+    from the configured branch; fall back to local state if GitHub is unavailable.
+    """
+    repo = os.getenv("GH_REPO", "").strip()
+    branch = os.getenv("GH_BRANCH", "main").strip() or "main"
+    pat = os.getenv("GH_PAT", "").strip()
+    if repo:
+        url = f"https://api.github.com/repos/{repo}/contents/{STATE_FILE}"
+        headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+        if pat:
+            headers["Authorization"] = f"Bearer {pat}"
+        try:
+            response = requests.get(
+                url, headers=headers, params={"ref": branch}, timeout=12
+            )
+            if response.ok:
+                payload = response.json()
+                import base64
+                raw = base64.b64decode(payload["content"]).decode("utf-8")
+                data = json.loads(raw)
+                if isinstance(data, dict) and isinstance(data.get("signals", []), list):
+                    data.setdefault("signals", [])
+                    data.setdefault("last_run", None)
+                    return data
+                print("[PANEL] GitHub signals.json has an unexpected format; using local state")
+            else:
+                print(f"[PANEL] Could not fetch remote signal state: HTTP {response.status_code}")
+        except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
+            print(f"[PANEL] Remote signal state unavailable: {type(exc).__name__}: {str(exc)[:120]}")
     try:
         return bot.load_state()
     except Exception:
@@ -129,7 +161,8 @@ def api(method: str, **payload) -> dict | None:
         print("[PANEL] TELEGRAM_BOT_TOKEN is missing")
         return None
     try:
-        response = requests.post(API + TOKEN + "/" + method, json=payload, timeout=20)
+        request_timeout = 35 if method == "getUpdates" else 20
+        response = requests.post(API + TOKEN + "/" + method, json=payload, timeout=request_timeout)
         try:
             data = response.json()
         except ValueError:
@@ -425,12 +458,19 @@ def poll_and_handle(users: dict, state: dict) -> int:
         print("[PANEL] No token; skipped polling")
         return 0
     offset = int(users.get("last_update_id", 0)) + 1
-    result = api("getUpdates", offset=offset, timeout=0, allowed_updates=["message", "callback_query"])
+    # Long-poll in service mode; one-shot scheduled Actions still only checks once.
+    poll_timeout = 25 if "--loop" in sys.argv else 0
+    result = api("getUpdates", offset=offset, timeout=poll_timeout, allowed_updates=["message", "callback_query"])
     if not result or not result.get("ok"):
+        description = (result or {}).get("description", "no response")
+        print(f"[PANEL] getUpdates failed: {str(description)[:180]}")
+        if result and "webhook" in str(description).lower():
+            print("[PANEL] Telegram webhook is set; getUpdates cannot be used until the webhook is removed.")
         return 0
+
     updates = result.get("result", [])
-    max_id = int(users.get("last_update_id", 0))
     handled = 0
+    last_successful_id = int(users.get("last_update_id", 0))
     for update in updates:
         update_id = int(update.get("update_id", 0))
         try:
@@ -438,11 +478,14 @@ def poll_and_handle(users: dict, state: dict) -> int:
                 handle_message(users, state, update["message"])
             elif update.get("callback_query"):
                 handle_callback(users, update["callback_query"])
+            # Persist only through the last successfully handled update. If a
+            # handler raises, leave this update pending for the next poll.
+            last_successful_id = max(last_successful_id, update_id)
+            users["last_update_id"] = last_successful_id
             handled += 1
         except Exception as exc:
             print("[PANEL HANDLER ERROR]", type(exc).__name__, str(exc)[:180])
-        max_id = max(max_id, update_id)
-    users["last_update_id"] = max_id
+            break
     return handled
 
 

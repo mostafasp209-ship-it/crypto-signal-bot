@@ -1219,8 +1219,6 @@ def format_signal(signal):
         if oi is not None else "N/A"
     )
 
-    components = signal.get("components", {})
-
     return (
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
@@ -1235,14 +1233,6 @@ def format_signal(signal):
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
         f"RR: <b>{signal['rr']:.2f}</b>\n\n"
 
-        f"📐 EMA: {components.get('ema', 0)}\n"
-        f"RSI: {components.get('rsi', 0)}\n"
-        f"BB: {components.get('bb', 0)}\n"
-        f"Ichimoku: {components.get('ichi', 0)}\n"
-        f"Fibonacci: {components.get('fib', 0)}\n"
-        f"S/R: {components.get('sr', 0)}\n"
-        f"Brooks: {components.get('brooks', 0)}\n"
-        f"RTM: {components.get('rtm', 0)}\n\n"
 
         f"💰 Funding: {funding_text}\n"
         f"📊 OI: {oi_text}\n"
