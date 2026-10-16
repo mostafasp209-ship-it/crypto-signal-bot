@@ -214,11 +214,12 @@ def reply_keyboard(rows: list[list[str]]) -> dict:
 
 
 def admin_menu() -> dict:
-    return reply_keyboard([[B_USERS, B_STATS], [B_BLOCK, B_BROADCAST], [B_STATUS, B_SCAN], [B_SIGNALS, B_HISTORY], [B_HELP]])
+    # Keep the existing button layout and always expose a one-tap home/menu button.
+    return reply_keyboard([[B_USERS, B_STATS], [B_BLOCK, B_BROADCAST], [B_STATUS, B_SCAN], [B_SIGNALS, B_HISTORY], [B_HELP], [B_MENU]])
 
 
 def user_menu() -> dict:
-    return reply_keyboard([[B_SIGNALS, B_HISTORY], [B_PERF, B_NOTIF], [B_HELP]])
+    return reply_keyboard([[B_SIGNALS, B_HISTORY], [B_PERF, B_NOTIF], [B_HELP], [B_MENU]])
 
 
 def menu_for(chat_id: Any) -> dict:
