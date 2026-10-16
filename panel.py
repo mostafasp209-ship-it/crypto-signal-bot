@@ -45,6 +45,7 @@ B_SIGNALS = "📡 سیگنال‌های فعال"
 B_HISTORY = "🗂 تاریخچه سیگنال‌ها"
 B_PERF = "📈 عملکرد"
 B_NOTIF = "🔔 اعلان‌ها"
+B_PROFILE = "👤 پروفایل من"
 B_HELP = "📖 راهنما"
 B_MENU = "🏠 منو"
 
@@ -219,7 +220,7 @@ def admin_menu() -> dict:
 
 
 def user_menu() -> dict:
-    return reply_keyboard([[B_SIGNALS, B_HISTORY], [B_PERF, B_NOTIF], [B_HELP], [B_MENU]])
+    return reply_keyboard([[B_SIGNALS, B_HISTORY], [B_PERF, B_NOTIF], [B_PROFILE], [B_HELP], [B_MENU]])
 
 
 def menu_for(chat_id: Any) -> dict:
@@ -277,6 +278,26 @@ def show_performance(chat_id: Any, state: dict) -> None:
     closed = [s for s in signals if s.get("status") in ("CLOSED", "EXPIRED")]
     report += f"\n\nسیگنال فعال: <b>{active}</b>\nکل تاریخچه: <b>{len(signals)}</b>"
     send(chat_id, report, menu_for(chat_id))
+
+
+def show_profile(chat_id: Any, user: dict) -> None:
+    """Show a compact, personal account/status card for the current Telegram user."""
+    last_seen = user.get("last_seen")
+    try:
+        seen_text = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(int(last_seen))) if last_seen else "همین حالا"
+    except (TypeError, ValueError, OverflowError):
+        seen_text = "نامشخص"
+    name = html.escape(str(user.get("name") or "کاربر")[:80])
+    notify = "فعال 🔔" if user.get("notify", True) else "خاموش 🔕"
+    status = "مسدود 🚫" if user.get("blocked") else "فعال ✅"
+    send(chat_id,
+         "👤 <b>پروفایل من</b>\\n\\n"
+         f"نام: <b>{name}</b>\\n"
+         f"شناسه تلگرام: <code>{html.escape(str(chat_id))}</code>\\n"
+         f"وضعیت حساب: <b>{status}</b>\\n"
+         f"اعلان‌ها: <b>{notify}</b>\\n"
+         f"آخرین فعالیت: <code>{html.escape(seen_text)}</code>",
+         menu_for(chat_id))
 
 
 def show_users(chat_id: Any, users: dict) -> None:
@@ -425,6 +446,8 @@ def handle_message(users: dict, state: dict, msg: dict) -> None:
         show_signals(chat_id, state, True)
     elif text in (B_PERF, B_STATS):
         show_performance(chat_id, state)
+    elif text == B_PROFILE:
+        show_profile(chat_id, user)
     elif text == B_NOTIF:
         user["notify"] = not user.get("notify", True)
         send(chat_id, "اعلان‌ها " + ("فعال شد 🔔" if user["notify"] else "غیرفعال شد 🔕"), menu_for(chat_id))
