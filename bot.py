@@ -37,6 +37,7 @@ TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
+MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
 MIN_SCORE = 12
 MIN_RR = 1.50
 
