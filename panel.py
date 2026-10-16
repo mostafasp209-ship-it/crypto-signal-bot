@@ -211,7 +211,15 @@ def answer_callback(callback_id: str, text: str = "") -> None:
 
 
 def reply_keyboard(rows: list[list[str]]) -> dict:
-    return {"keyboard": [[{"text": label} for label in row] for row in rows], "resize_keyboard": True, "is_persistent": True}
+    # Let users collapse the keyboard and keep the chat full-screen.
+    # Telegram may otherwise keep reopening the panel after every interaction.
+    return {
+        "keyboard": [[{"text": label} for label in row] for row in rows],
+        "resize_keyboard": True,
+        "one_time_keyboard": True,
+        "is_persistent": False,
+        "input_field_placeholder": "برای باز کردن منو /menu را بزنید",
+    }
 
 
 def admin_menu() -> dict:
