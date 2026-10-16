@@ -140,7 +140,20 @@ def save_users(users: dict) -> None:
 
 
 def is_admin(chat_id: Any) -> bool:
-    return bool(ADMIN_ID) and str(chat_id) == ADMIN_ID
+    cid = str(chat_id)
+    if ADMIN_ID and cid == ADMIN_ID:
+        return True
+
+    # Recovery fallback: explicitly marked admins in users.json remain admins
+    # if the GitHub Actions ADMIN_CHAT_ID secret is missing or stale.
+    try:
+        with USERS_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        users = data.get("users", {}) if isinstance(data, dict) else {}
+        record = users.get(cid, {}) if isinstance(users, dict) else {}
+        return isinstance(record, dict) and record.get("is_admin") is True
+    except (OSError, json.JSONDecodeError, AttributeError):
+        return False
 
 
 def get_user(users: dict, chat_id: Any) -> dict:
