@@ -331,13 +331,18 @@ class ExchangeManager:
                 print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
             print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
 
+            added_from_exchange = 0
             for symbol in symbols:
-                if symbol not in seen:
-                    ordered.append((name, symbol))
-                    seen.add(symbol)
+                if symbol in seen:
+                    continue
+                ordered.append((name, symbol))
+                seen.add(symbol)
+                added_from_exchange += 1
 
                 if MAX_COINS is not None and len(ordered) >= MAX_COINS:
                     return ordered
+                if added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
+                    break
 
         return ordered
 
