@@ -2,9 +2,7 @@ name: Crypto Signal Pro + Telegram Panel
 
 on:
   schedule:
-    # Main market scan every 4 hours
-    - cron: "0 */4 * * *"
-    # Telegram buttons and commands are checked every 5 minutes
+    # Poll the Telegram panel every 5 minutes; scanner is gated to every 4 hours below.
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
@@ -41,13 +39,17 @@ jobs:
         run: python -m py_compile bot.py panel.py
 
       - name: Run market scanner (every 4 hours)
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 */4 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           PYTHONUNBUFFERED: "1"
-        run: python -u bot.py
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] || { [ "$(date -u +%M)" -lt 5 ] && [ "$(( $(date -u +%H) % 4 ))" -eq 0 ]; }; then
+            python -u bot.py
+          else
+            echo "Outside the 4-hour scan window; scanner skipped."
+          fi
 
       - name: Poll Telegram panel
         if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *')
