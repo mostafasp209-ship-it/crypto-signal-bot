@@ -1,22 +1,24 @@
-name: Crypto Signal Pro
+name: Crypto Signal Pro + Telegram Panel
 
 on:
   schedule:
+    # Main market scan every 4 hours
     - cron: "0 */4 * * *"
+    # Telegram buttons and commands are checked every 5 minutes
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: crypto-signal-pro
+  group: crypto-signal-pro-panel
   cancel-in-progress: false
 
 jobs:
-  run-bot:
+  run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -38,7 +40,8 @@ jobs:
       - name: Validate Python syntax
         run: python -m py_compile bot.py panel.py
 
-      - name: Run bot
+      - name: Run market scanner (every 4 hours)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 */4 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -46,13 +49,33 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py
 
-      - name: Save signal state
+      - name: Poll Telegram panel
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *')
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          GH_REPO: mostafasp209-ship-it/crypto-signal-bot
+          GH_BRANCH: main
+          PYTHONUNBUFFERED: "1"
+        run: python -u panel.py --once
+
+      - name: Persist bot and panel state
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -f signals.json ] && [ -n "$(git status --porcelain -- signals.json)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add signals.json
-            git commit -m "Update signal state [skip ci]" || true
-            git push
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          changed=0
+          for file in signals.json users.json; do
+            if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
+              git add "$file"
+              changed=1
+            fi
+          done
+          if [ "$changed" = "1" ]; then
+            git commit -m "Persist bot and Telegram panel state [skip ci]" || true
+            git pull --rebase origin main
+            git push origin HEAD:main
           fi
