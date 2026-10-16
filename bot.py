@@ -36,7 +36,7 @@ QUOTE = "USDT"
 TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
-MAX_COINS = None  # Scan every eligible USDT spot symbol across configured exchanges
+MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
 MIN_SCORE = 12
 MIN_RR = 1.50
 
@@ -318,6 +318,17 @@ class ExchangeManager:
                 continue
 
             symbols = self.market_symbols(ex)
+            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
+            try:
+                tickers = ex.fetch_tickers(symbols)
+                ranked = []
+                for symbol in symbols:
+                    ticker = tickers.get(symbol, {})
+                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
+                    ranked.append((quote_volume, symbol))
+                symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
+            except Exception as exc:
+                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
             print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
 
             for symbol in symbols:
@@ -1349,8 +1360,8 @@ def format_signal(signal):
             f"• {html.escape(str(item.get('title', ''))[:180])}\n"
             for item in signal.get("news", {}).get("headlines", [])[:2]
         )
-        + "\\n"
-
+        + "\n\n"
+        + (
         f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
         f"({signal['risk_pct']:.2f}%)\n"
@@ -1364,12 +1375,40 @@ def format_signal(signal):
         f"📊 OI: {oi_text}\n"
         f"⏱ Expiry: 48h\n"
         f"⚖️ ریسک اسمی: ${signal['risk_usd']:.2f}"
+        )
     )
 
 
 # ============================================================
 # SCANNER
 # ============================================================
+
+def has_potential_long_setup(df):
+    """Cheap 4h prefilter so daily candles are fetched only for plausible setups."""
+    if df is None or len(df) < 205:
+        return False
+    work = add_indicators(df)
+    work = work.dropna(subset=["atr", "ema20", "ema50", "ema200", "rsi"])
+    if len(work) < 60:
+        return False
+    last = work.iloc[-1]
+    close, opn = safe_float(last["close"]), safe_float(last["open"])
+    low, high = safe_float(last["low"]), safe_float(last["high"])
+    atr, ema20 = safe_float(last["atr"]), safe_float(last["ema20"])
+    ema50, ema200 = safe_float(last["ema50"]), safe_float(last["ema200"])
+    rsi = safe_float(last["rsi"])
+    if any(v is None for v in (close, opn, low, high, atr, ema20, ema50, ema200, rsi)) or atr <= 0:
+        return False
+    if not (close > ema50 and ema50 > ema200 and close > opn and 42 <= rsi <= 72):
+        return False
+    if abs(close - opn) > 2.2 * atr or high - low > 3.2 * atr:
+        return False
+    prior = work.iloc[-21:-1]
+    close_location = (close - low) / max(high - low, 1e-12)
+    breakout = close > safe_float(prior["high"].max()) and close_location >= 0.65
+    pullback = low <= ema20 + 0.20 * atr and close > ema20 and close_location >= 0.60
+    return bool(breakout or pullback)
+
 
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
@@ -1413,6 +1452,11 @@ def scan_market(manager, state):
                 raw = manager.fetch_ohlcv(exchange, symbol)
                 df = closed_candles(raw)
                 if len(df) < 210:
+                    stats["no_setup_or_score"] += 1
+                    break
+
+                # Cheap 4h filter first; most symbols skip the daily network request.
+                if not has_potential_long_setup(df):
                     stats["no_setup_or_score"] += 1
                     break
 
@@ -1477,7 +1521,7 @@ def scan_market(manager, state):
                 f"[SCAN PROGRESS] {idx}/{len(candidates)} symbols; "
                 f"signals={stats['signals']}; rate_limited={','.join(sorted(rate_limited_exchanges)) or 'none'}"
             )
-        time.sleep(SLEEP_BETWEEN_SYMBOLS)
+        # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
     signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
     print(
