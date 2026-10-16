@@ -858,8 +858,24 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         tp1, tp2, tp3 = entry + risk * 1.0, entry + risk * 1.8, entry + risk * 2.6
     else:
         tp1, tp2, tp3 = entry - risk * 1.0, entry - risk * 1.8, entry - risk * 2.6
-    reward = abs(tp3 - entry)
-    rr = reward / risk
+    # Weighted reward reflects the planned 50/30/20 partial exits, rather
+    # than reporting only TP3 as if the whole position exits there.
+    weighted_reward = (
+        TP_WEIGHTS["tp1"] * abs(tp1 - entry)
+        + TP_WEIGHTS["tp2"] * abs(tp2 - entry)
+        + TP_WEIGHTS["tp3"] * abs(tp3 - entry)
+    )
+    # Approximate round-trip spot fees per unit at the stop and weighted target.
+    entry_fee_per_unit = entry * FEE_RATE
+    stop_fee_per_unit = abs(sl) * FEE_RATE
+    target_fee_per_unit = (
+        TP_WEIGHTS["tp1"] * abs(tp1) * FEE_RATE
+        + TP_WEIGHTS["tp2"] * abs(tp2) * FEE_RATE
+        + TP_WEIGHTS["tp3"] * abs(tp3) * FEE_RATE
+    )
+    net_risk_per_unit = risk + entry_fee_per_unit + stop_fee_per_unit
+    net_reward_per_unit = weighted_reward - entry_fee_per_unit - target_fee_per_unit
+    rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
 
     if rr < MIN_RR:
         return None
@@ -871,6 +887,7 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
         "tp2": tp2,
         "tp3": tp3,
         "risk_per_unit": risk,
+        "net_risk_per_unit": net_risk_per_unit,
         "rr": rr,
     }
 
@@ -998,11 +1015,13 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     risk_per_unit = abs(levels["entry"] - levels["sl"])
     if risk_per_unit <= 0:
         return None
-    risk_sized_quantity = RISK_USD / risk_per_unit
+    # Size against stop loss plus estimated entry/exit fees.
+    net_risk_per_unit = safe_float(levels.get("net_risk_per_unit"), risk_per_unit)
+    risk_sized_quantity = RISK_USD / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
     cap_quantity = MAX_POSITION_USD / levels["entry"] if MAX_POSITION_USD > 0 else risk_sized_quantity
     position_quantity = min(risk_sized_quantity, cap_quantity)
     position_value = position_quantity * levels["entry"]
-    actual_risk_usd = position_quantity * risk_per_unit
+    actual_risk_usd = position_quantity * net_risk_per_unit
     return {
         "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
         "symbol": symbol,
@@ -1374,7 +1393,7 @@ def format_signal(signal):
         f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
         f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
-        f"RR: <b>{signal['rr']:.2f}</b>\n\n"
+        f"RR وزنی خالص (با کارمزد): <b>{signal['rr']:.2f}</b>\n\n"
 
 
         f"💰 Funding: {funding_text}\n"
