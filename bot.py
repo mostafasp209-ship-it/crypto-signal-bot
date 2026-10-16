@@ -39,7 +39,8 @@ TREND_TIMEFRAME = "1d"
 MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
 MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
 MIN_SCORE = 12
-MIN_RR = 1.50
+# RR is weighted across TP1/TP2/TP3 and includes estimated round-trip fees.
+MIN_RR = 1.35
 
 SIGNAL_EXPIRY_HOURS = 48
 RISK_USD = 10.0
@@ -597,12 +598,13 @@ def rtm_score(df):
     recent = df.tail(12)
     returns = recent["close"].pct_change().dropna()
 
-    positive = returns.tail(4).sum()
-    negative = returns.tail(4).sum()
+    recent_returns = returns.tail(4)
+    positive = recent_returns.clip(lower=0).sum()
+    negative = recent_returns.clip(upper=0).sum()
 
-    if positive > 0.025:
+    if positive > 0.025 and positive > abs(negative):
         return True, False, 1
-    if negative < -0.025:
+    if negative < -0.025 and abs(negative) > positive:
         return False, True, 1
 
     return False, False, 0
