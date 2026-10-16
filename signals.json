@@ -306,10 +306,10 @@
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-15T20:14:27.270113+00:00",
-      "updated_at": "2026-10-15T20:14:27.270123+00:00",
+      "updated_at": "2026-10-16T04:07:16.413231+00:00",
       "expiry_at": "2026-10-17T20:14:27.270126+00:00",
       "entry": 8.471,
-      "sl": 7.90625827152194,
+      "sl": 8.471,
       "tp1": 9.03574172847806,
       "tp2": 9.487535111260508,
       "tp3": 9.939328494042956,
@@ -339,12 +339,12 @@
         "long_short": null,
         "source": null
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 4.845002229818775,
+      "fees_paid": 0.15499777018122537,
       "closed_reason": null
     },
     {
@@ -596,5 +596,5 @@
     "fees": 0.0,
     "sl_methods": {}
   },
-  "last_run": "2026-10-16T03:54:21.864387+00:00"
+  "last_run": "2026-10-16T04:08:28.257183+00:00"
 }
