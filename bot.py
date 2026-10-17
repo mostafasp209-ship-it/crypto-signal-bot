@@ -1433,6 +1433,9 @@ def format_signal(signal):
         f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
         f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
         f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
+        f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
+        f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
+        f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
         f"RR وزنی خالص (با کارمزد): <b>{signal['rr']:.2f}</b>\n\n"
 
 
