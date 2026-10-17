@@ -820,54 +820,91 @@ def news_context_for_symbol(symbol, headlines):
 # SIGNAL ENGINE
 # ============================================================
 
-def calculate_levels(side, entry, atr, sr_support, sr_resistance):
-    entry = safe_float(entry)
-    atr = safe_float(atr)
+def find_support_resistance(df, entry, atr, lookback=120):
+    """Find clustered pivot-based S/R levels using closed candles only."""
+    if df is None or len(df) < 25:
+        return [], []
+    recent = df.tail(lookback).reset_index(drop=True)
+    highs = recent["high"].astype(float).to_numpy()
+    lows = recent["low"].astype(float).to_numpy()
+    tolerance = max((safe_float(atr, 0.0) or 0.0) * 0.35, entry * 0.0025)
+    supports, resistances = [], []
 
+    # A pivot must stand out against two candles on both sides.
+    for i in range(2, len(recent) - 2):
+        if lows[i] <= min(lows[i-2:i]) and lows[i] <= min(lows[i+1:i+3]):
+            level = float(lows[i])
+            if level < entry:
+                supports.append(level)
+        if highs[i] >= max(highs[i-2:i]) and highs[i] >= max(highs[i+1:i+3]):
+            level = float(highs[i])
+            if level > entry:
+                resistances.append(level)
+
+    # Merge nearby pivots into zones and prioritize levels with repeated reactions.
+    def cluster(levels):
+        groups = []
+        for level in sorted(levels):
+            if not groups or level - sum(groups[-1]) / len(groups[-1]) > tolerance:
+                groups.append([level])
+            else:
+                groups[-1].append(level)
+        return sorted(
+            [(sum(g) / len(g), len(g)) for g in groups],
+            key=lambda item: (-item[1], abs(item[0] - entry))
+        )
+
+    supports_c = cluster(supports)
+    resistances_c = cluster(resistances)
+    # Nearest levels first for targets; only distinct, correctly ordered levels.
+    supports_c.sort(key=lambda item: entry - item[0])
+    resistances_c.sort(key=lambda item: item[0] - entry)
+    return supports_c, resistances_c
+
+
+def calculate_levels(side, entry, atr, df):
+    """Place SL behind the nearest structural level and TPs at successive S/R zones."""
+    entry, atr = safe_float(entry), safe_float(atr)
     if not entry or not atr or atr <= 0:
         return None
 
-    # ATR-based stop with a safety floor.
-    stop_distance = max(atr * 1.8, entry * 0.015)
+    supports, resistances = find_support_resistance(df, entry, atr)
+    buffer = max(atr * 0.20, entry * 0.0015)
 
     if side == "BUY":
-        sl = entry - stop_distance
-        tp1 = entry + stop_distance * 1.0
-        tp2 = entry + stop_distance * 1.8
-        tp3 = entry + stop_distance * 2.6
+        # Stop must be below a real support; no synthetic support is invented.
+        if not supports:
+            print("[FILTER] no valid support below entry")
+            return None
+        support = supports[0][0]
+        sl = support - buffer
+        targets = [level for level, touches in resistances if level > entry + buffer]
+        # Avoid taking a target immediately inside a crowded/nearby zone.
+        targets = [x for x in targets if x - entry >= max(atr * 0.6, entry * 0.004)]
+        if len(targets) < 3:
+            print("[FILTER] fewer than 3 valid resistance targets")
+            return None
+        tp1, tp2, tp3 = targets[:3]
     else:
-        sl = entry + stop_distance
-        tp1 = entry - stop_distance * 1.0
-        tp2 = entry - stop_distance * 1.8
-        tp3 = entry - stop_distance * 2.6
+        # SELL logic remains available for future extensions, but current spot bot is long-only.
+        if not resistances:
+            return None
+        resistance = resistances[0][0]
+        sl = resistance + buffer
+        targets = [level for level, touches in supports if level < entry - buffer]
+        if len(targets) < 3:
+            return None
+        tp1, tp2, tp3 = targets[:3]
 
-    # Don't use S/R to move SL into an unsafe position.
-    if side == "BUY" and sr_support:
-        candidate = sr_support * 0.995
-        if candidate < entry and candidate > sl:
-            sl = candidate
-    elif side == "SELL" and sr_resistance:
-        candidate = sr_resistance * 1.005
-        if candidate > entry and candidate < sl:
-            sl = candidate
-
-    # Recalculate all targets from the FINAL stop distance. Previously, S/R
-    # could move the stop without moving targets, making rr1/rr2 inconsistent.
     risk = abs(entry - sl)
-    if risk <= 0:
+    if risk <= 0 or (side == "BUY" and not sl < entry) or (side == "SELL" and not sl > entry):
         return None
-    if side == "BUY":
-        tp1, tp2, tp3 = entry + risk * 1.0, entry + risk * 1.8, entry + risk * 2.6
-    else:
-        tp1, tp2, tp3 = entry - risk * 1.0, entry - risk * 1.8, entry - risk * 2.6
-    # Weighted reward reflects the planned 50/30/20 partial exits, rather
-    # than reporting only TP3 as if the whole position exits there.
+
     weighted_reward = (
         TP_WEIGHTS["tp1"] * abs(tp1 - entry)
         + TP_WEIGHTS["tp2"] * abs(tp2 - entry)
         + TP_WEIGHTS["tp3"] * abs(tp3 - entry)
     )
-    # Approximate round-trip spot fees per unit at the stop and weighted target.
     entry_fee_per_unit = entry * FEE_RATE
     stop_fee_per_unit = abs(sl) * FEE_RATE
     target_fee_per_unit = (
@@ -880,17 +917,16 @@ def calculate_levels(side, entry, atr, sr_support, sr_resistance):
     rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
 
     if rr < MIN_RR:
+        print(f"[FILTER] S/R-based RR {rr:.2f} < MIN_RR={MIN_RR}")
         return None
 
     return {
-        "entry": entry,
-        "sl": sl,
-        "tp1": tp1,
-        "tp2": tp2,
-        "tp3": tp3,
-        "risk_per_unit": risk,
-        "net_risk_per_unit": net_risk_per_unit,
-        "rr": rr,
+        "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "risk_per_unit": risk, "net_risk_per_unit": net_risk_per_unit, "rr": rr,
+        "support": supports[0][0] if supports else None,
+        "resistance": resistances[0][0] if resistances else None,
+        "tp_methods": ["resistance_1", "resistance_2", "resistance_3"] if side == "BUY" else ["support_1", "support_2", "support_3"],
+        "sl_method": "below_support" if side == "BUY" else "above_resistance",
     }
 
 
@@ -1003,10 +1039,8 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         print(f"[FILTER] {symbol} {side} setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
         return None
 
-    recent = df.tail(60)
-    support = safe_float(recent["low"].quantile(0.10))
-    resistance = safe_float(recent["high"].quantile(0.90))
-    levels = calculate_levels(side, close, atr, support, resistance)
+    # Structural S/R levels are calculated from closed-candle swing pivots.
+    levels = calculate_levels(side, close, atr, df)
     if not levels:
         return None
     risk_pct = abs(levels["entry"] - levels["sl"]) / levels["entry"] * 100
@@ -1040,6 +1074,10 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         "tp1": levels["tp1"],
         "tp2": levels["tp2"],
         "tp3": levels["tp3"],
+        "support": levels.get("support"),
+        "resistance": levels.get("resistance"),
+        "sl_method": levels.get("sl_method"),
+        "tp_methods": levels.get("tp_methods", []),
         "rr": levels["rr"],
         "risk_pct": risk_pct,
         # Preserve the original stop distance for correct partial PnL after SL moves to breakeven.
