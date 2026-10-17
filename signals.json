@@ -55,11 +55,11 @@
       "symbol": "BAT/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-15T08:19:19.931083+00:00",
-      "updated_at": "2026-10-15T20:13:41.759489+00:00",
+      "updated_at": "2026-10-17T08:39:33.929850+00:00",
       "expiry_at": "2026-10-17T08:19:19.931101+00:00",
       "entry": 0.1722,
       "sl": 0.1722,
@@ -94,10 +94,11 @@
       "tp1_hit": true,
       "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.2,
-      "realized_pnl": 10.263300580620772,
-      "fees_paid": 0.13669941937922697,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": 12.796220033902951,
+      "fees_paid": 0.1708413355935302,
+      "closed_reason": "48h expiry",
+      "expiry_hit": true
     },
     {
       "id": "PYTH_USDT_BUY_1792052492",
@@ -822,17 +823,17 @@
     }
   ],
   "historical_stats": {
-    "closed": 5,
+    "closed": 6,
     "tp3": 1,
     "tp2_then_sl": 0,
     "tp1_then_sl": 1,
     "sl_direct": 2,
-    "expired": 1,
+    "expired": 2,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -12.744884118457971,
-    "fees": 1.1675898301363483,
+    "net_pnl": 0.05133591544498195,
+    "fees": 1.3384311657298786,
     "sl_methods": {}
   },
-  "last_run": "2026-10-17T07:07:44.421064+00:00"
+  "last_run": "2026-10-17T08:40:43.124852+00:00"
 }
