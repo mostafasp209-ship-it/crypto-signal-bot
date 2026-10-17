@@ -5,11 +5,11 @@
       "symbol": "RSR/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-15T04:19:49.293871+00:00",
-      "updated_at": "2026-10-15T04:19:49.293882+00:00",
+      "updated_at": "2026-10-17T04:39:15.180720+00:00",
       "expiry_at": "2026-10-17T04:19:49.293885+00:00",
       "entry": 0.0020637,
       "sl": 0.0018333581772788474,
@@ -44,10 +44,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -5.617824781939472,
+      "fees_paid": 0.1737417874323564,
+      "closed_reason": "48h expiry",
+      "expiry_hit": true
     },
     {
       "id": "BAT_USDT_BUY_1792052359",
@@ -203,11 +204,11 @@
       "symbol": "TIA/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-15T16:18:52.189100+00:00",
-      "updated_at": "2026-10-16T09:43:06.187538+00:00",
+      "updated_at": "2026-10-17T04:39:15.733436+00:00",
       "expiry_at": "2026-10-17T16:18:52.189112+00:00",
       "entry": 0.5948,
       "sl": 0.5948,
@@ -242,11 +243,11 @@
       },
       "tp1_hit": true,
       "tp2_hit": true,
-      "tp3_hit": false,
-      "remaining_fraction": 0.2,
-      "realized_pnl": 10.165155465103254,
-      "fees_paid": 0.2348445348967445,
-      "closed_reason": null
+      "tp3_hit": true,
+      "remaining_fraction": 0,
+      "realized_pnl": 15.303844331379066,
+      "fees_paid": 0.2961556686209306,
+      "closed_reason": "TP3"
     },
     {
       "id": "XDC_USDT_BUY_1792095318",
@@ -662,20 +663,176 @@
       "fees_paid": 0.21701490566026665,
       "closed_reason": "SL",
       "sl_hit": true
+    },
+    {
+      "id": "TIA_USDT_BUY_1792211967",
+      "symbol": "TIA/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "متوسط",
+      "score": 12,
+      "created_at": "2026-10-17T04:39:27.171761+00:00",
+      "updated_at": "2026-10-17T04:39:27.171772+00:00",
+      "expiry_at": "2026-10-19T04:39:27.171774+00:00",
+      "entry": 0.7327,
+      "sl": 0.6386079856689485,
+      "tp1": 0.8267920143310515,
+      "tp2": 0.9020656257958928,
+      "tp3": 0.977339237260734,
+      "rr": 1.5207029809045,
+      "risk_pct": 12.841819889593491,
+      "initial_risk_per_unit": 0.09409201433105152,
+      "initial_sl": 0.6386079856689485,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 10.0,
+      "position_quantity": 104.75227299153502,
+      "quantity": 104.75227299153502,
+      "position_value": 76.75199042089771,
+      "position_capped": false,
+      "components": {
+        "setup": "BREAKOUT_RETEST",
+        "daily_trend": "BULL",
+        "ema_alignment": 2,
+        "close_strength": 1,
+        "volume_confirmation": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "Bitcoin price steadies around $82K after Fed’s Warsh avoids rate-hike hints",
+            "link": "https://cointelegraph.com/markets/bitcoin-price-steadies-82k-fed-warsh-avoids-rate-hike-hints?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-16T15:45:43+00:00",
+            "sentiment": "mixed",
+            "age_hours": 12.9
+          },
+          {
+            "title": "Ledger’s early implant warnings deserved more action, Karpelès says",
+            "link": "https://cointelegraph.com/news/ledger-early-implant-warnings-mark-karpeles?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-16T13:51:35+00:00",
+            "sentiment": "mixed",
+            "age_hours": 14.8
+          },
+          {
+            "title": "Altcoins outpace bitcoin as celestia jumps 16%, Warsh silent on interest-rate plans",
+            "link": "https://www.coindesk.com/markets/2026/10/16/altcoins-outpace-bitcoin-as-celestia-jumps-16-warsh-silent-on-interest-rate-plans",
+            "published_at": "2026-10-16T10:41:03+00:00",
+            "sentiment": "mixed",
+            "age_hours": 18.0
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
+    },
+    {
+      "id": "METIS_USDT_BUY_1792212004",
+      "symbol": "METIS/USDT",
+      "exchange": "cryptocom",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "متوسط",
+      "score": 12,
+      "created_at": "2026-10-17T04:40:04.633507+00:00",
+      "updated_at": "2026-10-17T04:40:04.633518+00:00",
+      "expiry_at": "2026-10-19T04:40:04.633520+00:00",
+      "entry": 4.209,
+      "sl": 4.016195518333293,
+      "tp1": 4.401804481666706,
+      "tp2": 4.556048067000071,
+      "tp3": 4.710291652333436,
+      "rr": 1.452801499252451,
+      "risk_pct": 4.580766967610033,
+      "initial_risk_per_unit": 0.19280448166670627,
+      "initial_sl": 4.016195518333293,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 9.552372401284845,
+      "position_quantity": 47.51722499406035,
+      "quantity": 47.51722499406035,
+      "position_value": 200.0,
+      "position_capped": true,
+      "components": {
+        "setup": "BREAKOUT_RETEST",
+        "daily_trend": "BULL",
+        "ema_alignment": 2,
+        "close_strength": 1,
+        "volume_confirmation": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "Bitcoin price steadies around $82K after Fed’s Warsh avoids rate-hike hints",
+            "link": "https://cointelegraph.com/markets/bitcoin-price-steadies-82k-fed-warsh-avoids-rate-hike-hints?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-16T15:45:43+00:00",
+            "sentiment": "mixed",
+            "age_hours": 12.9
+          },
+          {
+            "title": "Ledger’s early implant warnings deserved more action, Karpelès says",
+            "link": "https://cointelegraph.com/news/ledger-early-implant-warnings-mark-karpeles?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-16T13:51:35+00:00",
+            "sentiment": "mixed",
+            "age_hours": 14.8
+          },
+          {
+            "title": "Altcoins outpace bitcoin as celestia jumps 16%, Warsh silent on interest-rate plans",
+            "link": "https://www.coindesk.com/markets/2026/10/16/altcoins-outpace-bitcoin-as-celestia-jumps-16-warsh-silent-on-interest-rate-plans",
+            "published_at": "2026-10-16T10:41:03+00:00",
+            "sentiment": "mixed",
+            "age_hours": 18.0
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
   "historical_stats": {
-    "closed": 3,
-    "tp3": 0,
+    "closed": 5,
+    "tp3": 1,
     "tp2_then_sl": 0,
     "tp1_then_sl": 1,
     "sl_direct": 2,
-    "expired": 0,
+    "expired": 1,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -22.430903667897567,
-    "fees": 0.6976923740830614,
+    "net_pnl": -12.744884118457971,
+    "fees": 1.1675898301363483,
     "sl_methods": {}
   },
-  "last_run": "2026-10-17T00:52:42.478874+00:00"
+  "last_run": "2026-10-17T04:40:18.277208+00:00"
 }
