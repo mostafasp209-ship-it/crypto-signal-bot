@@ -256,11 +256,11 @@
       "symbol": "XDC/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-15T20:15:18.399224+00:00",
-      "updated_at": "2026-10-15T20:15:18.399233+00:00",
+      "updated_at": "2026-10-17T20:37:00.183101+00:00",
       "expiry_at": "2026-10-17T20:15:18.399237+00:00",
       "entry": 0.034942,
       "sl": 0.03248546460115404,
@@ -296,21 +296,22 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -4.680587955460188,
+      "fees_paid": 0.2800814514308345,
+      "closed_reason": "48h expiry",
+      "expiry_hit": true
     },
     {
       "id": "INJ_USDT_BUY_1792095267",
       "symbol": "INJ/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-15T20:14:27.270113+00:00",
-      "updated_at": "2026-10-16T04:07:16.413231+00:00",
+      "updated_at": "2026-10-17T20:37:00.333590+00:00",
       "expiry_at": "2026-10-17T20:14:27.270126+00:00",
       "entry": 8.471,
       "sl": 8.471,
@@ -346,10 +347,11 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 4.845002229818775,
-      "fees_paid": 0.15499777018122537,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": 6.861968468650989,
+      "fees_paid": 0.30716467350460636,
+      "closed_reason": "48h expiry",
+      "expiry_hit": true
     },
     {
       "id": "OPX_USDT_BUY_1792122447",
@@ -822,20 +824,99 @@
       "fees_paid": 0.3868234735091471,
       "closed_reason": "SL",
       "sl_hit": true
+    },
+    {
+      "id": "RSR_USDT_BUY_1792269474",
+      "symbol": "RSR/USDT",
+      "exchange": "cryptocom",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "متوسط",
+      "score": 12,
+      "created_at": "2026-10-17T20:37:54.016883+00:00",
+      "updated_at": "2026-10-17T20:37:54.016894+00:00",
+      "expiry_at": "2026-10-19T20:37:54.016895+00:00",
+      "entry": 0.0020222,
+      "sl": 0.0019218391260818382,
+      "tp1": 0.0021315,
+      "tp2": 0.0022178500000000004,
+      "tp3": 0.0029939,
+      "support": 0.001942,
+      "resistance": 0.0021315,
+      "sl_method": "below_support",
+      "tp_methods": [
+        "resistance_1",
+        "resistance_2",
+        "resistance_3"
+      ],
+      "rr": 2.9081364064925053,
+      "risk_pct": 4.962954896556318,
+      "initial_risk_per_unit": 0.00010036087391816187,
+      "initial_sl": 0.0019218391260818382,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 10.0,
+      "position_quantity": 95872.76100559361,
+      "quantity": 95872.76100559361,
+      "position_value": 193.8738973055114,
+      "position_capped": false,
+      "components": {
+        "setup": "EMA_PULLBACK",
+        "daily_trend": "BULL",
+        "ema_alignment": 2,
+        "volume_confirmation": 1,
+        "momentum": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "Polygon sees Coinme acquisition as entry to payments sector dominated by Visa, Stripe",
+            "link": "https://www.coindesk.com/business/2026/10/17/polygon-sees-coinme-acquisition-as-entry-to-payments-sector-dominated-by-visa-stripe",
+            "published_at": "2026-10-17T14:00:00+00:00",
+            "sentiment": "mixed",
+            "age_hours": 6.6
+          },
+          {
+            "title": "Solana shows resilience, but some areas need continued observation, Fidelity says",
+            "link": "https://cointelegraph.com/news/solana-shows-resilience-but-some-areas-need-continued-observation-fidelity-says?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-17T12:58:03+00:00",
+            "sentiment": "mixed",
+            "age_hours": 7.7
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
   "historical_stats": {
-    "closed": 8,
+    "closed": 10,
     "tp3": 1,
     "tp2_then_sl": 0,
     "tp1_then_sl": 1,
     "sl_direct": 3,
-    "expired": 3,
+    "expired": 5,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -18.701374401210174,
-    "fees": 1.8992259467305797,
+    "net_pnl": -16.51999388801937,
+    "fees": 2.4864720716660207,
     "sl_methods": {}
   },
-  "last_run": "2026-10-17T16:39:12.557641+00:00"
+  "last_run": "2026-10-17T20:38:07.371875+00:00"
 }
