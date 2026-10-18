@@ -821,286 +821,368 @@ def news_context_for_symbol(symbol, headlines):
 # ============================================================
 
 def find_support_resistance(df, entry, atr, lookback=120):
-    """Find clustered pivot-based S/R levels using closed candles only."""
-    if df is None or len(df) < 25:
+    """Build ATR-sized support/resistance zones from confirmed 2-left/2-right pivots."""
+    if df is None or len(df) < 30 or not entry or not atr or atr <= 0:
         return [], []
     recent = df.tail(lookback).reset_index(drop=True)
     highs = recent["high"].astype(float).to_numpy()
     lows = recent["low"].astype(float).to_numpy()
-    tolerance = max((safe_float(atr, 0.0) or 0.0) * 0.35, entry * 0.0025)
-    supports, resistances = [], []
+    closes = recent["close"].astype(float).to_numpy()
+    tolerance = max(atr * 0.45, entry * 0.002)
+    pivots = []
 
-    # A pivot must stand out against two candles on both sides.
+    # A pivot is only usable after two candles have closed to its right.
     for i in range(2, len(recent) - 2):
         if lows[i] <= min(lows[i-2:i]) and lows[i] <= min(lows[i+1:i+3]):
-            level = float(lows[i])
-            if level < entry:
-                supports.append(level)
+            pivots.append({"price": float(lows[i]), "idx": i, "kind": "support"})
         if highs[i] >= max(highs[i-2:i]) and highs[i] >= max(highs[i+1:i+3]):
-            level = float(highs[i])
-            if level > entry:
-                resistances.append(level)
+            pivots.append({"price": float(highs[i]), "idx": i, "kind": "resistance"})
 
-    # Merge nearby pivots into zones and prioritize levels with repeated reactions.
-    def cluster(levels):
+    def make_zones(kind):
+        points = sorted((p for p in pivots if p["kind"] == kind), key=lambda p: p["price"])
         groups = []
-        for level in sorted(levels):
-            if not groups or level - sum(groups[-1]) / len(groups[-1]) > tolerance:
-                groups.append([level])
+        for point in points:
+            if not groups or point["price"] - sum(p["price"] for p in groups[-1]) / len(groups[-1]) > tolerance:
+                groups.append([point])
             else:
-                groups[-1].append(level)
-        return sorted(
-            [(sum(g) / len(g), len(g)) for g in groups],
-            key=lambda item: (-item[1], abs(item[0] - entry))
-        )
+                groups[-1].append(point)
 
-    supports_c = cluster(supports)
-    resistances_c = cluster(resistances)
-    # Nearest levels first for targets; only distinct, correctly ordered levels.
-    supports_c.sort(key=lambda item: entry - item[0])
-    resistances_c.sort(key=lambda item: item[0] - entry)
-    return supports_c, resistances_c
+        zones = []
+        for group in groups:
+            center = sum(p["price"] for p in group) / len(group)
+            lo_zone, hi_zone = center - tolerance * 0.35, center + tolerance * 0.35
+            # Count separate visits, not every candle spent inside the zone.
+            touches = 0
+            armed = True
+            last_touch = None
+            for j in range(max(p["idx"] for p in group) + 3, len(recent)):
+                intersects = lows[j] <= hi_zone and highs[j] >= lo_zone
+                if armed and intersects:
+                    touches += 1
+                    last_touch = j
+                    armed = False
+                if not intersects and abs(closes[j] - center) >= max(atr * 0.65, tolerance):
+                    armed = True
+            # Recency is measured from the most recent confirmed pivot in this cluster.
+            last_pivot = max(p["idx"] for p in group)
+            zones.append({
+                "center": center, "low": lo_zone, "high": hi_zone,
+                "pivot_count": len(group), "touches": touches,
+                "last_pivot": last_pivot, "last_touch": last_touch,
+                "age": len(recent) - 1 - last_pivot,
+                "fresh": touches == 0,
+            })
+        return zones
+
+    support_zones = [z for z in make_zones("support") if z["center"] < entry]
+    resistance_zones = [z for z in make_zones("resistance") if z["center"] > entry]
+    support_zones.sort(key=lambda z: entry - z["center"])
+    resistance_zones.sort(key=lambda z: z["center"] - entry)
+    # Preserve the tuple interface used by level/notification code.
+    supports = [(z["center"], z["touches"], z) for z in support_zones]
+    resistances = [(z["center"], z["touches"], z) for z in resistance_zones]
+    return supports, resistances
+
+
+def _candle_rejection(row, side, atr):
+    opn, close = float(row["open"]), float(row["close"])
+    high, low = float(row["high"]), float(row["low"])
+    span = max(high - low, 1e-12)
+    body = abs(close - opn)
+    close_loc = (close - low) / span
+    lower_wick = min(opn, close) - low
+    upper_wick = high - max(opn, close)
+    if side == "BUY":
+        return close > opn and close_loc >= 0.62 and (lower_wick >= body * 0.35 or body >= 0.35 * atr)
+    return close < opn and close_loc <= 0.38 and (upper_wick >= body * 0.35 or body >= 0.35 * atr)
+
+
+def _trendline_context(df, atr):
+    """Return a conservative trendline read from the last confirmed swing pivots."""
+    if df is None or len(df) < 20:
+        return {"up_near": False, "down_near": False, "up_break": False, "down_break": False}
+    hi = df["high"].astype(float).to_numpy()
+    lo = df["low"].astype(float).to_numpy()
+    piv_hi, piv_lo = [], []
+    for i in range(2, len(df) - 2):
+        if hi[i] >= max(hi[i-2:i]) and hi[i] >= max(hi[i+1:i+3]):
+            piv_hi.append((i, hi[i]))
+        if lo[i] <= min(lo[i-2:i]) and lo[i] <= min(lo[i+1:i+3]):
+            piv_lo.append((i, lo[i]))
+    last_close = float(df.iloc[-1]["close"])
+    out = {"up_near": False, "down_near": False, "up_break": False, "down_break": False}
+    if len(piv_lo) >= 2:
+        (x1, y1), (x2, y2) = piv_lo[-2:]
+        if x2 > x1 and y2 > y1:
+            projected = y2 + (y2-y1) / (x2-x1) * (len(df)-1-x2)
+            out["up_near"] = abs(last_close-projected) <= 0.45*atr
+            out["up_break"] = last_close < projected - 0.20*atr
+    if len(piv_hi) >= 2:
+        (x1, y1), (x2, y2) = piv_hi[-2:]
+        if x2 > x1 and y2 < y1:
+            projected = y2 + (y2-y1) / (x2-x1) * (len(df)-1-x2)
+            out["down_near"] = abs(last_close-projected) <= 0.45*atr
+            out["down_break"] = last_close > projected + 0.20*atr
+    return out
 
 
 def calculate_levels(side, entry, atr, df):
-    """Place SL behind the nearest structural level and TPs at successive S/R zones."""
+    """Use structural invalidation and successive zones; keep fee-aware weighted RR."""
     entry, atr = safe_float(entry), safe_float(atr)
     if not entry or not atr or atr <= 0:
         return None
-
     supports, resistances = find_support_resistance(df, entry, atr)
-    buffer = max(atr * 0.20, entry * 0.0015)
+    buffer = max(atr * 0.22, entry * 0.0015)
 
     if side == "BUY":
-        # Stop must be below a real support; no synthetic support is invented.
         if not supports:
-            print("[FILTER] no valid support below entry")
+            print("[FILTER] no structural support below entry")
             return None
         support = supports[0][0]
         sl = support - buffer
-        targets = [level for level, touches in resistances if level > entry + buffer]
-        # Avoid taking a target immediately inside a crowded/nearby zone.
-        targets = [x for x in targets if x - entry >= max(atr * 0.6, entry * 0.004)]
+        targets = [item[0] for item in resistances if item[0] > entry + max(atr * 0.55, entry * 0.003)]
         if len(targets) < 3:
-            print("[FILTER] fewer than 3 valid resistance targets")
+            print("[FILTER] fewer than 3 distinct resistance zones for structural targets")
             return None
         tp1, tp2, tp3 = targets[:3]
     else:
-        # SELL logic remains available for future extensions, but current spot bot is long-only.
         if not resistances:
             return None
         resistance = resistances[0][0]
         sl = resistance + buffer
-        targets = [level for level, touches in supports if level < entry - buffer]
+        targets = [item[0] for item in supports if item[0] < entry - max(atr * 0.55, entry * 0.003)]
         if len(targets) < 3:
             return None
         tp1, tp2, tp3 = targets[:3]
 
     risk = abs(entry - sl)
-    if risk <= 0 or (side == "BUY" and not sl < entry) or (side == "SELL" and not sl > entry):
+    if risk <= 0 or (side == "BUY" and sl >= entry) or (side == "SELL" and sl <= entry):
         return None
-
-    weighted_reward = (
-        TP_WEIGHTS["tp1"] * abs(tp1 - entry)
-        + TP_WEIGHTS["tp2"] * abs(tp2 - entry)
-        + TP_WEIGHTS["tp3"] * abs(tp3 - entry)
-    )
-    entry_fee_per_unit = entry * FEE_RATE
-    stop_fee_per_unit = abs(sl) * FEE_RATE
-    target_fee_per_unit = (
-        TP_WEIGHTS["tp1"] * abs(tp1) * FEE_RATE
-        + TP_WEIGHTS["tp2"] * abs(tp2) * FEE_RATE
-        + TP_WEIGHTS["tp3"] * abs(tp3) * FEE_RATE
-    )
-    net_risk_per_unit = risk + entry_fee_per_unit + stop_fee_per_unit
-    net_reward_per_unit = weighted_reward - entry_fee_per_unit - target_fee_per_unit
-    rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
-
+    weighted_reward = sum(TP_WEIGHTS[k] * abs(target-entry) for k, target in
+                          (("tp1", tp1), ("tp2", tp2), ("tp3", tp3)))
+    entry_fee = entry * FEE_RATE
+    stop_fee = abs(sl) * FEE_RATE
+    target_fee = sum(TP_WEIGHTS[k] * abs(target) * FEE_RATE for k, target in
+                     (("tp1", tp1), ("tp2", tp2), ("tp3", tp3)))
+    net_risk = risk + entry_fee + stop_fee
+    net_reward = weighted_reward - entry_fee - target_fee
+    rr = net_reward / net_risk if net_risk > 0 else 0.0
     if rr < MIN_RR:
-        print(f"[FILTER] S/R-based RR {rr:.2f} < MIN_RR={MIN_RR}")
+        print(f"[FILTER] structural RR {rr:.2f} < MIN_RR={MIN_RR}")
         return None
-
     return {
         "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-        "risk_per_unit": risk, "net_risk_per_unit": net_risk_per_unit, "rr": rr,
+        "risk_per_unit": risk, "net_risk_per_unit": net_risk, "rr": rr,
         "support": supports[0][0] if supports else None,
         "resistance": resistances[0][0] if resistances else None,
         "tp_methods": ["resistance_1", "resistance_2", "resistance_3"] if side == "BUY" else ["support_1", "support_2", "support_3"],
-        "sl_method": "below_support" if side == "BUY" else "above_resistance",
+        "sl_method": "below_support_zone" if side == "BUY" else "above_resistance_zone",
     }
 
 
 def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=None):
-    """Hybrid price-action strategy: trend + breakout/retest or EMA pullback.
-
-    Uses only the latest closed candle supplied by the scanner. The rest of the
-    signal schema and trade-management code intentionally remain unchanged.
+    """Price-action setup engine: S/R zones, first touch, trendlines, spike/two-leg pullback,
+    breakout-retest and failed breakdown. Long entries only because this is a spot bot.
     """
     if df is None or len(df) < 205:
         return None
-
     df = add_indicators(df).dropna(subset=["atr", "ema20", "ema50", "ema200", "rsi"]).reset_index(drop=True)
-    if len(df) < 60:
+    if len(df) < 80:
         return None
 
     i = len(df) - 1
     last = df.iloc[i]
-    prev = df.iloc[i - 1]
-    close = safe_float(last["close"])
-    opn = safe_float(last["open"])
-    high = safe_float(last["high"])
-    low = safe_float(last["low"])
+    close, opn = safe_float(last["close"]), safe_float(last["open"])
+    high, low = safe_float(last["high"]), safe_float(last["low"])
     atr = safe_float(last["atr"])
     volume = safe_float(last.get("volume"), 0.0) or 0.0
-    if not close or not atr or atr <= 0 or not opn:
+    if not close or not atr or atr <= 0 or opn is None:
         return None
-
-    # Compare the signal candle only with candles that preceded it.
-    prior = df.iloc[i-20:i]
-    prior_high = safe_float(prior["high"].max())
-    prior_low = safe_float(prior["low"].min())
+    span = max(high-low, 1e-12)
+    body = abs(close-opn)
+    close_loc = (close-low)/span
+    prior = df.iloc[max(0, i-20):i]
+    if len(prior) < 15:
+        return None
+    prior_high, prior_low = float(prior["high"].max()), float(prior["low"].min())
     vol_base = safe_float(df["volume"].iloc[max(0, i-20):i].median(), 0.0) or 0.0
-    candle_range = max(high - low, 1e-12)
-    close_location = (close - low) / candle_range
-    body = abs(close - opn)
+    ema20, ema50, ema200 = map(float, (last["ema20"], last["ema50"], last["ema200"]))
     rsi = safe_float(last["rsi"], 50.0)
+    bullish_trend = trend == "BULL" and close > ema50 and ema50 > ema200
+    bearish_trend = trend == "BEAR" and close < ema50 and ema50 < ema200
 
-    bullish_trend = (
-        trend == "BULL"
-        and close > safe_float(last["ema50"])
-        and safe_float(last["ema50"]) > safe_float(last["ema200"])
-    )
-    bearish_trend = (
-        trend == "BEAR"
-        and close < safe_float(last["ema50"])
-        and safe_float(last["ema50"]) < safe_float(last["ema200"])
-    )
+    supports, resistances = find_support_resistance(df, close, atr)
+    if not supports and not resistances:
+        return None
+    nearest_support = supports[0][2] if supports else None
+    nearest_resistance = resistances[0][2] if resistances else None
+    trendlines = _trendline_context(df, atr)
 
-    # Breakout-and-hold: prior range is calculated without the current candle.
-    buy_breakout = (
-        bullish_trend and close > prior_high
-        and close > opn and close_location >= 0.65
-        and body >= 0.35 * atr and 42 <= rsi <= 72
-    )
-    sell_breakout = (
-        bearish_trend and close < prior_low
-        and close < opn and close_location <= 0.35
-        and body >= 0.35 * atr and 28 <= rsi <= 58
-    )
+    # Zone bounce: price enters a support zone and closes with a bullish rejection.
+    support_bounce = False
+    support_zone = None
+    if nearest_support:
+        z = nearest_support
+        support_bounce = (low <= z["high"] and close >= z["low"] and
+                          _candle_rejection(last, "BUY", atr) and
+                          (bullish_trend or trend == "NEUTRAL" or trendlines["up_near"]))
+        if support_bounce:
+            support_zone = z
 
-    # Trend pullback: price tests EMA20 and closes back in trend direction.
-    buy_pullback = (
-        bullish_trend and low <= safe_float(last["ema20"]) + 0.20 * atr
-        and close > safe_float(last["ema20"]) and close > opn
-        and close_location >= 0.60 and 42 <= rsi <= 68
-    )
-    sell_pullback = (
-        bearish_trend and high >= safe_float(last["ema20"]) - 0.20 * atr
-        and close < safe_float(last["ema20"]) and close < opn
-        and close_location <= 0.40 and 32 <= rsi <= 58
-    )
+    # Fresh/first-touch weighting: count a fresh zone only when the current bar is
+    # the first distinct revisit after the pivot zone became known.
+    first_touch = bool(support_zone and support_zone["touches"] <= 1)
+    fresh_zone = bool(support_zone and support_zone["fresh"])
 
-    # Avoid entries in exceptionally quiet or explosive candles.
-    if body > 2.2 * atr or (high - low) > 3.2 * atr:
+    # Al Brooks-inspired spike + pullback: recent bullish displacement followed by
+    # a two-leg pullback (at least two down-closes, with a second low not breaking structure).
+    recent = df.iloc[max(0, i-8):i]
+    spike = False
+    two_leg_pullback = False
+    if len(recent) >= 6:
+        bullish_bars = int((recent["close"] > recent["open"]).sum())
+        recent_body = (recent["close"]-recent["open"]).abs()
+        displacement = float((recent["close"].iloc[-1] - recent["close"].iloc[-5]))
+        spike = bullish_bars >= 3 and displacement >= 1.2*atr and float(recent_body.tail(3).mean()) >= 0.30*atr
+        pull = df.iloc[max(0, i-5):i]
+        down_closes = int((pull["close"] < pull["close"].shift(1)).sum())
+        local_low = float(pull["low"].min())
+        two_leg_pullback = down_closes >= 2 and local_low >= float(df.iloc[max(0, i-12):i-5]["low"].min()) - 0.15*atr if i >= 12 else False
+    spike_two_leg = bool(spike and two_leg_pullback and close > opn and close_loc >= 0.58 and close > ema20 and bullish_trend)
+
+    # Breakout then retest: a confirmed earlier close above a zone, followed by a revisit
+    # and a bullish trigger. It is not labelled a retest from a breakout candle alone.
+    breakout_retest = False
+    retest_zone = None
+    for back in range(2, min(6, i-20)):
+        k = i-back
+        prior_res = [item[2] for item in resistances if item[2]["last_pivot"] < k and
+                     float(df.iloc[k]["close"]) > item[2]["high"] + 0.12*atr]
+        if not prior_res:
+            continue
+        z = min(prior_res, key=lambda item: abs(float(df.iloc[k]["close"])-item["center"]))
+        window = df.iloc[k+1:i+1]
+        touched = bool(((window["low"] <= z["high"] + 0.15*atr) &
+                        (window["high"] >= z["low"] - 0.15*atr)).any())
+        if touched and close > z["center"] and _candle_rejection(last, "BUY", atr) and bullish_trend:
+            breakout_retest, retest_zone = True, z
+            break
+
+    # Failed breakdown: a wick breaks support, but the candle closes back above the zone.
+    failed_breakdown = False
+    failure_zone = None
+    for item in supports:
+        z = item[2]
+        if low < z["low"] - 0.12*atr and close > z["high"] and close > opn and close_loc >= 0.60:
+            failed_breakdown, failure_zone = True, z
+            break
+
+    # Trendline pullback is a separate setup, not a substitute for horizontal structure.
+    trendline_pullback = bool(trendlines["up_near"] and bullish_trend and
+                              low <= ema20 + 0.35*atr and close > opn and close_loc >= 0.58)
+
+    setup_candidates = []
+    if failed_breakdown:
+        setup_candidates.append(("FAILED_BREAKDOWN", 15, failure_zone))
+    if breakout_retest:
+        setup_candidates.append(("BREAKOUT_RETEST", 14, retest_zone))
+    if support_bounce:
+        setup_candidates.append(("SR_FIRST_TOUCH" if first_touch else "SR_BOUNCE", 12, support_zone))
+    if spike_two_leg:
+        setup_candidates.append(("SPIKE_TWO_LEG_PULLBACK", 13, support_zone))
+    if trendline_pullback:
+        setup_candidates.append(("TRENDLINE_PULLBACK", 12, nearest_support))
+
+    if not setup_candidates:
+        return None
+    setup, base_score, setup_zone = max(setup_candidates, key=lambda x: x[1])
+
+    # Reject overextended entry candles; all decisions use closed 4h bars.
+    if body > 2.2*atr or span > 3.2*atr:
         return None
 
-    buy_setup = "BREAKOUT_RETEST" if buy_breakout else ("EMA_PULLBACK" if buy_pullback else None)
-    sell_setup = "BREAKDOWN_RETEST" if sell_breakout else ("EMA_PULLBACK" if sell_pullback else None)
-    if buy_setup:
-        side, setup = "BUY", buy_setup
-    elif sell_setup:
-        # This project is spot-long only. A SELL entry is a short position and
-        # must not be advertised as an executable spot signal.
-        print(f"[FILTER] {symbol}: bearish setup ignored (spot-long only)")
-        return None
-    else:
-        return None
+    score = base_score
+    components = {
+        "setup": setup,
+        "daily_trend": trend,
+        "sr_zone_touches": setup_zone.get("touches", 0) if isinstance(setup_zone, dict) else None,
+        "sr_zone_pivots": setup_zone.get("pivot_count", 0) if isinstance(setup_zone, dict) else None,
+        "sr_zone_fresh": bool(setup_zone.get("fresh")) if isinstance(setup_zone, dict) else False,
+        "first_touch": bool(first_touch),
+        "trendline_up_near": bool(trendlines["up_near"]),
+        "trendline_up_broken": bool(trendlines["up_break"]),
+        "spike_detected": bool(spike),
+        "two_leg_pullback": bool(two_leg_pullback),
+        "breakout_retest": bool(breakout_retest),
+        "failed_breakdown": bool(failed_breakdown),
+    }
+    if bullish_trend:
+        score += 2
+        components["trend_alignment"] = 2
+    if close > ema20 > ema50:
+        score += 1
+        components["ema_structure"] = 1
+    if close_loc >= 0.75:
+        score += 1
+        components["strong_close"] = 1
+    if vol_base > 0 and volume >= vol_base*1.2:
+        score += 1
+        components["volume_confirmation"] = 1
+    if 48 <= rsi <= 68:
+        score += 1
+        components["momentum_confirmation"] = 1
+    if fresh_zone or first_touch:
+        score += 1
+        components["freshness_bonus"] = 1
+    if trendlines["up_break"]:
+        score -= 2
+        components["broken_uptrendline_penalty"] = -2
 
-    # Score is a transparent quality score, not a promise of win probability.
-    score = 8
-    components = {"setup": setup, "daily_trend": trend}
-    if (side == "BUY" and close > last["ema20"] > last["ema50"]) or (side == "SELL" and close < last["ema20"] < last["ema50"]):
-        score += 2; components["ema_alignment"] = 2
-    if (side == "BUY" and close_location >= 0.75) or (side == "SELL" and close_location <= 0.25):
-        score += 1; components["close_strength"] = 1
-    if vol_base > 0 and volume >= vol_base * 1.2:
-        score += 1; components["volume_confirmation"] = 1
-    if (side == "BUY" and 48 <= rsi <= 65) or (side == "SELL" and 35 <= rsi <= 52):
-        score += 1; components["momentum"] = 1
-    fund_score = fundamental_score(fundamentals, side)
+    fundamentals = fundamentals or {}
+    fund_score = fundamental_score(fundamentals, "BUY")
     if fund_score:
-        score += 1; components["fundamental_confirmation"] = fund_score
+        score += 1
+        components["fundamental_confirmation"] = fund_score
     news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
     news_adjustment = int(news_context.get("score_adjustment", 0))
     score += news_adjustment
     components["news_context"] = news_context.get("label", "unavailable")
     components["news_score_adjustment"] = news_adjustment
     if score < MIN_SCORE:
-        print(f"[FILTER] {symbol} {side} setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
+        print(f"[FILTER] {symbol} BUY setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
         return None
 
-    # Structural S/R levels are calculated from closed-candle swing pivots.
-    levels = calculate_levels(side, close, atr, df)
+    levels = calculate_levels("BUY", close, atr, df)
     if not levels:
         return None
-    risk_pct = abs(levels["entry"] - levels["sl"]) / levels["entry"] * 100
+    risk_pct = abs(levels["entry"]-levels["sl"])/levels["entry"]*100
     if risk_pct > 15:
         return None
-
-    strength = "قوی" if score >= 13 else "متوسط" if score >= 11 else "ضعیف"
-    risk_per_unit = abs(levels["entry"] - levels["sl"])
-    if risk_per_unit <= 0:
+    strength = "قوی" if score >= 16 else "متوسط" if score >= 13 else "ضعیف"
+    net_risk_per_unit = safe_float(levels.get("net_risk_per_unit"), abs(levels["entry"]-levels["sl"]))
+    if not net_risk_per_unit or net_risk_per_unit <= 0:
         return None
-    # Size against stop loss plus estimated entry/exit fees.
-    net_risk_per_unit = safe_float(levels.get("net_risk_per_unit"), risk_per_unit)
-    risk_sized_quantity = RISK_USD / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
-    cap_quantity = MAX_POSITION_USD / levels["entry"] if MAX_POSITION_USD > 0 else risk_sized_quantity
+    risk_sized_quantity = RISK_USD/net_risk_per_unit
+    cap_quantity = MAX_POSITION_USD/levels["entry"] if MAX_POSITION_USD > 0 else risk_sized_quantity
     position_quantity = min(risk_sized_quantity, cap_quantity)
-    position_value = position_quantity * levels["entry"]
-    actual_risk_usd = position_quantity * net_risk_per_unit
+    position_value = position_quantity*levels["entry"]
+    actual_risk_usd = position_quantity*net_risk_per_unit
     return {
-        "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
-        "symbol": symbol,
-        "exchange": exchange_name,
-        "side": side,
-        "status": "ACTIVE",
-        "strength": strength,
-        "score": int(score),
-        "created_at": iso_now(),
-        "updated_at": iso_now(),
-        "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
-        "entry": levels["entry"],
-        "sl": levels["sl"],
-        "tp1": levels["tp1"],
-        "tp2": levels["tp2"],
-        "tp3": levels["tp3"],
-        "support": levels.get("support"),
-        "resistance": levels.get("resistance"),
-        "sl_method": levels.get("sl_method"),
-        "tp_methods": levels.get("tp_methods", []),
-        "rr": levels["rr"],
-        "risk_pct": risk_pct,
-        # Preserve the original stop distance for correct partial PnL after SL moves to breakeven.
-        "initial_risk_per_unit": abs(levels["entry"] - levels["sl"]),
-        "initial_sl": levels["sl"],
-        "risk_usd": RISK_USD,
-        "risk_target_usd": RISK_USD,
-        "actual_risk_usd": actual_risk_usd,
-        "position_quantity": position_quantity,
-        "quantity": position_quantity,
-        "position_value": position_value,
-        "position_capped": position_quantity + 1e-12 < risk_sized_quantity,
-        "components": components,
-        "trend": trend,
-        "fundamentals": fundamentals,
-        "news": news_context,
-        "tp1_hit": False,
-        "tp2_hit": False,
-        "tp3_hit": False,
-        "remaining_fraction": 1.0,
-        "realized_pnl": 0.0,
-        "fees_paid": 0.0,
-        "closed_reason": None,
+        "id": f"{symbol.replace('/', '_')}_BUY_{int(time.time())}",
+        "symbol": symbol, "exchange": exchange_name, "side": "BUY", "status": "ACTIVE",
+        "strength": strength, "score": int(score), "created_at": iso_now(), "updated_at": iso_now(),
+        "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
+        "entry": levels["entry"], "sl": levels["sl"], "tp1": levels["tp1"],
+        "tp2": levels["tp2"], "tp3": levels["tp3"], "support": levels.get("support"),
+        "resistance": levels.get("resistance"), "sl_method": levels.get("sl_method"),
+        "tp_methods": levels.get("tp_methods", []), "rr": levels["rr"], "risk_pct": risk_pct,
+        "initial_risk_per_unit": abs(levels["entry"]-levels["sl"]), "initial_sl": levels["sl"],
+        "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
+        "position_quantity": position_quantity, "quantity": position_quantity,
+        "position_value": position_value, "position_capped": position_quantity+1e-12 < risk_sized_quantity,
+        "components": components, "trend": trend, "fundamentals": fundamentals, "news": news_context,
+        "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
+        "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
     }
 
 
@@ -1442,12 +1524,11 @@ def format_signal(signal):
 # ============================================================
 
 def has_potential_long_setup(df):
-    """Cheap 4h prefilter so daily candles are fetched only for plausible setups."""
+    """Broad price-action prefilter; detailed S/R structure is evaluated after daily trend."""
     if df is None or len(df) < 205:
         return False
-    work = add_indicators(df)
-    work = work.dropna(subset=["atr", "ema20", "ema50", "ema200", "rsi"])
-    if len(work) < 60:
+    work = add_indicators(df).dropna(subset=["atr", "ema20", "ema50", "ema200", "rsi"]).reset_index(drop=True)
+    if len(work) < 80:
         return False
     last = work.iloc[-1]
     close, opn = safe_float(last["close"]), safe_float(last["open"])
@@ -1457,16 +1538,18 @@ def has_potential_long_setup(df):
     rsi = safe_float(last["rsi"])
     if any(v is None for v in (close, opn, low, high, atr, ema20, ema50, ema200, rsi)) or atr <= 0:
         return False
-    if not (close > ema50 and ema50 > ema200 and close > opn and 42 <= rsi <= 72):
-        return False
-    if abs(close - opn) > 2.2 * atr or high - low > 3.2 * atr:
+    if abs(close-opn) > 2.2*atr or high-low > 3.2*atr:
         return False
     prior = work.iloc[-21:-1]
-    close_location = (close - low) / max(high - low, 1e-12)
-    breakout = close > safe_float(prior["high"].max()) and close_location >= 0.65
-    pullback = low <= ema20 + 0.20 * atr and close > ema20 and close_location >= 0.60
-    return bool(breakout or pullback)
-
+    close_loc = (close-low)/max(high-low, 1e-12)
+    trend_ok = close > ema50 and ema50 > ema200
+    breakout = trend_ok and close > float(prior["high"].max()) and close_loc >= 0.55
+    pullback = trend_ok and low <= ema20 + 0.45*atr and close > opn and close_loc >= 0.55
+    rejection = close > opn and close_loc >= 0.62 and low <= float(work.iloc[-60:-1]["low"].quantile(0.18)) + 0.55*atr
+    failed_breakdown = low < float(work.iloc[-60:-1]["low"].quantile(0.12)) - 0.10*atr and close > opn and close_loc >= 0.60
+    spike_pullback = (close > opn and close > ema20 and
+                      int((work["close"].iloc[-9:-1] > work["open"].iloc[-9:-1]).sum()) >= 3)
+    return bool(breakout or pullback or rejection or failed_breakdown or spike_pullback)
 
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
