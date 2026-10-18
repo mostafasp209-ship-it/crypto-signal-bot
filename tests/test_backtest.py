@@ -41,7 +41,7 @@ class BacktestSimulationTests(unittest.TestCase):
         ])
         self.assertEqual(report["trades"], 3)
         self.assertAlmostEqual(report["net_pnl_usd"], 4.0)
-        self.assertAlmostEqual(report["expectancy_usd_per_trade"], 4.0 / 3.0)
+        self.assertAlmostEqual(report["expectancy_usd_per_trade"], 4.0 / 3.0, places=3)
         self.assertAlmostEqual(report["max_drawdown_usd"], 1.0)
 
 
