@@ -912,11 +912,11 @@
       "symbol": "SAND/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 13,
       "created_at": "2026-10-18T08:38:50.236466+00:00",
-      "updated_at": "2026-10-18T08:38:50.236477+00:00",
+      "updated_at": "2026-10-18T12:43:29.864207+00:00",
       "expiry_at": "2026-10-20T08:38:50.236480+00:00",
       "entry": 0.0647,
       "sl": 0.06311116593740614,
@@ -982,24 +982,27 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -9.355486862442017,
+      "fees_paid": 0.39103554868624424,
+      "closed_reason": "SL",
+      "sl_hit": true
     }
   ],
   "historical_stats": {
-    "closed": 13,
+    "closed": 14,
     "tp3": 1,
     "tp2_then_sl": 0,
     "tp1_then_sl": 1,
-    "sl_direct": 5,
+    "sl_direct": 6,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -32.01842003473226,
-    "fees": 3.32842497141283,
-    "sl_methods": {}
+    "net_pnl": -41.37390689717428,
+    "fees": 3.719460520099074,
+    "sl_methods": {
+      "below_support": 1
+    }
   },
-  "last_run": "2026-10-18T08:39:38.130507+00:00"
+  "last_run": "2026-10-18T12:44:38.449221+00:00"
 }
