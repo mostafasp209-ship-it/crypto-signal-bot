@@ -1056,7 +1056,7 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     retest_zone = None
     for back in range(2, min(6, i-20)):
         k = i-back
-        prior_res = [item[2] for item in resistances if item[2]["last_pivot"] < k and
+        prior_res = [item[2] for item in supports if item[2]["last_pivot"] < k and
                      float(df.iloc[k]["close"]) > item[2]["high"] + 0.12*atr]
         if not prior_res:
             continue
