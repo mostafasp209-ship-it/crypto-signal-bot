@@ -185,6 +185,8 @@ def backtest_symbol(exchange, symbol, limit=700):
 
 
 def _metrics(trades):
+    # Portfolio drawdown must follow exit chronology, not symbol grouping.
+    trades = sorted(trades, key=lambda t: t.get("exit_time", t.get("signal_time", "")))
     pnls = [float(t["pnl"]) for t in trades]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
