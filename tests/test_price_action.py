@@ -30,7 +30,8 @@ class PriceActionTests(unittest.TestCase):
         # Pullback, first bullish trigger, a renewed pullback, then second trigger.
         closes = [100, 101, 102, 103, 104, 105, 104, 103, 102, 103, 102, 103, 104]
         fixture = make_ohlcv(closes)
-        # Ensure the second trigger truly breaks the preceding bar's high.
+        # Make both trigger bars break the immediately preceding bar's high.
+        fixture.loc[9, "high"] = float(fixture.loc[8, "high"]) + 0.20
         fixture.loc[11, "high"] = float(fixture.loc[10, "high"]) + 0.20
         result = bot._count_h1_h2(fixture, lookback=18)
         self.assertTrue(result["h1"])
