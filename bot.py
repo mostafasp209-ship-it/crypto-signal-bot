@@ -978,7 +978,9 @@ def _count_h1_h2(df, lookback=18):
     for start in range(max(1, len(w) - 10), len(w) - 3):
         segment = w.iloc[start:min(start + 4, len(w))]
         values = segment["close"].to_numpy()
-        if int((values[1:] < values[:-1]).sum()) >= 2:
+        if int((values[1:] < values[:-1]).sum()) >= 2 and pullback_start is None:
+            # Keep the start of the pullback sequence so the first trigger,
+            # intervening retracement, and second trigger can all be counted.
             pullback_start = start
     if pullback_start is None:
         return result
