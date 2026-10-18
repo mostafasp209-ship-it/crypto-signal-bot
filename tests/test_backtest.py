@@ -35,14 +35,24 @@ class BacktestSimulationTests(unittest.TestCase):
         self.assertAlmostEqual(result["pnl"], -5.0)
 
     def test_summary_reports_expectancy_and_drawdown(self):
+        trades = [
+            {"symbol": "TEST/USDT", "signal_time": "2026-01-01T00:00:00+00:00", "pnl": 2.0},
+            {"symbol": "TEST/USDT", "signal_time": "2026-01-02T00:00:00+00:00", "pnl": -1.0},
+            {"symbol": "TEST/USDT", "signal_time": "2026-01-04T00:00:00+00:00", "pnl": 3.0},
+        ]
         report = backtest.summarize([
-            {"symbol": "TEST/USDT", "bars": 10,
-             "trades": [{"pnl": 2.0}, {"pnl": -1.0}, {"pnl": 3.0}], "error": None}
+            {"symbol": "TEST/USDT", "bars": 10, "trades": trades, "error": None,
+             "start_time": "2025-12-01T00:00:00+00:00",
+             "end_time": "2026-01-10T00:00:00+00:00",
+             "oos_cutoff": "2026-01-03T00:00:00+00:00"}
         ])
-        self.assertEqual(report["trades"], 3)
-        self.assertAlmostEqual(report["net_pnl_usd"], 4.0)
-        self.assertAlmostEqual(report["expectancy_usd_per_trade"], 4.0 / 3.0, places=3)
-        self.assertAlmostEqual(report["max_drawdown_usd"], 1.0)
+        overall = report["overall"]
+        self.assertEqual(overall["trades"], 3)
+        self.assertAlmostEqual(overall["net_pnl_usd"], 4.0)
+        self.assertAlmostEqual(overall["expectancy_usd_per_trade"], 4.0 / 3.0, places=3)
+        self.assertAlmostEqual(overall["max_drawdown_usd"], 1.0)
+        self.assertEqual(report["out_of_sample_last_30_percent"]["trades"], 1)
+        self.assertAlmostEqual(report["out_of_sample_last_30_percent"]["net_pnl_usd"], 3.0)
 
 
 if __name__ == "__main__":
