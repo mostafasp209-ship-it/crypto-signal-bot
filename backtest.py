@@ -174,35 +174,57 @@ def backtest_symbol(exchange, symbol, limit=700):
         # Do not allow overlapping positions in the same symbol.
         i = max(i + 1, int(outcome["exit_index"]) + 1)
 
-    return {"symbol": symbol, "bars": len(candles), "trades": trades, "error": None}
+    cutoff_index = min(len(candles) - 1, int(len(candles) * 0.70))
+    def as_utc(index):
+        return datetime.fromtimestamp(int(candles.iloc[index]["timestamp"]) / 1000, timezone.utc).isoformat()
+    return {
+        "symbol": symbol, "bars": len(candles), "trades": trades, "error": None,
+        "start_time": as_utc(0), "end_time": as_utc(len(candles) - 1),
+        "oos_cutoff": as_utc(cutoff_index),
+    }
 
 
-def summarize(results):
-    trades = [trade for result in results for trade in result.get("trades", [])]
+def _metrics(trades):
     pnls = [float(t["pnl"]) for t in trades]
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
-    cumulative = 0.0
-    peak = 0.0
-    max_drawdown = 0.0
+    gross_profit, gross_loss = sum(wins), abs(sum(losses))
+    cumulative = peak = max_drawdown = 0.0
     for pnl in pnls:
         cumulative += pnl
         peak = max(peak, cumulative)
         max_drawdown = max(max_drawdown, peak - cumulative)
-    gross_profit = sum(wins)
-    gross_loss = abs(sum(losses))
     return {
-        "symbols": [r["symbol"] for r in results],
-        "bars_by_symbol": {r["symbol"]: r["bars"] for r in results},
-        "trades": len(trades),
-        "wins": len(wins),
-        "losses": len(losses),
+        "trades": len(trades), "wins": len(wins), "losses": len(losses),
         "win_rate_pct": round(100 * len(wins) / len(trades), 2) if trades else 0.0,
         "net_pnl_usd": round(sum(pnls), 4),
         "expectancy_usd_per_trade": round(sum(pnls) / len(pnls), 4) if pnls else 0.0,
         "profit_factor": round(gross_profit / gross_loss, 4) if gross_loss else (None if not gross_profit else "infinite"),
         "max_drawdown_usd": round(max_drawdown, 4),
-        "note": "Exploratory backtest only; not proof of future profitability. Use out-of-sample and multiple market regimes.",
+    }
+
+
+def summarize(results):
+    trades = [trade for result in results for trade in result.get("trades", [])]
+    trades.sort(key=lambda trade: trade.get("signal_time", ""))
+    cutoffs = {result["symbol"]: result.get("oos_cutoff") for result in results}
+    oos_trades = [t for t in trades if cutoffs.get(t["symbol"]) and t["signal_time"] >= cutoffs[t["symbol"]]]
+    setup_groups = {}
+    for trade in trades:
+        setup_groups.setdefault(trade.get("setup", "unknown"), []).append(trade)
+    symbol_groups = {}
+    for trade in trades:
+        symbol_groups.setdefault(trade.get("symbol", "unknown"), []).append(trade)
+    return {
+        "symbols": [r["symbol"] for r in results],
+        "bars_by_symbol": {r["symbol"]: r["bars"] for r in results},
+        "date_ranges_utc": {r["symbol"]: {"start": r.get("start_time"), "end": r.get("end_time")} for r in results},
+        "oos_cutoffs_utc": cutoffs,
+        "overall": _metrics(trades),
+        "out_of_sample_last_30_percent": _metrics(oos_trades),
+        "by_setup": {name: _metrics(sorted(group, key=lambda t: t.get("signal_time", ""))) for name, group in sorted(setup_groups.items())},
+        "by_symbol": {name: _metrics(sorted(group, key=lambda t: t.get("signal_time", ""))) for name, group in sorted(symbol_groups.items())},
+        "note": "Exploratory backtest only; last 30% by time is reported separately. Not proof of future profitability; validate across more assets/regimes and avoid tuning to this sample.",
         "trade_details": trades,
         "errors": [{"symbol": r["symbol"], "error": r["error"]} for r in results if r.get("error")],
     }
