@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "bot.py"
+      - "backtest.py"
       - "tests/**"
       - ".github/workflows/tests.yml"
   workflow_dispatch:
@@ -28,6 +29,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile bot and tests
-        run: python -m py_compile bot.py panel.py tests/test_price_action.py
+        run: python -m py_compile bot.py panel.py backtest.py tests/test_price_action.py tests/test_backtest.py
       - name: Run strategy unit tests
         run: python -m unittest discover -s tests -v
