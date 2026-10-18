@@ -1597,9 +1597,9 @@ def scan_market(manager, state):
 # MAIN
 # ============================================================
 
-def main():
+def main(manage_only=False):
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT")
+    print("CRYPTO SIGNAL BOT" + (" — MANAGEMENT ONLY" if manage_only else ""))
     print("Started:", iso_now())
     print("=" * 70)
 
@@ -1625,6 +1625,10 @@ def main():
     else:
         # Keep the cached historical counters synchronized even if no signal changed.
         refresh_historical_stats(state)
+
+    if manage_only:
+        print("Management-only run complete; market scan skipped.")
+        return
 
     new_signals = scan_market(manager, state)
 
@@ -1670,8 +1674,12 @@ def main():
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
+    args = parser.parse_args()
     try:
-        main()
+        main(manage_only=args.manage_only)
     except Exception:
         traceback.print_exc()
         telegram_send(
