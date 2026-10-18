@@ -1117,55 +1117,45 @@ def duplicate_exists(state, symbol, side):
 
 
 def close_piece(signal, exit_price, fraction, label):
-    entry = safe_float(signal["entry"])
+    """Book a partial exit only when original risk can be determined reliably."""
+    entry = safe_float(signal.get("entry"))
     exit_price = safe_float(exit_price)
+    fraction = safe_float(fraction)
+    if entry is None or entry <= 0 or exit_price is None or exit_price <= 0 or fraction is None or fraction <= 0:
+        print(f"[PNL ERROR] Invalid close values for {signal.get('symbol')}")
+        return False
 
-    if not entry or not exit_price:
-        return
-
-    # Position size must use the ORIGINAL stop distance. The active SL may move
-    # to entry after TP1, which must not make remaining partial exits unaccounted.
     risk_per_unit = safe_float(signal.get("initial_risk_per_unit"))
-    if not risk_per_unit or risk_per_unit <= 0:
-        original_sl = safe_float(signal.get("initial_sl"))
-        if original_sl is None:
-            # Compatibility for older signals: TP1 is one original risk unit away.
-            tp1 = safe_float(signal.get("tp1"))
-            risk_per_unit = abs(tp1 - entry) if tp1 is not None else 0.0
-        else:
-            risk_per_unit = abs(entry - original_sl)
+    original_sl = safe_float(signal.get("initial_sl"))
+    if (risk_per_unit is None or risk_per_unit <= 0) and original_sl is None:
+        current_sl = safe_float(signal.get("sl"))
+        # Never infer risk from TP1; it may not equal the initial stop distance.
+        if current_sl is not None and not math.isclose(current_sl, entry, rel_tol=1e-9, abs_tol=1e-12):
+            original_sl = current_sl
+    if risk_per_unit is None or risk_per_unit <= 0:
+        risk_per_unit = abs(entry - original_sl) if original_sl is not None else 0.0
     if risk_per_unit <= 0:
-        print(f"[PNL ERROR] Cannot determine initial risk for {signal.get('symbol')}")
-        return
+        print(f"[PNL ERROR] Cannot determine original risk for {signal.get('symbol')}; PnL not booked")
+        return False
 
     quantity = safe_float(signal.get("position_quantity"))
     if quantity is None or quantity <= 0:
         quantity = RISK_USD / risk_per_unit
         signal["position_quantity"] = quantity
-    gross = (
-        (exit_price - entry) * quantity
-        if signal["side"] == "BUY"
-        else (entry - exit_price) * quantity
-    )
+    remaining = safe_float(signal.get("remaining_fraction"), 1.0)
+    fraction = min(fraction, max(0.0, remaining))
+    if fraction <= 0:
+        return False
 
     piece_qty = quantity * fraction
-    gross_piece = gross * fraction
-
-    entry_fee = entry * piece_qty * FEE_RATE
-    exit_fee = exit_price * piece_qty * FEE_RATE
-    fees = entry_fee + exit_fee
-
-    net = gross_piece - fees
-
-    signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0) + net
-    signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0) + fees
-    signal["remaining_fraction"] = max(
-        0,
-        safe_float(signal.get("remaining_fraction"), 1) - fraction,
-    )
-
+    gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
+    fees = (entry + exit_price) * piece_qty * FEE_RATE
+    signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
+    signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
+    signal["remaining_fraction"] = max(0.0, remaining - fraction)
     signal[f"{label}_hit"] = True
     signal["updated_at"] = iso_now()
+    return True
 
 
 def price_hit(signal, price, level_name):
