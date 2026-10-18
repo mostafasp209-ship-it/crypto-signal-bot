@@ -851,11 +851,15 @@ def find_support_resistance(df, entry, atr, lookback=120):
         for group in groups:
             center = sum(p["price"] for p in group) / len(group)
             lo_zone, hi_zone = center - tolerance * 0.35, center + tolerance * 0.35
-            # Count separate visits, not every candle spent inside the zone.
+            # Count distinct revisits after the first pivot; don't count the
+            # pivot bars that define this zone as retests.
             touches = 0
             armed = True
             last_touch = None
-            for j in range(max(p["idx"] for p in group) + 3, len(recent)):
+            pivot_indices = {p["idx"] for p in group}
+            for j in range(min(p["idx"] for p in group) + 3, len(recent)):
+                if j in pivot_indices:
+                    continue
                 intersects = lows[j] <= hi_zone and highs[j] >= lo_zone
                 if armed and intersects:
                     touches += 1
@@ -863,7 +867,6 @@ def find_support_resistance(df, entry, atr, lookback=120):
                     armed = False
                 if not intersects and abs(closes[j] - center) >= max(atr * 0.65, tolerance):
                     armed = True
-            # Recency is measured from the most recent confirmed pivot in this cluster.
             last_pivot = max(p["idx"] for p in group)
             zones.append({
                 "center": center, "low": lo_zone, "high": hi_zone,
@@ -924,6 +927,107 @@ def _trendline_context(df, atr):
             out["down_near"] = abs(last_close-projected) <= 0.45*atr
             out["down_break"] = last_close > projected + 0.20*atr
     return out
+
+
+def _market_regime(df, atr):
+    """Classify the latest closed-bar context without using future candles."""
+    if df is None or len(df) < 60 or not atr or atr <= 0:
+        return {"regime": "UNCLEAR", "higher_highs": False, "higher_lows": False}
+    work = df.tail(100).reset_index(drop=True)
+    hi = work["high"].astype(float).to_numpy()
+    lo = work["low"].astype(float).to_numpy()
+    piv_hi, piv_lo = [], []
+    for j in range(2, len(work) - 2):
+        if hi[j] >= max(hi[j-2:j]) and hi[j] >= max(hi[j+1:j+3]):
+            piv_hi.append((j, hi[j]))
+        if lo[j] <= min(lo[j-2:j]) and lo[j] <= min(lo[j+1:j+3]):
+            piv_lo.append((j, lo[j]))
+    higher_highs = len(piv_hi) >= 3 and piv_hi[-1][1] > piv_hi[-2][1] > piv_hi[-3][1]
+    higher_lows = len(piv_lo) >= 3 and piv_lo[-1][1] > piv_lo[-2][1] > piv_lo[-3][1]
+    lower_highs = len(piv_hi) >= 3 and piv_hi[-1][1] < piv_hi[-2][1] < piv_hi[-3][1]
+    lower_lows = len(piv_lo) >= 3 and piv_lo[-1][1] < piv_lo[-2][1] < piv_lo[-3][1]
+    close = float(work.iloc[-1]["close"])
+    ema = work["close"].ewm(span=50, adjust=False).mean()
+    slope = float(ema.iloc[-1] - ema.iloc[-6])
+    if higher_highs and higher_lows and close > float(ema.iloc[-1]) and slope > 0:
+        regime = "UPTREND"
+    elif lower_highs and lower_lows and close < float(ema.iloc[-1]) and slope < 0:
+        regime = "DOWNTREND"
+    else:
+        recent_range = float(work["high"].tail(20).max() - work["low"].tail(20).min())
+        net_move = abs(float(work["close"].iloc[-1]) - float(work["close"].iloc[-21]))
+        efficiency = net_move / max(recent_range, 1e-12)
+        regime = "RANGE" if efficiency < 0.30 else "TRANSITION"
+    return {"regime": regime, "higher_highs": bool(higher_highs),
+            "higher_lows": bool(higher_lows), "lower_highs": bool(lower_highs),
+            "lower_lows": bool(lower_lows), "ema50_slope": slope}
+
+
+def _count_h1_h2(df, lookback=18):
+    """Approximate Brooks-style H1/H2 attempts after a pullback in a bull trend.
+
+    A trigger is a bullish bar that trades above the previous bar's high.
+    H2 requires a distinct second trigger attempt after an intervening pullback;
+    two bullish candles by themselves do not qualify.
+    """
+    result = {"h1": False, "h2": False, "attempts": 0, "pullback_bars": 0}
+    if df is None or len(df) < 8:
+        return result
+    w = df.tail(lookback).reset_index(drop=True)
+    pullback_start = None
+    for start in range(max(1, len(w) - 10), len(w) - 3):
+        segment = w.iloc[start:min(start + 4, len(w))]
+        values = segment["close"].to_numpy()
+        if int((values[1:] < values[:-1]).sum()) >= 2:
+            pullback_start = start
+    if pullback_start is None:
+        return result
+    post = w.iloc[pullback_start + 1:].reset_index(drop=True)
+    result["pullback_bars"] = int(len(post))
+    attempts = 0
+    previous_trigger = None
+    retraced_after_trigger = False
+    for j in range(1, len(post)):
+        row, prev = post.iloc[j], post.iloc[j-1]
+        trigger = float(row["close"]) > float(row["open"]) and float(row["high"]) > float(prev["high"])
+        if trigger:
+            if attempts == 0:
+                attempts = 1
+                previous_trigger = j
+            elif retraced_after_trigger and j > (previous_trigger or 0):
+                attempts = 2
+                break
+        if attempts and previous_trigger is not None and j > previous_trigger:
+            if float(row["low"]) < float(post.iloc[previous_trigger]["low"]) or float(row["close"]) < float(row["open"]):
+                retraced_after_trigger = True
+    result["attempts"] = attempts
+    result["h1"] = attempts >= 1
+    result["h2"] = attempts >= 2
+    return result
+
+
+def _find_breakout_retest(df, atr, bullish_trend):
+    """Find a prior confirmed close above a resistance pivot and a later retest."""
+    if df is None or len(df) < 30 or atr <= 0 or not bullish_trend:
+        return None
+    highs = df["high"].astype(float).to_numpy()
+    lows = df["low"].astype(float).to_numpy()
+    closes = df["close"].astype(float).to_numpy()
+    i = len(df) - 1
+    for k in range(i - 2, max(4, i - 7), -1):
+        for p in range(max(2, k - 35), k - 2):
+            if highs[p] >= max(highs[p-2:p]) and highs[p] >= max(highs[p+1:p+3]):
+                level = highs[p]
+                if closes[k] <= level + 0.12 * atr or closes[k-1] > level:
+                    continue
+                touched = any(lows[j] <= level + 0.20 * atr and highs[j] >= level - 0.20 * atr
+                              for j in range(k + 1, i + 1))
+                last = df.iloc[-1]
+                if touched and lows[i] <= level + 0.20 * atr and closes[i] > level and _candle_rejection(last, "BUY", atr):
+                    return {"center": float(level), "low": float(level - 0.20*atr),
+                            "high": float(level + 0.20*atr), "touches": 1,
+                            "pivot_count": 1, "fresh": False, "last_pivot": p}
+    return None
 
 
 def calculate_levels(side, entry, atr, df):
@@ -1052,21 +1156,8 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
 
     # Breakout then retest: a confirmed earlier close above a zone, followed by a revisit
     # and a bullish trigger. It is not labelled a retest from a breakout candle alone.
-    breakout_retest = False
-    retest_zone = None
-    for back in range(2, min(6, i-20)):
-        k = i-back
-        prior_res = [item[2] for item in supports if item[2]["last_pivot"] < k and
-                     float(df.iloc[k]["close"]) > item[2]["high"] + 0.12*atr]
-        if not prior_res:
-            continue
-        z = min(prior_res, key=lambda item: abs(float(df.iloc[k]["close"])-item["center"]))
-        window = df.iloc[k+1:i+1]
-        touched = bool(((window["low"] <= z["high"] + 0.15*atr) &
-                        (window["high"] >= z["low"] - 0.15*atr)).any())
-        if touched and close > z["center"] and _candle_rejection(last, "BUY", atr) and bullish_trend:
-            breakout_retest, retest_zone = True, z
-            break
+    retest_zone = _find_breakout_retest(df, atr, bullish_trend)
+    breakout_retest = retest_zone is not None
 
     # Failed breakdown: a wick breaks support, but the candle closes back above the zone.
     failed_breakdown = False
@@ -1092,6 +1183,11 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         setup_candidates.append(("SPIKE_TWO_LEG_PULLBACK", 13, support_zone))
     if trendline_pullback:
         setup_candidates.append(("TRENDLINE_PULLBACK", 12, nearest_support))
+    h1_h2 = _count_h1_h2(df.iloc[max(0, i-18):i+1])
+    h2_pullback = bool(h1_h2["h2"] and bullish_trend and close > opn and
+                       close_loc >= 0.58 and close > ema20 and not trendlines["up_break"])
+    if h2_pullback:
+        setup_candidates.append(("H2_SECOND_ENTRY", 16, support_zone or nearest_support))
 
     if not setup_candidates:
         return None
@@ -1115,10 +1211,24 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         "two_leg_pullback": bool(two_leg_pullback),
         "breakout_retest": bool(breakout_retest),
         "failed_breakdown": bool(failed_breakdown),
+        "market_regime": _market_regime(df.iloc[:i+1], atr)["regime"],
+        "h1_detected": bool(h1_h2["h1"]),
+        "h2_detected": bool(h1_h2["h2"]),
+        "h2_attempts": int(h1_h2["attempts"]),
+        "h2_pullback_bars": int(h1_h2["pullback_bars"]),
     }
+    regime_context = _market_regime(df.iloc[:i+1], atr)
     if bullish_trend:
         score += 2
         components["trend_alignment"] = 2
+    if regime_context["regime"] == "UPTREND":
+        score += 2
+        components["market_structure_confirmation"] = 2
+    elif regime_context["regime"] == "RANGE" and setup not in {"FAILED_BREAKDOWN", "SR_FIRST_TOUCH", "SR_BOUNCE"}:
+        return None
+    if setup == "H2_SECOND_ENTRY":
+        score += 2
+        components["h2_second_entry_bonus"] = 2
     if close > ema20 > ema50:
         score += 1
         components["ema_structure"] = 1
