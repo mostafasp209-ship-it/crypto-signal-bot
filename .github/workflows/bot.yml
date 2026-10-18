@@ -49,6 +49,15 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py
 
+      - name: Manage active signals every 5 minutes
+        if: github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
+          PYTHONUNBUFFERED: "1"
+        run: python -u bot.py --manage-only
+
       - name: Poll Telegram panel
         if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *')
         env:
