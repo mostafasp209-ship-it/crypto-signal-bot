@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -55,6 +56,18 @@ class PriceActionTests(unittest.TestCase):
     def test_breakout_retest_requires_bullish_trend(self):
         df = make_ohlcv([100 + np.sin(i / 3.0) for i in range(50)])
         self.assertIsNone(bot._find_breakout_retest(df, 1.0, False))
+
+    def test_sparse_resistance_uses_ordered_fallback_targets(self):
+        df = make_ohlcv([100 + np.sin(i / 3.0) for i in range(50)])
+        support_zone = {"center": 95.0, "touches": 0, "pivot_count": 1}
+        with patch.object(bot, "find_support_resistance", return_value=([(95.0, 0, support_zone)], [])):
+            levels = bot.calculate_levels("BUY", 100.0, 2.0, df)
+        self.assertIsNotNone(levels)
+        self.assertLess(levels["sl"], levels["entry"])
+        self.assertLess(levels["entry"], levels["tp1"])
+        self.assertLess(levels["tp1"], levels["tp2"])
+        self.assertLess(levels["tp2"], levels["tp3"])
+        self.assertIn("fallback", " ".join(levels["tp_methods"]))
 
 
 if __name__ == "__main__":
