@@ -1031,7 +1031,7 @@ def _find_breakout_retest(df, atr, bullish_trend):
 
 
 def calculate_levels(side, entry, atr, df):
-    """Use structural invalidation and successive zones; keep fee-aware weighted RR."""
+    """Set structural invalidation and staged targets; use R-multiples if SR is sparse."""
     entry, atr = safe_float(entry), safe_float(atr)
     if not entry or not atr or atr <= 0:
         return None
@@ -1044,24 +1044,44 @@ def calculate_levels(side, entry, atr, df):
             return None
         support = supports[0][0]
         sl = support - buffer
-        targets = [item[0] for item in resistances if item[0] > entry + max(atr * 0.55, entry * 0.003)]
-        if len(targets) < 3:
-            print("[FILTER] fewer than 3 distinct resistance zones for structural targets")
-            return None
-        tp1, tp2, tp3 = targets[:3]
-    else:
+        risk = entry - sl
+        structural = [float(item[0]) for item in resistances
+                      if float(item[0]) > entry + max(atr * 0.25, entry * 0.001)]
+        structural = sorted(set(structural))
+        tp1 = structural[0] if structural else entry + 1.25 * risk
+        tp2 = structural[1] if len(structural) > 1 and structural[1] > tp1 + 0.25*risk else max(entry + 1.8*risk, tp1 + 0.5*risk)
+        tp3 = structural[2] if len(structural) > 2 and structural[2] > tp2 + 0.25*risk else max(entry + 2.6*risk, tp2 + 0.5*risk)
+        tp_methods = [
+            "resistance_zone" if structural else "fallback_1.25R",
+            "resistance_zone" if len(structural) > 1 and structural[1] > tp1 + 0.25*risk else "fallback_R_multiple",
+            "resistance_zone" if len(structural) > 2 and structural[2] > tp2 + 0.25*risk else "fallback_R_multiple",
+        ]
+    elif side == "SELL":
         if not resistances:
             return None
         resistance = resistances[0][0]
         sl = resistance + buffer
-        targets = [item[0] for item in supports if item[0] < entry - max(atr * 0.55, entry * 0.003)]
-        if len(targets) < 3:
-            return None
-        tp1, tp2, tp3 = targets[:3]
+        risk = sl - entry
+        structural = sorted(set(float(item[0]) for item in supports
+                                if float(item[0]) < entry - max(atr * 0.25, entry * 0.001)), reverse=True)
+        tp1 = structural[0] if structural else entry - 1.25 * risk
+        tp2 = structural[1] if len(structural) > 1 and structural[1] < tp1 - 0.25*risk else min(entry - 1.8*risk, tp1 - 0.5*risk)
+        tp3 = structural[2] if len(structural) > 2 and structural[2] < tp2 - 0.25*risk else min(entry - 2.6*risk, tp2 - 0.5*risk)
+        tp_methods = [
+            "support_zone" if structural else "fallback_1.25R",
+            "support_zone" if len(structural) > 1 and structural[1] < tp1 - 0.25*risk else "fallback_R_multiple",
+            "support_zone" if len(structural) > 2 and structural[2] < tp2 - 0.25*risk else "fallback_R_multiple",
+        ]
+    else:
+        return None
 
-    risk = abs(entry - sl)
     if risk <= 0 or (side == "BUY" and sl >= entry) or (side == "SELL" and sl <= entry):
         return None
+    if side == "BUY" and not (entry < tp1 < tp2 < tp3):
+        return None
+    if side == "SELL" and not (entry > tp1 > tp2 > tp3):
+        return None
+
     weighted_reward = sum(TP_WEIGHTS[k] * abs(target-entry) for k, target in
                           (("tp1", tp1), ("tp2", tp2), ("tp3", tp3)))
     entry_fee = entry * FEE_RATE
@@ -1072,14 +1092,14 @@ def calculate_levels(side, entry, atr, df):
     net_reward = weighted_reward - entry_fee - target_fee
     rr = net_reward / net_risk if net_risk > 0 else 0.0
     if rr < MIN_RR:
-        print(f"[FILTER] structural RR {rr:.2f} < MIN_RR={MIN_RR}")
+        print(f"[FILTER] structural/fallback RR {rr:.2f} < MIN_RR={MIN_RR}")
         return None
     return {
         "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
         "risk_per_unit": risk, "net_risk_per_unit": net_risk, "rr": rr,
         "support": supports[0][0] if supports else None,
         "resistance": resistances[0][0] if resistances else None,
-        "tp_methods": ["resistance_1", "resistance_2", "resistance_3"] if side == "BUY" else ["support_1", "support_2", "support_3"],
+        "tp_methods": tp_methods,
         "sl_method": "below_support_zone" if side == "BUY" else "above_resistance_zone",
     }
 
