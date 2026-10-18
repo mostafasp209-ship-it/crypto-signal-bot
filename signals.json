@@ -517,11 +517,11 @@
       "symbol": "XMR/USDT",
       "exchange": "bitfinex",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-16T03:47:16.031281+00:00",
-      "updated_at": "2026-10-18T00:51:22.854560+00:00",
+      "updated_at": "2026-10-18T04:39:30.341673+00:00",
       "expiry_at": "2026-10-18T03:47:16.031295+00:00",
       "entry": 549.88,
       "sl": 549.88,
@@ -585,10 +585,11 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 3.5092645261666124,
-      "fees_paid": 0.2037129775036703,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": 11.748114820776355,
+      "fees_paid": 0.4121602750958723,
+      "closed_reason": "48h expiry",
+      "expiry_hit": true
     },
     {
       "id": "ZRO_USDT_BUY_1792143808",
@@ -674,11 +675,11 @@
       "symbol": "TIA/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 12,
       "created_at": "2026-10-17T04:39:27.171761+00:00",
-      "updated_at": "2026-10-17T04:39:27.171772+00:00",
+      "updated_at": "2026-10-18T04:39:30.454816+00:00",
       "expiry_at": "2026-10-19T04:39:27.171774+00:00",
       "entry": 0.7327,
       "sl": 0.6386079856689485,
@@ -742,10 +743,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0,
+      "realized_pnl": -11.14149365628886,
+      "fees_paid": 0.14250499217768425,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "METIS_USDT_BUY_1792212004",
@@ -907,17 +909,17 @@
     }
   ],
   "historical_stats": {
-    "closed": 11,
+    "closed": 13,
     "tp3": 1,
     "tp2_then_sl": 0,
     "tp1_then_sl": 1,
-    "sl_direct": 4,
-    "expired": 5,
+    "sl_direct": 5,
+    "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -32.62504119921975,
-    "fees": 2.773759704139273,
+    "net_pnl": -32.01842003473226,
+    "fees": 3.32842497141283,
     "sl_methods": {}
   },
-  "last_run": "2026-10-18T00:52:36.375661+00:00"
+  "last_run": "2026-10-18T04:40:30.854526+00:00"
 }
