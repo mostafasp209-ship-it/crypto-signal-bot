@@ -7,6 +7,8 @@ on:
     # Run the live-market scanner every 4 hours, independently of panel polling.
     - cron: "17 */4 * * *"
   workflow_dispatch:
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -23,7 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -39,6 +41,10 @@ jobs:
 
       - name: Validate Python syntax
         run: python -m py_compile bot.py panel.py
+
+      - name: Run trade-management unit tests
+        if: github.event_name == 'pull_request'
+        run: python -m unittest discover -s tests -v
 
       - name: Run market scanner (every 4 hours)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 */4 * * *'
@@ -70,7 +76,7 @@ jobs:
         run: python -u panel.py --once
 
       - name: Persist bot and panel state
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
