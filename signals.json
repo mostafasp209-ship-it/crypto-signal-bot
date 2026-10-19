@@ -2902,11 +2902,11 @@
       "symbol": "ICP/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:52:36.746718+00:00",
-      "updated_at": "2026-10-19T00:52:36.746733+00:00",
+      "updated_at": "2026-10-19T17:55:30.826478+00:00",
       "expiry_at": "2026-10-21T00:52:36.746735+00:00",
       "entry": 2.906,
       "sl": 2.8619965121137967,
@@ -2991,10 +2991,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -6.03785271851344,
+      "fees_paid": 0.3943565037852719,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "RENDER_USDT_BUY_1792371157",
@@ -5701,19 +5702,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 32,
+    "closed": 33,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 8,
-    "sl_direct": 16,
+    "sl_direct": 17,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -83.09400694923431,
-    "fees": 10.87264139553347,
+    "net_pnl": -89.13185966774775,
+    "fees": 11.266997899318742,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 17
+      "below_support_zone": 18
     }
   },
   "last_run": "2026-10-19T16:45:34.288873+00:00"
