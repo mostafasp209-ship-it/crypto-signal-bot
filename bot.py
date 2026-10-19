@@ -1527,7 +1527,7 @@ def manage_signal_candle(signal, candle):
             # Model gaps through the stop at the candle open, otherwise at the stop level.
             exit_price = min(o, sl) if side == "BUY" else max(o, sl)
             if not close_piece(signal, exit_price, remaining, "sl"):
-                return False
+                return None
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
@@ -1535,7 +1535,7 @@ def manage_signal_candle(signal, candle):
 
     for label in targets_touched:
         if not close_piece(signal, signal.get(label), TP_WEIGHTS[label], label):
-            break
+            return None
         changed = True
         if label == "tp1":
             signal["sl"] = signal["entry"]
@@ -1586,6 +1586,9 @@ def process_completed_candles(signal, exchange, symbol):
                 "timestamp": ts, "open": row[1], "high": row[2],
                 "low": row[3], "close": row[4],
             })
+            # None means accounting failed: do not advance the watermark; retry later.
+            if changed is None:
+                break
             # Advance the watermark even if no level was touched, preventing reprocessing.
             signal["last_processed_candle_ts"] = ts
             if changed:
