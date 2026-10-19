@@ -1626,6 +1626,36 @@ def update_open_signals(state, manager):
             print(f"[MANAGE SKIP] {symbol}: not listed on {exchange_name}")
             continue
 
+        # Prefer completed historical candles so levels crossed between scheduled
+        # runs are not silently missed. Candle-based ambiguity is handled conservatively.
+        candle_events = process_completed_candles(signal, exchange, symbol)
+        side = signal.get("side", "BUY")
+        header = f"<b>{symbol} — {side}</b>"
+        if candle_events:
+            for ce in candle_events:
+                bef = ce["before"]
+                if not bef["tp1_hit"] and ce["tp1_hit"]:
+                    events.append(
+                        f"🎯 <b>TP1 فعال شد (بازسازی کندلی)</b>\n{header}\n"
+                        f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\n"
+                        f"SL جدید: <b>{fmt_price(ce.get('sl'))}</b>"
+                    )
+                if not bef["tp2_hit"] and ce["tp2_hit"]:
+                    events.append(f"🥈 <b>TP2 فعال شد (بازسازی کندلی)</b>\n{header}\n۳۰٪ دیگر از موقعیت ثبت شد.")
+                if not bef["tp3_hit"] and ce["tp3_hit"]:
+                    events.append(f"🥉 <b>TP3 فعال شد (بازسازی کندلی)</b>\n{header}\n۲۰٪ باقی‌مانده ثبت شد.")
+                if bef["status"] == "ACTIVE" and ce["status"] == "CLOSED":
+                    reason = str(ce.get("closed_reason") or "").upper()
+                    title = "🛑 <b>حد ضرر (SL) فعال شد</b>" if reason == "SL" else "✅ <b>موقعیت با TP3 بسته شد</b>" if reason == "TP3" else "📕 <b>موقعیت بسته شد</b>"
+                    events.append(
+                        f"{title}\n{header}\n"
+                        f"دلیل: <b>{reason or 'نامشخص'}</b>\n"
+                        f"سود/زیان ثبت‌شده: <b>$\{safe_float(ce.get('realized_pnl'), 0):.2f}</b>\n"
+                        f"کارمزد ثبت‌شده: <b>$\{safe_float(ce.get('fees_paid'), 0):.2f}</b>"
+                    )
+            # Persist all processed candle transitions and avoid double-processing via ticker.
+            continue
+
         price = manager.ticker_price(exchange, symbol)
         if price is None:
             print(f"[MANAGE SKIP] {symbol}: ticker price unavailable")
