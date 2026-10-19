@@ -36,19 +36,19 @@ def load_ohlcv(path: str, timeframe_hours: int) -> pd.DataFrame:
     raw_ts = df["timestamp"]
     if pd.api.types.is_numeric_dtype(raw_ts):
         ts = pd.to_datetime(raw_ts, unit="ms", utc=True, errors="coerce")
+    elif raw_ts.astype(str).str.fullmatch(r"\\d+(\\.0)?").all():
+        ts = pd.to_datetime(pd.to_numeric(raw_ts, errors="coerce"), unit="ms", utc=True)
     else:
         ts = pd.to_datetime(raw_ts, utc=True, errors="coerce")
-        # Numeric-looking timestamps sometimes arrive as strings.
-        if ts.isna().all():
-            ts = pd.to_datetime(pd.to_numeric(raw_ts, errors="coerce"), unit="ms", utc=True)
 
     df["timestamp"] = ts
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["timestamp", "open", "high", "low", "close", "volume"])
     df = df.sort_values("timestamp").drop_duplicates("timestamp").reset_index(drop=True)
-    if len(df) < 210:
-        raise ValueError(f"{path}: need at least 210 valid candles; found {len(df)}")
+    minimum = 210 if timeframe_hours == 4 else 51
+    if len(df) < minimum:
+        raise ValueError(f"{path}: need at least {minimum} valid candles; found {len(df)}")
     if (df[["open", "high", "low", "close"]] <= 0).any().any():
         raise ValueError(f"{path}: OHLC prices must be positive")
     if (df["high"] < df[["open", "close", "low"]].max(axis=1)).any():
@@ -99,7 +99,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
     exit_reason = "DATA_END"
     exit_time = bars.iloc[-1]["timestamp"]
     exit_price = float(bars.iloc[-1]["close"])
-    last_index = min(len(bars) - 1, signal_index + MAX_HOLD_BARS + 1)
+    last_index = min(len(bars) - 1, signal_index + MAX_HOLD_BARS)
 
     for j in range(signal_index + 1, last_index + 1):
         bar = bars.iloc[j]
@@ -147,7 +147,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
             fees += exit_fee
             net_pnl += remaining * (exit_price / entry - 1.0) - exit_fee
             remaining = 0.0
-            exit_reason = "EXPIRY" if last_index == signal_index + MAX_HOLD_BARS + 1 else "DATA_END"
+            exit_reason = "EXPIRY" if last_index == signal_index + MAX_HOLD_BARS else "DATA_END"
 
     risk_pct = initial_risk / entry
     return {
