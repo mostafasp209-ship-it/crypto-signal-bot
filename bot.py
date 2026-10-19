@@ -1435,8 +1435,9 @@ def manage_signal(signal, current_price):
             if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
                 # Close remaining position at current price.
                 remaining = safe_float(signal.get("remaining_fraction"), 0)
-                if remaining > 0:
-                    close_piece(signal, current_price, remaining, "expiry")
+                if remaining > 0 and not close_piece(signal, current_price, remaining, "expiry"):
+                    # Do not finalize a trade if its remaining PnL could not be booked.
+                    return False
                 signal["status"] = "EXPIRED"
                 signal["closed_reason"] = "48h expiry"
                 signal["updated_at"] = iso_now()
@@ -1447,26 +1448,27 @@ def manage_signal(signal, current_price):
     # Stop is checked before new TP levels.
     if stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0:
-            close_piece(signal, current_price, remaining, "sl")
+        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+            # Keep the signal active so a later run can retry reliable accounting.
+            return False
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
         return True
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        # Breakeven after TP1.
-        signal["sl"] = signal["entry"]
-        changed = True
+        if close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
+            # Breakeven after TP1 only after the partial exit was booked.
+            signal["sl"] = signal["entry"]
+            changed = True
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
-        changed = True
+        if close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
+            changed = True
 
     if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
-        changed = True
+        if close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
+            changed = True
 
     if signal.get("remaining_fraction", 0) <= 0.000001:
         signal["remaining_fraction"] = 0
