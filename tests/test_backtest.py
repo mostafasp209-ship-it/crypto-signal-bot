@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 
@@ -70,6 +72,19 @@ class BacktestSimulationTests(unittest.TestCase):
             pd.Timestamp(trade["exit_time"]) - pd.Timestamp(trade["entry_time"]),
             pd.Timedelta(hours=48),
         )
+
+
+    def test_load_ohlcv_parses_numeric_string_milliseconds(self):
+        start_ms = 1767225600000
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "daily.csv"
+            rows = ["timestamp,open,high,low,close,volume"]
+            for i in range(51):
+                rows.append(f"{start_ms + i * 86400000},100,102,99,101,1000")
+            path.write_text("\\n".join(rows), encoding="utf-8")
+            loaded = backtest.load_ohlcv(str(path), 24)
+        self.assertEqual(len(loaded), 51)
+        self.assertEqual(loaded.iloc[0]["timestamp"], pd.Timestamp("2026-01-01T00:00:00Z"))
 
     def test_summary_handles_empty_trade_list(self):
         self.assertEqual(backtest.summarize(trades := [])["trades"], len(trades))
