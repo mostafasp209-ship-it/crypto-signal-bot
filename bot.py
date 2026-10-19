@@ -1423,59 +1423,192 @@ def stop_hit(signal, price):
 
 
 def manage_signal(signal, current_price):
+    """Manage one signal at a single observed price; return whether state changed.
+
+    NOTE: This function alone cannot reconstruct intrarun stop/target ordering.
+    Historical OHLCV path processing is implemented separately in the next step.
+    """
     if signal.get("status") != "ACTIVE":
         return False
 
     changed = False
 
+    # Preserve expiry semantics: book the remaining position before finalizing.
     created = signal.get("created_at")
     if created:
         try:
             created_dt = datetime.fromisoformat(created)
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
             if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
-                # Close remaining position at current price.
-                remaining = safe_float(signal.get("remaining_fraction"), 0)
-                if remaining > 0:
-                    close_piece(signal, current_price, remaining, "expiry")
+                remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+                if remaining > 0 and not close_piece(signal, current_price, remaining, "expiry"):
+                    return False
                 signal["status"] = "EXPIRED"
                 signal["closed_reason"] = "48h expiry"
                 signal["updated_at"] = iso_now()
                 return True
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            # Invalid timestamps must not silently expire a signal.
+            print(f"[MANAGE ERROR] Invalid created_at for {signal.get('symbol')}: {created!r}")
 
-    # Stop is checked before new TP levels.
+    # If price is already beyond the active stop, book the remaining amount first.
     if stop_hit(signal, current_price):
-        remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0:
-            close_piece(signal, current_price, remaining, "sl")
+        remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+            return False
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
         return True
 
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        # Breakeven after TP1.
-        signal["sl"] = signal["entry"]
+    # Process crossed targets in order and never mark a target hit unless booking succeeded.
+    for label in ("tp1", "tp2", "tp3"):
+        if signal.get(f"{label}_hit"):
+            continue
+        if not price_hit(signal, current_price, label):
+            continue
+        if not close_piece(signal, signal.get(label), TP_WEIGHTS[label], label):
+            # Avoid advancing to later targets if this partial exit could not be booked.
+            break
         changed = True
+        if label == "tp1":
+            signal["sl"] = signal["entry"]
+            signal["updated_at"] = iso_now()
 
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
-        changed = True
-
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
-        changed = True
-
-    if signal.get("remaining_fraction", 0) <= 0.000001:
-        signal["remaining_fraction"] = 0
+    if (safe_float(signal.get("remaining_fraction"), 0.0) or 0.0) <= 0.000001:
+        signal["remaining_fraction"] = 0.0
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "TP3"
         signal["updated_at"] = iso_now()
         changed = True
 
     return changed
+
+
+def manage_signal_candle(signal, candle):
+    """Process one completed OHLCV candle conservatively.
+
+    If a candle crosses both the active stop and any target, assume the stop
+    happened first because OHLC data cannot reveal the intrabar sequence.
+    """
+    if signal.get("status") != "ACTIVE":
+        return False
+
+    ts = safe_float(candle.get("timestamp"))
+    o = safe_float(candle.get("open"))
+    h = safe_float(candle.get("high"))
+    lo = safe_float(candle.get("low"))
+    cl = safe_float(candle.get("close"))
+    if None in (ts, o, h, lo, cl) or min(o, h, lo, cl) <= 0:
+        return False
+
+    changed = False
+    side = signal.get("side", "BUY")
+    sl = safe_float(signal.get("sl"))
+    stop_touched = (lo <= sl) if side == "BUY" and sl is not None else (
+        h >= sl if side != "BUY" and sl is not None else False
+    )
+    targets_touched = []
+    for label in ("tp1", "tp2", "tp3"):
+        if signal.get(f"{label}_hit"):
+            continue
+        level = safe_float(signal.get(label))
+        if level is None:
+            continue
+        touched = (h >= level) if side == "BUY" else (lo <= level)
+        if touched:
+            targets_touched.append(label)
+
+    # Conservative ambiguity policy: stop wins if stop and target occur in same candle.
+    if stop_touched:
+        remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+        if remaining > 0:
+            # Model gaps through the stop at the candle open, otherwise at the stop level.
+            exit_price = min(o, sl) if side == "BUY" else max(o, sl)
+            if not close_piece(signal, exit_price, remaining, "sl"):
+                return None
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "SL"
+        signal["updated_at"] = iso_now()
+        return True
+
+    for label in targets_touched:
+        if not close_piece(signal, signal.get(label), TP_WEIGHTS[label], label):
+            return None
+        changed = True
+        if label == "tp1":
+            signal["sl"] = signal["entry"]
+            signal["updated_at"] = iso_now()
+
+    if (safe_float(signal.get("remaining_fraction"), 0.0) or 0.0) <= 0.000001:
+        signal["remaining_fraction"] = 0.0
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "TP3"
+        signal["updated_at"] = iso_now()
+        changed = True
+    signal["last_processed_candle_ts"] = int(ts)
+    return changed
+
+
+def process_completed_candles(signal, exchange, symbol):
+    """Fetch and process completed 4h candles not previously examined."""
+    try:
+        raw = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=30)
+        if not raw or len(raw) < 2:
+            return []
+        # The last returned candle may still be forming; exclude it explicitly.
+        completed = raw[:-1]
+        created = signal.get("created_at")
+        try:
+            created_dt = datetime.fromisoformat(created) if created else None
+            if created_dt and created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            created_ms = int(created_dt.timestamp() * 1000) if created_dt else 0
+        except (TypeError, ValueError, OverflowError):
+            created_ms = 0
+        last_ts = safe_float(signal.get("last_processed_candle_ts"), None)
+        if last_ts is None:
+            last_ts = created_ms - 1
+
+        events = []
+        for row in completed:
+            ts = int(row[0])
+            if ts <= last_ts or ts < created_ms:
+                continue
+            before = {
+                "status": signal.get("status"),
+                "tp1_hit": bool(signal.get("tp1_hit")),
+                "tp2_hit": bool(signal.get("tp2_hit")),
+                "tp3_hit": bool(signal.get("tp3_hit")),
+            }
+            changed = manage_signal_candle(signal, {
+                "timestamp": ts, "open": row[1], "high": row[2],
+                "low": row[3], "close": row[4],
+            })
+            # None means accounting failed: do not advance the watermark; retry later.
+            if changed is None:
+                break
+            # Advance the watermark even if no level was touched, preventing reprocessing.
+            signal["last_processed_candle_ts"] = ts
+            if changed:
+                events.append({
+                    "timestamp": ts, "before": before,
+                    "status": signal.get("status"),
+                    "tp1_hit": bool(signal.get("tp1_hit")),
+                    "tp2_hit": bool(signal.get("tp2_hit")),
+                    "tp3_hit": bool(signal.get("tp3_hit")),
+                    "sl": signal.get("sl"),
+                    "realized_pnl": signal.get("realized_pnl"),
+                    "fees_paid": signal.get("fees_paid"),
+                    "closed_reason": signal.get("closed_reason"),
+                })
+            if signal.get("status") != "ACTIVE":
+                break
+        return events
+    except Exception as exc:
+        print(f"[CANDLE MANAGER] {symbol}: {type(exc).__name__}: {exc}")
+        return []
 
 
 def update_open_signals(state, manager):
@@ -1494,6 +1627,66 @@ def update_open_signals(state, manager):
             continue
         if symbol not in getattr(exchange, "markets", {}):
             print(f"[MANAGE SKIP] {symbol}: not listed on {exchange_name}")
+            continue
+
+        side = signal.get("side", "BUY")
+        header = f"<b>{symbol} — {side}</b>"
+
+        # Enforce maximum holding time before replaying historical candles.
+        # Otherwise repeated candle events can postpone the 48h expiry.
+        expiry_due = False
+        created = signal.get("created_at")
+        if created:
+            try:
+                created_dt = datetime.fromisoformat(created)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                expiry_due = utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS)
+            except (TypeError, ValueError, OverflowError):
+                print(f"[MANAGE ERROR] Invalid created_at for {symbol}: {created!r}")
+
+        if expiry_due:
+            price = manager.ticker_price(exchange, symbol)
+            if price is None:
+                print(f"[MANAGE SKIP] {symbol}: cannot expire without a usable exit price")
+                continue
+            if manage_signal(signal, price) and signal.get("status") == "EXPIRED":
+                events.append(
+                    f"⌛ <b>اعتبار سیگنال تمام شد</b>\\n{header}\\n"
+                    f"قیمت بررسی/خروج: <b>{fmt_price(price)}</b>\\n"
+                    f"سود/زیان ثبت‌شده: <b>${safe_float(signal.get('realized_pnl'), 0):.2f}</b>"
+                )
+                continue
+            # Failed PnL booking leaves the signal active for a later retry.
+            if signal.get("status") == "ACTIVE":
+                continue
+
+        # Prefer completed historical candles so levels crossed between scheduled
+        # runs are not silently missed. Candle-based ambiguity is handled conservatively.
+        candle_events = process_completed_candles(signal, exchange, symbol)
+        if candle_events:
+            for ce in candle_events:
+                bef = ce["before"]
+                if not bef["tp1_hit"] and ce["tp1_hit"]:
+                    events.append(
+                        f"🎯 <b>TP1 فعال شد (بازسازی کندلی)</b>\n{header}\n"
+                        f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\n"
+                        f"SL جدید: <b>{fmt_price(ce.get('sl'))}</b>"
+                    )
+                if not bef["tp2_hit"] and ce["tp2_hit"]:
+                    events.append(f"🥈 <b>TP2 فعال شد (بازسازی کندلی)</b>\n{header}\n۳۰٪ دیگر از موقعیت ثبت شد.")
+                if not bef["tp3_hit"] and ce["tp3_hit"]:
+                    events.append(f"🥉 <b>TP3 فعال شد (بازسازی کندلی)</b>\n{header}\n۲۰٪ باقی‌مانده ثبت شد.")
+                if bef["status"] == "ACTIVE" and ce["status"] == "CLOSED":
+                    reason = str(ce.get("closed_reason") or "").upper()
+                    title = "🛑 <b>حد ضرر (SL) فعال شد</b>" if reason == "SL" else "✅ <b>موقعیت با TP3 بسته شد</b>" if reason == "TP3" else "📕 <b>موقعیت بسته شد</b>"
+                    events.append(
+                        f"{title}\n{header}\n"
+                        f"دلیل: <b>{reason or 'نامشخص'}</b>\n"
+                        f"سود/زیان ثبت‌شده: <b>${safe_float(ce.get('realized_pnl'), 0):.2f}</b>\n"
+                        f"کارمزد ثبت‌شده: <b>${safe_float(ce.get('fees_paid'), 0):.2f}</b>"
+                    )
+            # Persist all processed candle transitions and avoid double-processing via ticker.
             continue
 
         price = manager.ticker_price(exchange, symbol)
@@ -1859,13 +2052,16 @@ def main(manage_only=False):
     management_events = update_open_signals(state, manager)
     if management_events:
         refresh_historical_stats(state)
-        save_state(state)
         for event_message in management_events:
             telegram_send(event_message)
             time.sleep(0.25)
     else:
         # Keep the cached historical counters synchronized even if no signal changed.
         refresh_historical_stats(state)
+
+    # Persist candle watermarks and other state changes even when no TP/SL event
+    # was emitted; otherwise completed candles can be reprocessed on every run.
+    save_state(state)
 
     if manage_only:
         print("Management-only run complete; market scan skipped.")
