@@ -1696,11 +1696,11 @@
       "symbol": "XLM/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:52:32.096319+00:00",
-      "updated_at": "2026-10-19T02:13:46.442660+00:00",
+      "updated_at": "2026-10-19T11:35:20.178617+00:00",
       "expiry_at": "2026-10-21T00:52:32.096333+00:00",
       "entry": 0.178,
       "sl": 0.178,
@@ -1786,10 +1786,11 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 0.3612359550561802,
-      "fees_paid": 0.200561797752809,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -1.084707865168539,
+      "fees_paid": 0.39931460674157304,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "PENGU_USDT_BUY_1792371154",
@@ -5196,19 +5197,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 19,
+    "closed": 20,
     "tp3": 1,
     "tp2_then_sl": 0,
-    "tp1_then_sl": 2,
+    "tp1_then_sl": 3,
     "sl_direct": 10,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -66.69397970335707,
-    "fees": 5.683852634017833,
+    "net_pnl": -67.77868756852561,
+    "fees": 6.083167240759406,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 4
+      "below_support_zone": 5
     }
   },
   "last_run": "2026-10-19T08:50:06.573404+00:00"
