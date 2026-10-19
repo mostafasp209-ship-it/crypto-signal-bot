@@ -1653,8 +1653,8 @@ def update_open_signals(state, manager):
                     events.append(
                         f"{title}\n{header}\n"
                         f"دلیل: <b>{reason or 'نامشخص'}</b>\n"
-                        f"سود/زیان ثبت‌شده: <b>$\{safe_float(ce.get('realized_pnl'), 0):.2f}</b>\n"
-                        f"کارمزد ثبت‌شده: <b>$\{safe_float(ce.get('fees_paid'), 0):.2f}</b>"
+                        f"سود/زیان ثبت‌شده: <b>${safe_float(ce.get('realized_pnl'), 0):.2f}</b>\n"
+                        f"کارمزد ثبت‌شده: <b>${safe_float(ce.get('fees_paid'), 0):.2f}</b>"
                     )
             # Persist all processed candle transitions and avoid double-processing via ticker.
             continue
