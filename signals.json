@@ -4579,6 +4579,313 @@
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
       "closed_reason": null
+    },
+    {
+      "id": "NYM_USDT_BUY_1792385021",
+      "symbol": "NYM/USDT",
+      "exchange": "bitfinex",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "قوی",
+      "score": 22,
+      "created_at": "2026-10-19T04:43:41.105658+00:00",
+      "updated_at": "2026-10-19T04:43:41.105667+00:00",
+      "expiry_at": "2026-10-21T04:43:41.105670+00:00",
+      "entry": 0.030492,
+      "sl": 0.02761513022264313,
+      "tp1": 0.03408808722169608,
+      "tp2": 0.03567036559924236,
+      "tp3": 0.03797186142112785,
+      "support": 0.02779,
+      "resistance": null,
+      "sl_method": "below_support_zone",
+      "tp_methods": [
+        "fallback_1.25R",
+        "fallback_R_multiple",
+        "fallback_R_multiple"
+      ],
+      "rr": 1.6292101096001332,
+      "risk_pct": 9.434834636484544,
+      "initial_risk_per_unit": 0.002876869777356867,
+      "initial_sl": 0.02761513022264313,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 10.0,
+      "position_quantity": 3407.1818330751535,
+      "quantity": 3407.1818330751535,
+      "position_value": 103.89178845412758,
+      "position_capped": false,
+      "components": {
+        "setup": "H2_SECOND_ENTRY",
+        "daily_trend": "BULL",
+        "sr_zone_touches": 4,
+        "sr_zone_pivots": 1,
+        "sr_zone_fresh": false,
+        "first_touch": false,
+        "trendline_up_near": false,
+        "trendline_up_broken": false,
+        "spike_detected": true,
+        "two_leg_pullback": false,
+        "breakout_retest": false,
+        "failed_breakdown": false,
+        "market_regime": "TRANSITION",
+        "h1_detected": true,
+        "h2_detected": true,
+        "h2_attempts": 2,
+        "h2_pullback_bars": 9,
+        "trend_alignment": 2,
+        "h2_second_entry_bonus": 2,
+        "ema_structure": 1,
+        "strong_close": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0,
+        "nearest_resistance_room_r": null
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "SEC tokenized stock framework faces issuer pushback as Broadcom, Verizon object to OKX-ICE listing",
+            "link": "https://www.coindesk.com/business/2026/10/18/sec-tokenized-stock-framework-faces-issuer-pushback-as-broadcom-verizon-object-to-okx-ice-listing",
+            "published_at": "2026-10-18T23:28:06+00:00",
+            "sentiment": "mixed",
+            "age_hours": 5.3
+          },
+          {
+            "title": "Bitcoin’s $100,000 year-end hope divides analysts as inflation clouds outlook",
+            "link": "https://www.coindesk.com/markets/2026/10/18/bitcoin-s-usd100-000-year-end-hope-divides-analysts-as-inflation-clouds-outlook",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "mixed",
+            "age_hours": 15.7
+          },
+          {
+            "title": "Crypto audits give investors false sense of security as Q3 hacks cost $1.18 billion, Hacken says",
+            "link": "https://www.coindesk.com/tech/2026/10/18/crypto-audits-give-investors-false-sense-of-security-as-q3-hacks-cost-usd1-18-billion-hacken-says",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "negative",
+            "age_hours": 15.7
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
+    },
+    {
+      "id": "INJ_USDT_BUY_1792384990",
+      "symbol": "INJ/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "قوی",
+      "score": 17,
+      "created_at": "2026-10-19T04:43:10.196174+00:00",
+      "updated_at": "2026-10-19T04:43:10.196184+00:00",
+      "expiry_at": "2026-10-21T04:43:10.196186+00:00",
+      "entry": 8.555,
+      "sl": 8.339372898099523,
+      "tp1": 8.795,
+      "tp2": 8.958,
+      "tp3": 9.367,
+      "support": 8.4145,
+      "resistance": 8.795,
+      "sl_method": "below_support_zone",
+      "tp_methods": [
+        "resistance_zone",
+        "resistance_zone",
+        "resistance_zone"
+      ],
+      "rr": 1.659144387993372,
+      "risk_pct": 2.5204804430213557,
+      "initial_risk_per_unit": 0.21562710190047696,
+      "initial_sl": 8.339372898099523,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 5.435919925156668,
+      "position_quantity": 23.378141437755698,
+      "quantity": 23.378141437755698,
+      "position_value": 200.0,
+      "position_capped": true,
+      "components": {
+        "setup": "SR_BOUNCE",
+        "daily_trend": "BULL",
+        "sr_zone_touches": 2,
+        "sr_zone_pivots": 2,
+        "sr_zone_fresh": false,
+        "first_touch": false,
+        "trendline_up_near": false,
+        "trendline_up_broken": false,
+        "spike_detected": false,
+        "two_leg_pullback": false,
+        "breakout_retest": false,
+        "failed_breakdown": false,
+        "market_regime": "RANGE",
+        "h1_detected": true,
+        "h2_detected": false,
+        "h2_attempts": 1,
+        "h2_pullback_bars": 8,
+        "trend_alignment": 2,
+        "ema_structure": 1,
+        "strong_close": 1,
+        "momentum_confirmation": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0,
+        "nearest_resistance_room_r": 1.11
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "SEC tokenized stock framework faces issuer pushback as Broadcom, Verizon object to OKX-ICE listing",
+            "link": "https://www.coindesk.com/business/2026/10/18/sec-tokenized-stock-framework-faces-issuer-pushback-as-broadcom-verizon-object-to-okx-ice-listing",
+            "published_at": "2026-10-18T23:28:06+00:00",
+            "sentiment": "mixed",
+            "age_hours": 5.3
+          },
+          {
+            "title": "Bitcoin’s $100,000 year-end hope divides analysts as inflation clouds outlook",
+            "link": "https://www.coindesk.com/markets/2026/10/18/bitcoin-s-usd100-000-year-end-hope-divides-analysts-as-inflation-clouds-outlook",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "mixed",
+            "age_hours": 15.7
+          },
+          {
+            "title": "Crypto audits give investors false sense of security as Q3 hacks cost $1.18 billion, Hacken says",
+            "link": "https://www.coindesk.com/tech/2026/10/18/crypto-audits-give-investors-false-sense-of-security-as-q3-hacks-cost-usd1-18-billion-hacken-says",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "negative",
+            "age_hours": 15.7
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
+    },
+    {
+      "id": "SOL_USDT_BUY_1792384988",
+      "symbol": "SOL/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "قوی",
+      "score": 17,
+      "created_at": "2026-10-19T04:43:08.452343+00:00",
+      "updated_at": "2026-10-19T04:43:08.452353+00:00",
+      "expiry_at": "2026-10-21T04:43:08.452355+00:00",
+      "entry": 105.23,
+      "sl": 104.1848115768322,
+      "tp1": 106.5,
+      "tp2": 107.38,
+      "tp3": 108.82,
+      "support": 104.61,
+      "resistance": 106.5,
+      "sl_method": "below_support_zone",
+      "tp_methods": [
+        "resistance_zone",
+        "resistance_zone",
+        "resistance_zone"
+      ],
+      "rr": 1.4231925684166036,
+      "risk_pct": 0.9932418731994686,
+      "initial_risk_per_unit": 1.0451884231678008,
+      "initial_sl": 104.1848115768322,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 2.384497262652538,
+      "position_quantity": 1.9005986885869048,
+      "quantity": 1.9005986885869048,
+      "position_value": 200.0,
+      "position_capped": true,
+      "components": {
+        "setup": "FAILED_BREAKDOWN",
+        "daily_trend": "BEAR",
+        "sr_zone_touches": 2,
+        "sr_zone_pivots": 1,
+        "sr_zone_fresh": false,
+        "first_touch": false,
+        "trendline_up_near": false,
+        "trendline_up_broken": false,
+        "spike_detected": false,
+        "two_leg_pullback": false,
+        "breakout_retest": false,
+        "failed_breakdown": true,
+        "market_regime": "DOWNTREND",
+        "h1_detected": true,
+        "h2_detected": true,
+        "h2_attempts": 2,
+        "h2_pullback_bars": 8,
+        "volume_confirmation": 1,
+        "momentum_confirmation": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0,
+        "nearest_resistance_room_r": 1.22
+      },
+      "trend": "BEAR",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "SEC tokenized stock framework faces issuer pushback as Broadcom, Verizon object to OKX-ICE listing",
+            "link": "https://www.coindesk.com/business/2026/10/18/sec-tokenized-stock-framework-faces-issuer-pushback-as-broadcom-verizon-object-to-okx-ice-listing",
+            "published_at": "2026-10-18T23:28:06+00:00",
+            "sentiment": "mixed",
+            "age_hours": 5.3
+          },
+          {
+            "title": "Bitcoin’s $100,000 year-end hope divides analysts as inflation clouds outlook",
+            "link": "https://www.coindesk.com/markets/2026/10/18/bitcoin-s-usd100-000-year-end-hope-divides-analysts-as-inflation-clouds-outlook",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "mixed",
+            "age_hours": 15.7
+          },
+          {
+            "title": "Crypto audits give investors false sense of security as Q3 hacks cost $1.18 billion, Hacken says",
+            "link": "https://www.coindesk.com/tech/2026/10/18/crypto-audits-give-investors-false-sense-of-security-as-q3-hacks-cost-usd1-18-billion-hacken-says",
+            "published_at": "2026-10-18T13:00:00+00:00",
+            "sentiment": "negative",
+            "age_hours": 15.7
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
   "historical_stats": {
@@ -4597,5 +4904,5 @@
       "below_support_zone": 2
     }
   },
-  "last_run": "2026-10-19T00:53:43.660575+00:00"
+  "last_run": "2026-10-19T04:44:12.650633+00:00"
 }
