@@ -1400,10 +1400,10 @@
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:52:32.364487+00:00",
-      "updated_at": "2026-10-19T00:52:32.364497+00:00",
+      "updated_at": "2026-10-19T05:58:05.604010+00:00",
       "expiry_at": "2026-10-21T00:52:32.364499+00:00",
       "entry": 59.13,
-      "sl": 58.852901200065894,
+      "sl": 59.13,
       "tp1": 59.97,
       "tp2": 61.425,
       "tp3": 62.41,
@@ -1483,12 +1483,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 1.2191780821917746,
+      "fees_paid": 0.20142059868087264,
       "closed_reason": null
     },
     {
@@ -3793,10 +3793,10 @@
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:52:44.402650+00:00",
-      "updated_at": "2026-10-19T00:52:44.402662+00:00",
+      "updated_at": "2026-10-19T05:58:08.282399+00:00",
       "expiry_at": "2026-10-21T00:52:44.402663+00:00",
       "entry": 1.69,
-      "sl": 1.67323234926593,
+      "sl": 1.69,
       "tp1": 1.71,
       "tp2": 1.741,
       "tp3": 1.771,
@@ -3875,12 +3875,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.9822485207100603,
+      "fees_paid": 0.20118343195266272,
       "closed_reason": null
     },
     {
