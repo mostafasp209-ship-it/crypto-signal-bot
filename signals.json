@@ -5312,11 +5312,11 @@
       "symbol": "LPT/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T12:36:33.591711+00:00",
-      "updated_at": "2026-10-19T12:36:33.591720+00:00",
+      "updated_at": "2026-10-19T19:36:45.855137+00:00",
       "expiry_at": "2026-10-21T12:36:33.591723+00:00",
       "entry": 1.633,
       "sl": 1.6165202071425313,
@@ -5403,10 +5403,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -2.602327005511331,
+      "fees_paid": 0.39779546846295166,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "GODS_USDT_BUY_1792414347",
@@ -5702,19 +5703,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 33,
+    "closed": 34,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 8,
-    "sl_direct": 17,
+    "sl_direct": 18,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -89.13185966774775,
-    "fees": 11.266997899318742,
+    "net_pnl": -91.73418667325907,
+    "fees": 11.664793367781694,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 18
+      "below_support_zone": 19
     }
   },
   "last_run": "2026-10-19T16:45:34.288873+00:00"
