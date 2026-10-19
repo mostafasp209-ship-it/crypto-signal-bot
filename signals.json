@@ -2400,10 +2400,10 @@
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:52:29.399169+00:00",
-      "updated_at": "2026-10-19T00:52:29.399180+00:00",
+      "updated_at": "2026-10-19T08:48:07.524631+00:00",
       "expiry_at": "2026-10-21T00:52:29.399182+00:00",
       "entry": 2412.1,
-      "sl": 2395.7002730081463,
+      "sl": 2412.1,
       "tp1": 2435.25,
       "tp2": 2466.69,
       "tp3": 2493.4,
@@ -2483,12 +2483,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.7587848762489156,
+      "fees_paid": 0.20095974462086982,
       "closed_reason": null
     },
     {
