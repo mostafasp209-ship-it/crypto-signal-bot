@@ -994,11 +994,11 @@
       "symbol": "NEAR/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T00:52:30.485716+00:00",
-      "updated_at": "2026-10-19T00:52:30.485729+00:00",
+      "updated_at": "2026-10-19T22:05:15.937828+00:00",
       "expiry_at": "2026-10-21T00:52:30.485731+00:00",
       "entry": 5.025,
       "sl": 4.894681038362489,
@@ -1085,10 +1085,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -6.046089552238819,
+      "fees_paid": 0.39434825870646767,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "BCH_USDT_BUY_1792371158",
@@ -6006,19 +6007,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 35,
+    "closed": 36,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 8,
-    "sl_direct": 19,
+    "sl_direct": 20,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -94.48152599599578,
-    "fees": 12.062443678769945,
+    "net_pnl": -100.52761554823462,
+    "fees": 12.456791937476414,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 20
+      "below_support_zone": 21
     }
   },
   "last_run": "2026-10-19T20:42:36.189468+00:00"
