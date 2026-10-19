@@ -97,7 +97,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
     fees = FEE_RATE
     hits = [False, False, False]
     exit_reason = "DATA_END"
-    exit_time = bars.iloc[-1]["timestamp"]
+    exit_time = bars.iloc[-1]["timestamp"] + pd.Timedelta(hours=4)
     exit_price = float(bars.iloc[-1]["close"])
     last_index = min(len(bars) - 1, signal_index + MAX_HOLD_BARS)
 
@@ -108,7 +108,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
         # If stop and any still-relevant target are both touched, assume stop first.
         if low <= stop:
             exit_price = stop
-            exit_time = bar["timestamp"]
+            exit_time = bar["timestamp"] + pd.Timedelta(hours=4)
             gross_pnl += remaining * (exit_price / entry - 1.0)
             exit_fee = remaining * FEE_RATE
             fees += exit_fee
@@ -134,14 +134,14 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
             if remaining <= 1e-9:
                 remaining = 0.0
                 exit_price = target_price
-                exit_time = bar["timestamp"]
+                exit_time = bar["timestamp"] + pd.Timedelta(hours=4)
                 exit_reason = "TP3"
                 break
         if remaining <= 1e-9:
             break
         if j == last_index:
             exit_price = float(bar["close"])
-            exit_time = bar["timestamp"]
+            exit_time = bar["timestamp"] + pd.Timedelta(hours=4)
             gross_pnl += remaining * (exit_price / entry - 1.0)
             exit_fee = remaining * FEE_RATE
             fees += exit_fee
@@ -206,7 +206,7 @@ def run_backtest(four_hour: pd.DataFrame, daily: pd.DataFrame, symbol: str) -> l
             trades.append(trade)
             # No overlapping positions on the same symbol. Resume after the exit candle.
             exit_ts = pd.Timestamp(trade["exit_time"])
-            matching = four_hour.index[four_hour["timestamp"] == exit_ts]
+            matching = four_hour.index[four_hour["timestamp"] + pd.Timedelta(hours=4) == exit_ts]
             exit_index = int(matching[-1]) if len(matching) else i + 1
             i = max(i + 1, exit_index + 1)
         else:
