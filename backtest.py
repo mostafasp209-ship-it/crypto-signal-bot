@@ -36,7 +36,7 @@ def load_ohlcv(path: str, timeframe_hours: int) -> pd.DataFrame:
     raw_ts = df["timestamp"]
     if pd.api.types.is_numeric_dtype(raw_ts):
         ts = pd.to_datetime(raw_ts, unit="ms", utc=True, errors="coerce")
-    elif raw_ts.astype(str).str.fullmatch(r"\\d+(\\.0)?").all():
+    elif raw_ts.astype(str).str.fullmatch(r"\d+(\.0)?").all():
         ts = pd.to_datetime(pd.to_numeric(raw_ts, errors="coerce"), unit="ms", utc=True)
     else:
         ts = pd.to_datetime(raw_ts, utc=True, errors="coerce")
