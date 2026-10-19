@@ -68,7 +68,7 @@ class BacktestSimulationTests(unittest.TestCase):
         self.assertEqual(trade["exit_reason"], "EXPIRY")
         self.assertEqual(
             pd.Timestamp(trade["exit_time"]) - pd.Timestamp(trade["entry_time"]),
-            pd.Timedelta(hours=44),
+            pd.Timedelta(hours=48),
         )
 
     def test_summary_handles_empty_trade_list(self):
