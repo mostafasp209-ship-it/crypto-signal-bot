@@ -1629,11 +1629,41 @@ def update_open_signals(state, manager):
             print(f"[MANAGE SKIP] {symbol}: not listed on {exchange_name}")
             continue
 
+        side = signal.get("side", "BUY")
+        header = f"<b>{symbol} — {side}</b>"
+
+        # Enforce maximum holding time before replaying historical candles.
+        # Otherwise repeated candle events can postpone the 48h expiry.
+        expiry_due = False
+        created = signal.get("created_at")
+        if created:
+            try:
+                created_dt = datetime.fromisoformat(created)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                expiry_due = utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS)
+            except (TypeError, ValueError, OverflowError):
+                print(f"[MANAGE ERROR] Invalid created_at for {symbol}: {created!r}")
+
+        if expiry_due:
+            price = manager.ticker_price(exchange, symbol)
+            if price is None:
+                print(f"[MANAGE SKIP] {symbol}: cannot expire without a usable exit price")
+                continue
+            if manage_signal(signal, price) and signal.get("status") == "EXPIRED":
+                events.append(
+                    f"⌛ <b>اعتبار سیگنال تمام شد</b>\\n{header}\\n"
+                    f"قیمت بررسی/خروج: <b>{fmt_price(price)}</b>\\n"
+                    f"سود/زیان ثبت‌شده: <b>${safe_float(signal.get('realized_pnl'), 0):.2f}</b>"
+                )
+                continue
+            # Failed PnL booking leaves the signal active for a later retry.
+            if signal.get("status") == "ACTIVE":
+                continue
+
         # Prefer completed historical candles so levels crossed between scheduled
         # runs are not silently missed. Candle-based ambiguity is handled conservatively.
         candle_events = process_completed_candles(signal, exchange, symbol)
-        side = signal.get("side", "BUY")
-        header = f"<b>{symbol} — {side}</b>"
         if candle_events:
             for ce in candle_events:
                 bef = ce["before"]
