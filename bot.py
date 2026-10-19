@@ -2022,13 +2022,16 @@ def main(manage_only=False):
     management_events = update_open_signals(state, manager)
     if management_events:
         refresh_historical_stats(state)
-        save_state(state)
         for event_message in management_events:
             telegram_send(event_message)
             time.sleep(0.25)
     else:
         # Keep the cached historical counters synchronized even if no signal changed.
         refresh_historical_stats(state)
+
+    # Persist candle watermarks and other state changes even when no TP/SL event
+    # was emitted; otherwise completed candles can be reprocessed on every run.
+    save_state(state)
 
     if manage_only:
         print("Management-only run complete; market scan skipped.")
