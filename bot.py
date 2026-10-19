@@ -1423,55 +1423,61 @@ def stop_hit(signal, price):
 
 
 def manage_signal(signal, current_price):
+    """Manage one signal at a single observed price; return whether state changed.
+
+    NOTE: This function alone cannot reconstruct intrarun stop/target ordering.
+    Historical OHLCV path processing is implemented separately in the next step.
+    """
     if signal.get("status") != "ACTIVE":
         return False
 
     changed = False
 
+    # Preserve expiry semantics: book the remaining position before finalizing.
     created = signal.get("created_at")
     if created:
         try:
             created_dt = datetime.fromisoformat(created)
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
             if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
-                # Close remaining position at current price.
-                remaining = safe_float(signal.get("remaining_fraction"), 0)
+                remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
                 if remaining > 0 and not close_piece(signal, current_price, remaining, "expiry"):
-                    # Do not finalize a trade if its remaining PnL could not be booked.
                     return False
                 signal["status"] = "EXPIRED"
                 signal["closed_reason"] = "48h expiry"
                 signal["updated_at"] = iso_now()
                 return True
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            # Invalid timestamps must not silently expire a signal.
+            print(f"[MANAGE ERROR] Invalid created_at for {signal.get('symbol')}: {created!r}")
 
-    # Stop is checked before new TP levels.
+    # If price is already beyond the active stop, book the remaining amount first.
     if stop_hit(signal, current_price):
-        remaining = safe_float(signal.get("remaining_fraction"), 0)
+        remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
         if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
-            # Keep the signal active so a later run can retry reliable accounting.
             return False
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
         return True
 
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        if close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
-            # Breakeven after TP1 only after the partial exit was booked.
+    # Process crossed targets in order and never mark a target hit unless booking succeeded.
+    for label in ("tp1", "tp2", "tp3"):
+        if signal.get(f"{label}_hit"):
+            continue
+        if not price_hit(signal, current_price, label):
+            continue
+        if not close_piece(signal, signal.get(label), TP_WEIGHTS[label], label):
+            # Avoid advancing to later targets if this partial exit could not be booked.
+            break
+        changed = True
+        if label == "tp1":
             signal["sl"] = signal["entry"]
-            changed = True
+            signal["updated_at"] = iso_now()
 
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        if close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
-            changed = True
-
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        if close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
-            changed = True
-
-    if signal.get("remaining_fraction", 0) <= 0.000001:
-        signal["remaining_fraction"] = 0
+    if (safe_float(signal.get("remaining_fraction"), 0.0) or 0.0) <= 0.000001:
+        signal["remaining_fraction"] = 0.0
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "TP3"
         signal["updated_at"] = iso_now()
