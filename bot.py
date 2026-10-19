@@ -1486,6 +1486,128 @@ def manage_signal(signal, current_price):
     return changed
 
 
+def manage_signal_candle(signal, candle):
+    """Process one completed OHLCV candle conservatively.
+
+    If a candle crosses both the active stop and any target, assume the stop
+    happened first because OHLC data cannot reveal the intrabar sequence.
+    """
+    if signal.get("status") != "ACTIVE":
+        return False
+
+    ts = safe_float(candle.get("timestamp"))
+    o = safe_float(candle.get("open"))
+    h = safe_float(candle.get("high"))
+    lo = safe_float(candle.get("low"))
+    cl = safe_float(candle.get("close"))
+    if None in (ts, o, h, lo, cl) or min(o, h, lo, cl) <= 0:
+        return False
+
+    changed = False
+    side = signal.get("side", "BUY")
+    sl = safe_float(signal.get("sl"))
+    stop_touched = (lo <= sl) if side == "BUY" and sl is not None else (
+        h >= sl if side != "BUY" and sl is not None else False
+    )
+    targets_touched = []
+    for label in ("tp1", "tp2", "tp3"):
+        if signal.get(f"{label}_hit"):
+            continue
+        level = safe_float(signal.get(label))
+        if level is None:
+            continue
+        touched = (h >= level) if side == "BUY" else (lo <= level)
+        if touched:
+            targets_touched.append(label)
+
+    # Conservative ambiguity policy: stop wins if stop and target occur in same candle.
+    if stop_touched:
+        remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+        if remaining > 0:
+            # Model gaps through the stop at the candle open, otherwise at the stop level.
+            exit_price = min(o, sl) if side == "BUY" else max(o, sl)
+            if not close_piece(signal, exit_price, remaining, "sl"):
+                return False
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "SL"
+        signal["updated_at"] = iso_now()
+        return True
+
+    for label in targets_touched:
+        if not close_piece(signal, signal.get(label), TP_WEIGHTS[label], label):
+            break
+        changed = True
+        if label == "tp1":
+            signal["sl"] = signal["entry"]
+            signal["updated_at"] = iso_now()
+
+    if (safe_float(signal.get("remaining_fraction"), 0.0) or 0.0) <= 0.000001:
+        signal["remaining_fraction"] = 0.0
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "TP3"
+        signal["updated_at"] = iso_now()
+        changed = True
+    signal["last_processed_candle_ts"] = int(ts)
+    return changed
+
+
+def process_completed_candles(signal, exchange, symbol):
+    """Fetch and process completed 4h candles not previously examined."""
+    try:
+        raw = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=30)
+        if not raw or len(raw) < 2:
+            return []
+        # The last returned candle may still be forming; exclude it explicitly.
+        completed = raw[:-1]
+        created = signal.get("created_at")
+        try:
+            created_dt = datetime.fromisoformat(created) if created else None
+            if created_dt and created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+            created_ms = int(created_dt.timestamp() * 1000) if created_dt else 0
+        except (TypeError, ValueError, OverflowError):
+            created_ms = 0
+        last_ts = safe_float(signal.get("last_processed_candle_ts"), None)
+        if last_ts is None:
+            last_ts = created_ms - 1
+
+        events = []
+        for row in completed:
+            ts = int(row[0])
+            if ts <= last_ts or ts < created_ms:
+                continue
+            before = {
+                "status": signal.get("status"),
+                "tp1_hit": bool(signal.get("tp1_hit")),
+                "tp2_hit": bool(signal.get("tp2_hit")),
+                "tp3_hit": bool(signal.get("tp3_hit")),
+            }
+            changed = manage_signal_candle(signal, {
+                "timestamp": ts, "open": row[1], "high": row[2],
+                "low": row[3], "close": row[4],
+            })
+            # Advance the watermark even if no level was touched, preventing reprocessing.
+            signal["last_processed_candle_ts"] = ts
+            if changed:
+                events.append({
+                    "timestamp": ts, "before": before,
+                    "status": signal.get("status"),
+                    "tp1_hit": bool(signal.get("tp1_hit")),
+                    "tp2_hit": bool(signal.get("tp2_hit")),
+                    "tp3_hit": bool(signal.get("tp3_hit")),
+                    "sl": signal.get("sl"),
+                    "realized_pnl": signal.get("realized_pnl"),
+                    "fees_paid": signal.get("fees_paid"),
+                    "closed_reason": signal.get("closed_reason"),
+                })
+            if signal.get("status") != "ACTIVE":
+                break
+        return events
+    except Exception as exc:
+        print(f"[CANDLE MANAGER] {symbol}: {type(exc).__name__}: {exc}")
+        return []
+
+
 def update_open_signals(state, manager):
     """Update active signals and return one Telegram message per new event."""
     events = []
