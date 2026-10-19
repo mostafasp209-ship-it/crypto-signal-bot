@@ -131,6 +131,18 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
             hits[target_index] = True
             if target_index == 0:
                 stop = entry  # Move stop to breakeven after TP1.
+                # If this same candle also traded back through breakeven, do not
+                # assume later targets were reached in an unknowable intrabar order.
+                if remaining > 1e-9 and low <= stop:
+                    gross_pnl += remaining * (stop / entry - 1.0)
+                    exit_fee = remaining * FEE_RATE
+                    fees += exit_fee
+                    net_pnl += remaining * (stop / entry - 1.0) - exit_fee
+                    remaining = 0.0
+                    exit_price = stop
+                    exit_time = bar["timestamp"] + pd.Timedelta(hours=4)
+                    exit_reason = "SL_AFTER_TP"
+                    break
             if remaining <= 1e-9:
                 remaining = 0.0
                 exit_price = target_price
