@@ -39,6 +39,9 @@ TREND_TIMEFRAME = "1d"
 MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
 MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
 MIN_SCORE = 12
+# Reject BUY entries with too little upside room before the nearest resistance.
+# Initial threshold; validate against out-of-sample backtests before tuning.
+MIN_RESISTANCE_ROOM_R = 0.75
 # RR is weighted across TP1/TP2/TP3 and includes estimated round-trip fees.
 MIN_RR = 1.35
 
@@ -1287,6 +1290,29 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     levels = calculate_levels("BUY", close, atr, df)
     if not levels:
         return None
+
+    # A high setup score does not make a poor entry location acceptable.
+    # Reject entries where the nearest overhead resistance is too close relative
+    # to the structural stop distance; otherwise the trade can run into resistance
+    # before it has room to develop. Resistance is calculated from confirmed pivots.
+    entry_price = safe_float(levels.get("entry"))
+    stop_price = safe_float(levels.get("sl"))
+    nearest_resistance_price = safe_float(levels.get("resistance"))
+    if entry_price and stop_price and nearest_resistance_price and nearest_resistance_price > entry_price:
+        initial_risk = entry_price - stop_price
+        resistance_room = nearest_resistance_price - entry_price
+        room_in_r = resistance_room / initial_risk if initial_risk > 0 else 0.0
+        if room_in_r < MIN_RESISTANCE_ROOM_R:
+            print(
+                f"[FILTER] {symbol} BUY rejected: nearest resistance only "
+                f"{resistance_room / entry_price * 100:.2f}% away "
+                f"({room_in_r:.2f}R < {MIN_RESISTANCE_ROOM_R:.2f}R)"
+            )
+            return None
+        components["nearest_resistance_room_r"] = round(room_in_r, 2)
+    else:
+        components["nearest_resistance_room_r"] = None
+
     risk_pct = abs(levels["entry"]-levels["sl"])/levels["entry"]*100
     if risk_pct > 15:
         return None
