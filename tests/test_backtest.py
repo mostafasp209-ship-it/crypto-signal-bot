@@ -52,7 +52,7 @@ class BacktestSimulationTests(unittest.TestCase):
         data = bars([
             (100, 101, 99, 100),
             (100, 106, 99, 105),
-            (105, 106, 99, 101),
+            (101, 102, 101, 101),
             (101, 102, 100, 101),
         ])
         trade = backtest.simulate_trade(signal(), data, 0, "BTC/USDT")
