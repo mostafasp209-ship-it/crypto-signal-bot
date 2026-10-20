@@ -77,6 +77,7 @@ class BacktestSimulationTests(unittest.TestCase):
         self.assertIsNotNone(trade)
         self.assertTrue(trade["tp1_hit"])
         self.assertEqual(trade["exit_reason"], "SL_AFTER_TP")
+        self.assertEqual(trade["initial_sl"], 95.0)  # Must not be overwritten by the moved stop.
         self.assertGreater(trade["net_return_pct"], 0.0)
 
     def test_expiry_uses_twelve_four_hour_bars(self):
