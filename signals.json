@@ -1503,7 +1503,7 @@
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:53:32.233467+00:00",
-      "updated_at": "2026-10-20T14:08:25.895509+00:00",
+      "updated_at": "2026-10-20T14:40:27.388525+00:00",
       "expiry_at": "2026-10-21T00:53:32.233481+00:00",
       "entry": 0.1952,
       "sl": 0.1952,
@@ -1587,11 +1587,11 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 3.945440573770489,
-      "fees_paid": 0.2041495901639344,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 7.080379098360643,
+      "fees_paid": 0.32740778688524586,
       "closed_reason": null
     },
     {
@@ -2710,7 +2710,7 @@
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:53:17.324785+00:00",
-      "updated_at": "2026-10-20T14:08:26.702972+00:00",
+      "updated_at": "2026-10-20T14:40:28.528677+00:00",
       "expiry_at": "2026-10-21T00:53:17.324800+00:00",
       "entry": 2.943e-06,
       "sl": 2.943e-06,
@@ -2794,11 +2794,11 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 1.4972477064220164,
-      "fees_paid": 0.2016989466530751,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 3.984220183486234,
+      "fees_paid": 0.32430852871219845,
       "closed_reason": null
     },
     {
@@ -3907,10 +3907,10 @@
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:52:38.348166+00:00",
-      "updated_at": "2026-10-19T00:52:38.348178+00:00",
+      "updated_at": "2026-10-20T14:40:29.145778+00:00",
       "expiry_at": "2026-10-21T00:52:38.348179+00:00",
       "entry": 0.1897,
-      "sl": 0.1835249347049258,
+      "sl": 0.1897,
       "tp1": 0.1947,
       "tp2": 0.2073,
       "tp3": 0.2113,
@@ -3989,12 +3989,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 2.4331049024775986,
+      "fees_paid": 0.20263574064312073,
       "closed_reason": null
     },
     {
@@ -4101,11 +4101,11 @@
       "symbol": "JASMY/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:53:21.657855+00:00",
-      "updated_at": "2026-10-20T14:08:27.651989+00:00",
+      "updated_at": "2026-10-20T14:40:29.492076+00:00",
       "expiry_at": "2026-10-21T00:53:21.657869+00:00",
       "entry": 0.0045944,
       "sl": 0.0045944,
@@ -4189,11 +4189,11 @@
       },
       "tp1_hit": true,
       "tp2_hit": true,
-      "tp3_hit": false,
-      "remaining_fraction": 0.2,
-      "realized_pnl": 8.839819345289905,
-      "fees_paid": 0.32916898833362357,
-      "closed_reason": null
+      "tp3_hit": true,
+      "remaining_fraction": 0,
+      "realized_pnl": 11.897893522549174,
+      "fees_paid": 0.41231020372627547,
+      "closed_reason": "TP3"
     },
     {
       "id": "PENDLE_USDT_BUY_1792371206",
@@ -4707,10 +4707,10 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T04:43:10.196174+00:00",
-      "updated_at": "2026-10-19T04:43:10.196184+00:00",
+      "updated_at": "2026-10-20T14:40:31.341114+00:00",
       "expiry_at": "2026-10-21T04:43:10.196186+00:00",
       "entry": 8.555,
-      "sl": 8.339372898099523,
+      "sl": 8.555,
       "tp1": 8.795,
       "tp2": 8.958,
       "tp3": 9.367,
@@ -4793,12 +4793,12 @@
           }
         ]
       },
-      "tp1_hit": false,
-      "tp2_hit": false,
+      "tp1_hit": true,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 5.306162478082998,
+      "fees_paid": 0.32563179427235533,
       "closed_reason": null
     },
     {
@@ -5525,10 +5525,10 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T16:45:05.902568+00:00",
-      "updated_at": "2026-10-19T16:45:05.902580+00:00",
+      "updated_at": "2026-10-20T14:40:31.743042+00:00",
       "expiry_at": "2026-10-21T16:45:05.902582+00:00",
       "entry": 0.02965,
-      "sl": 0.02942379123877637,
+      "sl": 0.02965,
       "tp1": 0.02994,
       "tp2": 0.03085,
       "tp3": 0.031195,
@@ -5602,12 +5602,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.7770994940978148,
+      "fees_paid": 0.2009780775716695,
       "closed_reason": null
     },
     {
@@ -5818,7 +5818,7 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T20:41:29.293287+00:00",
-      "updated_at": "2026-10-20T14:08:30.017680+00:00",
+      "updated_at": "2026-10-20T14:40:31.897340+00:00",
       "expiry_at": "2026-10-21T20:41:29.293303+00:00",
       "entry": 0.4299,
       "sl": 0.4299,
@@ -5903,11 +5903,11 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 3.6110258199581224,
-      "fees_paid": 0.20381484066061872,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 7.3531751570132515,
+      "fees_paid": 0.3276808560130262,
       "closed_reason": null
     },
     {
@@ -6736,10 +6736,10 @@
       "strength": "متوسط",
       "score": 13,
       "created_at": "2026-10-20T00:53:10.664650+00:00",
-      "updated_at": "2026-10-20T00:53:10.664660+00:00",
+      "updated_at": "2026-10-20T14:40:32.509126+00:00",
       "expiry_at": "2026-10-22T00:53:10.664663+00:00",
       "entry": 0.08276,
-      "sl": 0.08163943175029789,
+      "sl": 0.08276,
       "tp1": 0.08442,
       "tp2": 0.08713,
       "tp3": 0.0885,
@@ -6819,12 +6819,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 1.8037941034316036,
+      "fees_paid": 0.20200579990333495,
       "closed_reason": null
     },
     {
@@ -7955,7 +7955,7 @@
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-20T04:40:30.655932+00:00",
-      "updated_at": "2026-10-20T14:08:31.347255+00:00",
+      "updated_at": "2026-10-20T14:40:33.231829+00:00",
       "expiry_at": "2026-10-22T04:40:30.655945+00:00",
       "entry": 0.7743,
       "sl": 0.7743,
@@ -8039,11 +8039,11 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 2.216970166602098,
-      "fees_paid": 0.20241938955615826,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 5.4938024021697185,
+      "fees_paid": 0.3258196220241939,
       "closed_reason": null
     },
     {
@@ -8663,19 +8663,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 58,
-    "tp3": 2,
+    "closed": 59,
+    "tp3": 3,
     "tp2_then_sl": 1,
     "tp1_then_sl": 13,
     "sl_direct": 36,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -203.4531089975207,
-    "fees": 20.864120818458908,
+    "net_pnl": -191.55521547497153,
+    "fees": 21.276431022185182,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 43
+      "below_support_zone": 44
     }
   },
   "last_run": "2026-10-20T12:52:34.552410+00:00"
