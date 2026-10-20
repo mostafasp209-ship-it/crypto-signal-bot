@@ -4002,11 +4002,11 @@
       "symbol": "ETC/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:52:42.444644+00:00",
-      "updated_at": "2026-10-19T06:33:04.201553+00:00",
+      "updated_at": "2026-10-20T23:00:08.902889+00:00",
       "expiry_at": "2026-10-21T00:52:42.444658+00:00",
       "entry": 7.6,
       "sl": 7.6,
@@ -4090,11 +4090,11 @@
       },
       "tp1_hit": true,
       "tp2_hit": true,
-      "tp3_hit": false,
-      "remaining_fraction": 0.2,
-      "realized_pnl": 2.9661842105263276,
-      "fees_paid": 0.32328947368421057,
-      "closed_reason": null
+      "tp3_hit": true,
+      "remaining_fraction": 0,
+      "realized_pnl": 4.726447368421067,
+      "fees_paid": 0.4051315789473685,
+      "closed_reason": "TP3"
     },
     {
       "id": "JASMY_USDT_BUY_1792371201",
@@ -9677,19 +9677,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 63,
-    "tp3": 4,
+    "closed": 64,
+    "tp3": 5,
     "tp2_then_sl": 2,
     "tp1_then_sl": 13,
     "sl_direct": 38,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -185.3703353615003,
-    "fees": 22.88422369497144,
+    "net_pnl": -180.6438879930792,
+    "fees": 23.289355273918808,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 48
+      "below_support_zone": 49
     }
   },
   "last_run": "2026-10-20T20:44:21.115638+00:00"
