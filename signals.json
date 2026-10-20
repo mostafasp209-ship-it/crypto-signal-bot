@@ -6321,11 +6321,11 @@
       "symbol": "RVN/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 18,
       "created_at": "2026-10-20T00:53:18.451010+00:00",
-      "updated_at": "2026-10-20T00:53:18.451019+00:00",
+      "updated_at": "2026-10-20T07:26:50.360884+00:00",
       "expiry_at": "2026-10-22T00:53:18.451021+00:00",
       "entry": 0.002749,
       "sl": 0.0025787615077086977,
@@ -6413,10 +6413,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -35.421442705722455,
+      "fees_paid": 0.2780147035311118,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "ZEC_USDT_BUY_1792457584",
@@ -7335,7 +7336,7 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-20T04:40:34.203023+00:00",
-      "updated_at": "2026-10-20T05:10:36.492796+00:00",
+      "updated_at": "2026-10-20T07:26:51.954606+00:00",
       "expiry_at": "2026-10-22T04:40:34.203036+00:00",
       "entry": 0.002305,
       "sl": 0.002305,
@@ -7420,11 +7421,11 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
+      "tp2_hit": true,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 0.4934490238611694,
-      "fees_paid": 0.2006941431670282,
+      "remaining_fraction": 0.2,
+      "realized_pnl": 2.4147895878524928,
+      "fees_paid": 0.32273752711496745,
       "closed_reason": null
     },
     {
@@ -8135,19 +8136,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 41,
+    "closed": 42,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 9,
-    "sl_direct": 24,
+    "sl_direct": 25,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -108.13515982285064,
-    "fees": 14.451178780044366,
+    "net_pnl": -143.5566025285731,
+    "fees": 14.729193483575477,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 26
+      "below_support_zone": 27
     }
   },
   "last_run": "2026-10-20T04:40:57.875513+00:00"
