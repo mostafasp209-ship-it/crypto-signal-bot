@@ -5707,11 +5707,11 @@
       "symbol": "DGB/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-19T20:41:35.735729+00:00",
-      "updated_at": "2026-10-19T20:41:35.735740+00:00",
+      "updated_at": "2026-10-20T00:23:35.199731+00:00",
       "expiry_at": "2026-10-21T20:41:35.735743+00:00",
       "entry": 0.00339,
       "sl": 0.0033280083418690486,
@@ -5798,10 +5798,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -6.293805309734503,
+      "fees_paid": 0.39410029498525073,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "ONDO_USDT_BUY_1792442489",
@@ -6007,19 +6008,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 36,
+    "closed": 37,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 8,
-    "sl_direct": 20,
+    "sl_direct": 21,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -100.52761554823462,
-    "fees": 12.456791937476414,
+    "net_pnl": -106.82142085796912,
+    "fees": 12.850892232461664,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 21
+      "below_support_zone": 22
     }
   },
   "last_run": "2026-10-19T20:42:36.189468+00:00"
