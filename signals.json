@@ -1801,11 +1801,11 @@
       "symbol": "PENGU/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:52:34.642910+00:00",
-      "updated_at": "2026-10-20T17:23:32.636460+00:00",
+      "updated_at": "2026-10-20T18:18:44.516750+00:00",
       "expiry_at": "2026-10-21T00:52:34.642925+00:00",
       "entry": 0.007446,
       "sl": 0.007446,
@@ -1890,11 +1890,11 @@
       },
       "tp1_hit": true,
       "tp2_hit": true,
-      "tp3_hit": false,
-      "remaining_fraction": 0.2,
-      "realized_pnl": 5.129822723609987,
-      "fees_paid": 0.32545527800161156,
-      "closed_reason": null
+      "tp3_hit": true,
+      "remaining_fraction": 0,
+      "realized_pnl": 8.14637389202256,
+      "fees_paid": 0.4085549288208434,
+      "closed_reason": "TP3"
     },
     {
       "id": "HYPE_USDT_BUY_1792371153",
@@ -9270,19 +9270,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 60,
-    "tp3": 3,
+    "closed": 61,
+    "tp3": 4,
     "tp2_then_sl": 2,
     "tp1_then_sl": 13,
     "sl_direct": 36,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -186.3570787128441,
-    "fees": 21.682034762687813,
+    "net_pnl": -178.21070482082155,
+    "fees": 22.090589691508654,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 45
+      "below_support_zone": 46
     }
   },
   "last_run": "2026-10-20T16:42:08.662098+00:00"
