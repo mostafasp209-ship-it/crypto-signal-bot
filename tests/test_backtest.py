@@ -38,6 +38,22 @@ def signal(**overrides):
 
 
 class BacktestSimulationTests(unittest.TestCase):
+    def test_levels_are_shifted_to_actual_next_bar_entry(self):
+        data = bars([
+            (100, 101, 99, 100),
+            (102, 103, 101, 102),
+            (102, 104, 101, 103),
+        ])
+        trade = backtest.simulate_trade(signal(), data, 0, "BTC/USDT")
+        self.assertIsNotNone(trade)
+        self.assertEqual(trade["entry"], 102.0)
+        self.assertEqual(trade["initial_sl"], 97.0)
+        self.assertEqual(trade["tp1"], 107.0)
+        self.assertEqual(trade["tp2"], 112.0)
+        self.assertEqual(trade["tp3"], 117.0)
+        self.assertEqual(trade["signal_entry"], 100.0)
+        self.assertAlmostEqual(trade["entry_gap_pct"], 2.0)
+
     def test_stop_first_when_stop_and_target_hit_same_candle(self):
         data = bars([
             (100, 101, 99, 100),
