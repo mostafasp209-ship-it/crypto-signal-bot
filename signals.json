@@ -1597,11 +1597,11 @@
       "symbol": "QNT/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 16,
       "created_at": "2026-10-19T00:52:35.303995+00:00",
-      "updated_at": "2026-10-19T07:26:18.781509+00:00",
+      "updated_at": "2026-10-20T06:09:42.140117+00:00",
       "expiry_at": "2026-10-21T00:52:35.304008+00:00",
       "entry": 191.82,
       "sl": 191.82,
@@ -1687,10 +1687,11 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 3.7372536753206145,
-      "fees_paid": 0.2039411948701908,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": 3.3653894275883736,
+      "fees_paid": 0.40376915858617457,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "XLM_USDT_BUY_1792371152",
@@ -8036,11 +8037,11 @@
       "symbol": "ADA/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 13,
       "created_at": "2026-10-20T04:39:45.320309+00:00",
-      "updated_at": "2026-10-20T04:39:45.320319+00:00",
+      "updated_at": "2026-10-20T06:09:49.628117+00:00",
       "expiry_at": "2026-10-22T04:39:45.320322+00:00",
       "entry": 0.21819,
       "sl": 0.21688159548030275,
@@ -8126,26 +8127,27 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -2.0116595627663814,
+      "fees_paid": 0.39838672716439805,
+      "closed_reason": "SL",
+      "sl_hit": true
     }
   ],
   "historical_stats": {
-    "closed": 39,
+    "closed": 41,
     "tp3": 2,
     "tp2_then_sl": 0,
-    "tp1_then_sl": 8,
-    "sl_direct": 23,
+    "tp1_then_sl": 9,
+    "sl_direct": 24,
     "expired": 6,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -109.48888968767264,
-    "fees": 13.649022894293791,
+    "net_pnl": -108.13515982285064,
+    "fees": 14.451178780044366,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 24
+      "below_support_zone": 26
     }
   },
   "last_run": "2026-10-20T04:40:57.875513+00:00"
