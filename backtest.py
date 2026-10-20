@@ -80,10 +80,19 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
         return None
     entry_bar = bars.iloc[signal_index + 1]
     entry = float(entry_bar["open"])
-    stop = float(signal["sl"])
-    targets = [float(signal["tp1"]), float(signal["tp2"]), float(signal["tp3"])]
+    signal_entry = float(signal["entry"])
+    # Preserve the strategy's planned distances while anchoring every level to
+    # the actual next-bar fill. Never mix levels calculated for one entry with
+    # PnL calculated from a different entry.
+    entry_gap = entry - signal_entry
+    stop = float(signal["sl"]) + entry_gap
+    targets = [
+        float(signal["tp1"]) + entry_gap,
+        float(signal["tp2"]) + entry_gap,
+        float(signal["tp3"]) + entry_gap,
+    ]
     resistance = bot.safe_float(signal.get("resistance"))
-    if entry <= stop or any(t <= entry for t in targets):
+    if entry <= 0 or entry <= stop or not (entry < targets[0] < targets[1] < targets[2]):
         return None
 
     initial_risk = entry - stop
@@ -170,8 +179,10 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
         "signal_time": bars.iloc[signal_index]["timestamp"].isoformat(),
         "entry_time": entry_bar["timestamp"].isoformat(),
         "exit_time": exit_time.isoformat(),
+        "signal_entry": signal_entry,
+        "entry_gap_pct": (entry / signal_entry - 1.0) * 100.0 if signal_entry else None,
         "entry": entry,
-        "initial_sl": float(signal["sl"]),
+        "initial_sl": stop,
         "tp1": targets[0],
         "tp2": targets[1],
         "tp3": targets[2],
