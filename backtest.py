@@ -86,6 +86,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
     # PnL calculated from a different entry.
     entry_gap = entry - signal_entry
     stop = float(signal["sl"]) + entry_gap
+    initial_stop = stop  # Preserve the original stop for audit/reporting after breakeven moves.
     targets = [
         float(signal["tp1"]) + entry_gap,
         float(signal["tp2"]) + entry_gap,
@@ -182,7 +183,7 @@ def simulate_trade(signal: dict, bars: pd.DataFrame, signal_index: int, symbol: 
         "signal_entry": signal_entry,
         "entry_gap_pct": (entry / signal_entry - 1.0) * 100.0 if signal_entry else None,
         "entry": entry,
-        "initial_sl": stop,
+        "initial_sl": initial_stop,
         "tp1": targets[0],
         "tp2": targets[1],
         "tp3": targets[2],
