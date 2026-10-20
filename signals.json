@@ -4201,10 +4201,10 @@
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-19T00:53:26.255372+00:00",
-      "updated_at": "2026-10-19T00:53:26.255385+00:00",
+      "updated_at": "2026-10-20T06:45:38.032433+00:00",
       "expiry_at": "2026-10-21T00:53:26.255387+00:00",
       "entry": 2.0434,
-      "sl": 1.9970154966692237,
+      "sl": 2.0434,
       "tp1": 2.0888999999999998,
       "tp2": 2.1341666666666668,
       "tp3": 2.18,
@@ -4283,12 +4283,12 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
+      "remaining_fraction": 0.5,
+      "realized_pnl": 2.024454340804524,
+      "fees_paid": 0.20222668102182637,
       "closed_reason": null
     },
     {
