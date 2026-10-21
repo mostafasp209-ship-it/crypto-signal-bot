@@ -34,6 +34,24 @@ class PostmortemReportTests(unittest.TestCase):
         self.assertEqual(profile["true"]["loser_count"], 1)
         self.assertTrue(profile["true"]["small_sample"])
 
+    def test_candidate_filters_are_labeled_diagnostic_and_do_not_mutate_data(self):
+        signals = [
+            {"symbol": "A/USDT", "status": "CLOSED", "realized_pnl": 5,
+             "components": {"spike_detected": False, "trendline_up_near": False, "setup": "FAILED_BREAKDOWN"}},
+            {"symbol": "B/USDT", "status": "CLOSED", "realized_pnl": -3,
+             "components": {"spike_detected": "true", "trendline_up_near": False, "setup": "FAILED_BREAKDOWN"}},
+            {"symbol": "C/USDT", "status": "CLOSED", "realized_pnl": -2,
+             "components": {"spike_detected": False, "trendline_up_near": True, "setup": "SR_BOUNCE"}},
+        ]
+        report = build_report({"signals": signals})
+        candidate = report["candidate_filter_diagnostics"]["exclude_spike_or_trendline_near"]
+        self.assertEqual(candidate["trades"], 1)
+        self.assertEqual(candidate["net_pnl_usd"], 5)
+        self.assertEqual(candidate["excluded_trades"], 2)
+        self.assertEqual(candidate["excluded_net_pnl_usd"], -5)
+        self.assertEqual(candidate["interpretation"], "IN_SAMPLE_DIAGNOSTIC_NOT_VALIDATION")
+        self.assertEqual(len(signals), 3)
+
     def test_empty_input_is_safe(self):
         report = build_report({"signals": []})
         self.assertEqual(report["counts"]["closed_with_pnl"], 0)
