@@ -32,6 +32,31 @@ class CandleSafetyTests(unittest.TestCase):
         self.assertTrue(pd.notna(df.iloc[-1]["ema200"]))
 
 
+class SignalExecutionTests(unittest.TestCase):
+    def test_stop_gap_is_recorded_separately_from_realized_pnl(self):
+        signal = {
+            "symbol": "TEST/USDT", "side": "BUY", "entry": 100.0, "sl": 95.0,
+            "initial_sl": 95.0, "initial_risk_per_unit": 5.0,
+            "position_quantity": 2.0, "remaining_fraction": 1.0,
+            "realized_pnl": 0.0, "fees_paid": 0.0,
+        }
+        self.assertTrue(bot.close_piece(signal, 92.0, 1.0, "sl"))
+        self.assertAlmostEqual(signal["stop_slippage_usd"], 6.0)
+        self.assertEqual(signal["last_exit_price"], 92.0)
+        self.assertEqual(signal["last_exit_label"], "sl")
+        self.assertAlmostEqual(signal["realized_pnl"], (92.0 - 100.0) * 2.0 - (100.0 + 92.0) * 2.0 * bot.FEE_RATE)
+
+    def test_stop_fill_at_or_better_than_stop_has_no_adverse_slippage(self):
+        signal = {
+            "symbol": "TEST/USDT", "side": "BUY", "entry": 100.0, "sl": 95.0,
+            "initial_sl": 95.0, "initial_risk_per_unit": 5.0,
+            "position_quantity": 1.0, "remaining_fraction": 1.0,
+            "realized_pnl": 0.0, "fees_paid": 0.0,
+        }
+        self.assertTrue(bot.close_piece(signal, 95.0, 1.0, "sl"))
+        self.assertEqual(signal["stop_slippage_usd"], 0.0)
+
+
 class SignalAuditTests(unittest.TestCase):
     def test_audit_reports_closed_pnl_and_anomalies(self):
         report = audit_signals({"signals": [
