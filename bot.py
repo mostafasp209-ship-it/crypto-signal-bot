@@ -1600,7 +1600,14 @@ def refresh_historical_stats(state):
 
 
 def performance_report(state):
+    # Forward-test statistics are isolated from the pre-reset historical sample.
+    start_at = state.get("forward_test_started_at")
     signals = state.get("signals", [])
+    if start_at:
+        signals = [
+            s for s in signals
+            if s.get("created_at") and s.get("created_at") >= start_at
+        ]
     closed = [
         s for s in signals
         if s.get("status") in {"CLOSED", "EXPIRED"}
@@ -1845,6 +1852,10 @@ def main(manage_only=False):
     print("=" * 70)
 
     state = load_state()
+    # Start a clean forward-test cohort without deleting prior signals or active trades.
+    if not state.get("forward_test_started_at"):
+        state["forward_test_started_at"] = iso_now()
+        save_state(state)
 
     manager = ExchangeManager()
 
@@ -1889,8 +1900,8 @@ def main(manage_only=False):
             f"زمان: {iso_now()}"
         )
 
-        # Send strongest signals first.
-        for signal in new_signals[:10]:
+        # Forward-test every emitted signal; do not silently omit signals beyond a batch cap.
+        for signal in new_signals:
             telegram_send(format_signal(signal))
             time.sleep(0.4)
     else:
