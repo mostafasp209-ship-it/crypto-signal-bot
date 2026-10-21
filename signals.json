@@ -310,10 +310,10 @@
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-21T04:41:14.663794+00:00",
-      "updated_at": "2026-10-21T04:41:14.663805+00:00",
+      "updated_at": "2026-10-21T14:56:11.758908+00:00",
       "expiry_at": "2026-10-23T04:41:14.663806+00:00",
       "entry": 0.3736,
-      "sl": 0.3717287407726006,
+      "sl": 0.3736,
       "tp1": 0.3758,
       "tp2": 0.379275,
       "tp3": 0.38339999999999996,
@@ -393,13 +393,15 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.3882762312633927,
+      "fees_paid": 0.2005888650963598,
+      "closed_reason": null,
+      "last_exit_price": 0.3758,
+      "last_exit_label": "tp1"
     },
     {
       "id": "DUSK_USDT_BUY_1792557636",
@@ -1648,10 +1650,10 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-21T12:51:29.249140+00:00",
-      "updated_at": "2026-10-21T12:51:29.249151+00:00",
+      "updated_at": "2026-10-21T14:56:13.060493+00:00",
       "expiry_at": "2026-10-23T12:51:29.249154+00:00",
       "entry": 0.05841,
-      "sl": 0.05804404826063438,
+      "sl": 0.05841,
       "tp1": 0.05875,
       "tp2": 0.05969,
       "tp3": 0.06025,
@@ -1732,13 +1734,15 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.3815100154083206,
+      "fees_paid": 0.20058209210751582,
+      "closed_reason": null,
+      "last_exit_price": 0.05875,
+      "last_exit_label": "tp1"
     },
     {
       "id": "RENDER_USDT_BUY_1792587049",
