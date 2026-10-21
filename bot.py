@@ -1393,6 +1393,18 @@ def close_piece(signal, exit_price, fraction, label):
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
     signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
     signal["remaining_fraction"] = max(0.0, remaining - fraction)
+    # Preserve execution evidence so the audit can distinguish strategy loss from
+    # stop execution slippage. Ticker polling can observe a price beyond the stop.
+    signal["last_exit_price"] = exit_price
+    signal["last_exit_label"] = label
+    if label == "sl":
+        stop_price = safe_float(signal.get("sl"))
+        if stop_price is not None:
+            if signal.get("side") == "BUY":
+                slippage = max(0.0, stop_price - exit_price) * piece_qty
+            else:
+                slippage = max(0.0, exit_price - stop_price) * piece_qty
+            signal["stop_slippage_usd"] = safe_float(signal.get("stop_slippage_usd"), 0.0) + slippage
     signal[f"{label}_hit"] = True
     signal["updated_at"] = iso_now()
     return True
