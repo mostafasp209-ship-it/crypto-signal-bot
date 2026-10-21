@@ -1314,6 +1314,34 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         components["nearest_resistance_room_r"] = None
 
     risk_pct = abs(levels["entry"]-levels["sl"])/levels["entry"]*100
+    # Immutable-at-entry evidence for later per-signal post-mortems. These are
+    # descriptive measurements, not claims that any factor caused the outcome.
+    resistance_room_r = components.get("nearest_resistance_room_r")
+    entry_snapshot = {
+        "timeframe": TIMEFRAME,
+        "trend_timeframe": TREND_TIMEFRAME,
+        "setup": setup,
+        "score": int(score),
+        "daily_trend": trend,
+        "market_regime": regime_context["regime"],
+        "close_location_in_candle": round(close_loc, 4),
+        "rsi": round(float(rsi), 4) if rsi is not None else None,
+        "atr_pct": round(float(atr / close * 100), 4),
+        "ema20_distance_atr": round(float((close - ema20) / atr), 4),
+        "ema50_distance_atr": round(float((close - ema50) / atr), 4),
+        "volume_vs_median": round(float(volume / vol_base), 4) if vol_base > 0 else None,
+        "support_zone_touches": components.get("sr_zone_touches"),
+        "support_zone_fresh": components.get("sr_zone_fresh"),
+        "resistance_room_r": resistance_room_r,
+        "stop_distance_atr": round(float(abs(levels["entry"] - levels["sl"]) / atr), 4),
+        "reward_risk_net": round(float(levels["rr"]), 4),
+        "trendline_broken": bool(trendlines["up_break"]),
+        "news_label": news_context.get("label", "unavailable"),
+        "news_score_adjustment": news_adjustment,
+        "tp_methods": list(levels.get("tp_methods", [])),
+        "sl_method": levels.get("sl_method"),
+        "captured_at": iso_now(),
+    }
     if risk_pct > 15:
         return None
     strength = "قوی" if score >= 16 else "متوسط" if score >= 13 else "ضعیف"
@@ -1338,7 +1366,7 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
         "position_quantity": position_quantity, "quantity": position_quantity,
         "position_value": position_value, "position_capped": position_quantity+1e-12 < risk_sized_quantity,
-        "components": components, "trend": trend, "fundamentals": fundamentals, "news": news_context,
+        "components": components, "entry_snapshot": entry_snapshot, "trend": trend, "fundamentals": fundamentals, "news": news_context,
         "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
         "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
     }
