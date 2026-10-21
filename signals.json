@@ -1139,10 +1139,10 @@
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-21T08:46:31.617546+00:00",
-      "updated_at": "2026-10-21T08:46:31.617555+00:00",
+      "updated_at": "2026-10-21T18:38:56.367360+00:00",
       "expiry_at": "2026-10-23T08:46:31.617558+00:00",
       "entry": 0.04182,
-      "sl": 0.0412249707194912,
+      "sl": 0.04182,
       "tp1": 0.042585,
       "tp2": 0.04504,
       "tp3": 0.0472,
@@ -1223,13 +1223,15 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 1.6274390243902315,
+      "fees_paid": 0.20182926829268294,
+      "closed_reason": null,
+      "last_exit_price": 0.042585,
+      "last_exit_label": "tp1"
     },
     {
       "id": "ADA_USDT_BUY_1792572356",
@@ -1444,10 +1446,10 @@
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-21T08:46:14.051726+00:00",
-      "updated_at": "2026-10-21T08:46:14.051735+00:00",
+      "updated_at": "2026-10-21T18:38:56.679121+00:00",
       "expiry_at": "2026-10-23T08:46:14.051737+00:00",
       "entry": 585.27,
-      "sl": 579.0885156043307,
+      "sl": 585.27,
       "tp1": 607.145,
       "tp2": 626.3,
       "tp3": 629.3907421978346,
@@ -1531,13 +1533,15 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 3.533853606027987,
+      "fees_paid": 0.20373759119722523,
+      "closed_reason": null,
+      "last_exit_price": 607.145,
+      "last_exit_label": "tp1"
     },
     {
       "id": "APE_USDT_BUY_1792572394",
@@ -2376,10 +2380,10 @@
       "strength": "قوی",
       "score": 20,
       "created_at": "2026-10-21T16:42:05.337047+00:00",
-      "updated_at": "2026-10-21T16:42:05.337057+00:00",
+      "updated_at": "2026-10-21T18:38:58.117057+00:00",
       "expiry_at": "2026-10-23T16:42:05.337059+00:00",
       "entry": 1.919,
-      "sl": 1.8989114269896081,
+      "sl": 1.919,
       "tp1": 1.938,
       "tp2": 2.0056,
       "tp3": 2.037,
@@ -2462,13 +2466,15 @@
           }
         ]
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.5,
+      "realized_pnl": 0.7891089108910843,
+      "fees_paid": 0.200990099009901,
+      "closed_reason": null,
+      "last_exit_price": 1.938,
+      "last_exit_label": "tp1"
     },
     {
       "id": "XTZ_USDT_BUY_1792600985",
