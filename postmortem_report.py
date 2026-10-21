@@ -51,6 +51,12 @@ def bucket(key: str, value: Any) -> str:
     if value is None or value == "":
         return "UNKNOWN"
     if key in {"spike_detected", "trendline_up_near"}:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"false", "0", "no", "off", ""}:
+                return "false"
+            if normalized in {"true", "1", "yes", "on"}:
+                return "true"
         return str(bool(value)).lower()
     if key == "nearest_resistance_room_r":
         n = number(value)
@@ -137,6 +143,41 @@ def build_report(payload: Any) -> dict[str, Any]:
             m["winner_count"] = sum(1 for r in rows if number(r.get("realized_pnl")) > 0)
             comparisons[key][group_name] = m
 
+    # Compare how common each feature is among winners vs losers. This is
+    # descriptive only; low counts and overlapping features prevent causal claims.
+    winner_loser_profile: dict[str, Any] = {}
+    for key in feature_keys:
+        winner_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        loser_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in winners:
+            winner_groups[bucket(key, value_for(row, key))].append(row)
+        for row in losers:
+            loser_groups[bucket(key, value_for(row, key))].append(row)
+        buckets = set(winner_groups) | set(loser_groups)
+        profile_rows = []
+        for group_name in buckets:
+            w_count = len(winner_groups.get(group_name, []))
+            l_count = len(loser_groups.get(group_name, []))
+            w_share = 100 * w_count / len(winners) if winners else None
+            l_share = 100 * l_count / len(losers) if losers else None
+            profile_rows.append({
+                "bucket": group_name,
+                "winner_count": w_count,
+                "winner_share_pct": round(w_share, 2) if w_share is not None else None,
+                "loser_count": l_count,
+                "loser_share_pct": round(l_share, 2) if l_share is not None else None,
+                "share_difference_pp_loser_minus_winner": (
+                    round(l_share - w_share, 2)
+                    if l_share is not None and w_share is not None else None
+                ),
+                "small_sample": (w_count + l_count) < 5,
+            })
+        profile_rows.sort(
+            key=lambda item: abs(item["share_difference_pp_loser_minus_winner"] or 0),
+            reverse=True,
+        )
+        winner_loser_profile[key] = profile_rows
+
     missing_snapshot = [s for s in closed if not isinstance(s.get("entry_snapshot"), dict)]
     slippage = [number(s.get("stop_slippage_usd")) or 0.0 for s in stopped]
     anomalies = []
@@ -169,6 +210,7 @@ def build_report(payload: Any) -> dict[str, Any]:
         },
         "overall": metrics(closed),
         "by_feature": comparisons,
+        "winner_loser_profile": winner_loser_profile,
         "largest_winner_sensitivity": {
             "largest_winner_symbol": max(winners, key=lambda s: number(s.get("realized_pnl"))).get("symbol") if winners else None,
             "overall_net_excluding_largest_winner_usd": round(
