@@ -24,6 +24,9 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Test postmortem report
+        run: python -m unittest discover -s tests -p 'test_postmortem_report.py'
+
       - name: Generate read-only loss analysis
         run: python postmortem_report.py --input signals.json --output postmortem-report.json
 
