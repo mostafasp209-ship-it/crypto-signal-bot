@@ -19,6 +19,21 @@ class PostmortemReportTests(unittest.TestCase):
         self.assertEqual(report["counts"]["entry_snapshot_coverage_pct"], 0)
         self.assertEqual(report["largest_winner_sensitivity"]["overall_net_excluding_largest_winner_usd"], -2)
 
+    def test_winner_loser_profile_compares_prevalence_and_parses_string_false(self):
+        report = build_report({"signals": [
+            {"symbol": "A/USDT", "status": "CLOSED", "realized_pnl": 4,
+             "closed_reason": "TP3", "components": {"spike_detected": False}},
+            {"symbol": "B/USDT", "status": "CLOSED", "realized_pnl": -2,
+             "closed_reason": "SL", "components": {"spike_detected": "false"}},
+            {"symbol": "C/USDT", "status": "CLOSED", "realized_pnl": -3,
+             "closed_reason": "SL", "components": {"spike_detected": "true"}},
+        ]})
+        profile = {row["bucket"]: row for row in report["winner_loser_profile"]["spike_detected"]}
+        self.assertEqual(profile["false"]["winner_count"], 1)
+        self.assertEqual(profile["false"]["loser_count"], 1)
+        self.assertEqual(profile["true"]["loser_count"], 1)
+        self.assertTrue(profile["true"]["small_sample"])
+
     def test_empty_input_is_safe(self):
         report = build_report({"signals": []})
         self.assertEqual(report["counts"]["closed_with_pnl"], 0)
