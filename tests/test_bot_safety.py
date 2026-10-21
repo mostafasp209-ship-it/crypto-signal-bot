@@ -70,6 +70,22 @@ class SignalAuditTests(unittest.TestCase):
         self.assertEqual(report["counts"]["losses"], 1)
         self.assertIn("pullback", report["by_setup"])
 
+    def test_audit_groups_legacy_features_and_checks_winner_concentration(self):
+        report = audit_signals({"signals": [
+            {"id": "big-win", "symbol": "AAA/USDT", "status": "CLOSED", "realized_pnl": 10,
+             "components": {"setup": "X", "market_regime": "RANGE", "nearest_resistance_room_r": 2,
+                            "sr_zone_touches": 3, "spike_detected": False, "trendline_up_near": False,
+                            "h2_detected": False}},
+            {"id": "loss", "symbol": "BBB/USDT", "status": "CLOSED", "realized_pnl": -4,
+             "components": {"setup": "X", "market_regime": "DOWNTREND", "nearest_resistance_room_r": 0.5,
+                            "sr_zone_touches": 8, "spike_detected": True, "trendline_up_near": True,
+                            "h2_detected": True}},
+        ]})
+        self.assertIn("DOWNTREND", report["by_market_regime"])
+        self.assertIn("<1R", report["by_resistance_room_bucket"])
+        self.assertIn("7+", report["by_support_touches_bucket"])
+        self.assertEqual(report["concentration_sensitivity"]["excluding_largest_winner"]["net_realized_pnl"], -4.0)
+
     def test_audit_rejects_invalid_shape(self):
         with self.assertRaises(ValueError):
             audit_signals({"unexpected": []})
