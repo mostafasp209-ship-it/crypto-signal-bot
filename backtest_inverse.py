@@ -1,29 +1,24 @@
-"""Replay mirrored (opposite-side) trades against historical OHLCV candles.
+"""Compare original and mirrored signal outcomes using supplied OHLCV CSVs.
 
-Input candles: one CSV per symbol, named like BTC_USDT.csv (also accepts
-BTC-USDT.csv), with timestamp,open,high,low,close columns. Timestamp may be
-ISO-8601 or Unix milliseconds. Example:
+Run:
   python backtest_inverse.py --signals signals.json --candles-dir candles
 
-This is a research tool, not a live-trading feature. For each recorded signal it
-mirrors the entry-relative SL/TP distances, uses 50/30/20% TP weights, charges
-the configured fee on entry and exit notionals, and conservatively treats a bar
-touching both stop and target as stop-first. Missing candles are reported, not
-silently treated as losses or wins.
+Put one CSV per symbol in candles/, e.g. BTC_USDT.csv, with timestamp,open,high,low,close columns. Timestamp can be ISO-8601 or Unix seconds/milliseconds.
+
+Both sides use the logged entry and mirror the entry-to-SL/TP distances for the inverse trade. Each uses the logged position_quantity when available, 50/30/20% TP weights, fee per side, and conservative stop-first handling when a candle touches both stop and target. Results are estimates: OHLC bars cannot reveal intrabar ordering or realistic fills/slippage.
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-
 
 TP_WEIGHTS = ((1, 0.50), (2, 0.30), (3, 0.20))
 
 
-def timestamp(value):
+def to_epoch(value):
     value = str(value).strip()
     try:
         number = float(value)
@@ -36,178 +31,140 @@ def timestamp(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
 
 
-def parse_time(value):
-    if not value:
-        return None
-    return timestamp(value)
-
-
 def read_candles(path):
-    rows = []
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        reader = csv.DictReader(handle)
-        for row in reader:
-            normalized = {str(k).strip().lower(): v for k, v in row.items() if k}
-            ts = normalized.get("timestamp") or normalized.get("time") or normalized.get("datetime") or normalized.get("date")
-            if ts is None:
-                raise ValueError(f"{path}: expected timestamp/time/datetime/date column")
-            rows.append({
-                "ts": timestamp(ts),
-                "open": float(normalized["open"]),
-                "high": float(normalized["high"]),
-                "low": float(normalized["low"]),
-                "close": float(normalized["close"]),
-            })
-    return sorted(rows, key=lambda row: row["ts"])
+    result = []
+    with path.open(newline="", encoding="utf-8-sig") as stream:
+        for row in csv.DictReader(stream):
+            row = {str(k).strip().lower(): v for k, v in row.items() if k}
+            raw_ts = row.get("timestamp") or row.get("time") or row.get("datetime") or row.get("date")
+            if raw_ts is None:
+                raise ValueError(f"{path}: missing timestamp column")
+            result.append({"ts": to_epoch(raw_ts), **{k: float(row[k]) for k in ("open", "high", "low", "close")}})
+    return sorted(result, key=lambda item: item["ts"])
 
 
-def find_candles(directory, symbol):
-    stem = symbol.replace("/", "_")
-    candidates = (f"{stem}.csv", f"{symbol.replace('/', '-')}.csv", f"{symbol.replace('/', '')}.csv")
-    for name in candidates:
-        path = directory / name
-        if path.exists():
-            return path
-    return None
+def candle_file(directory, symbol):
+    variants = (symbol.replace("/", "_") + ".csv", symbol.replace("/", "-") + ".csv", symbol.replace("/", "") + ".csv")
+    return next((directory / name for name in variants if (directory / name).exists()), None)
 
 
-def simulate(signal, candles, fee_rate):
-    entry = float(signal["entry"])
-    side = str(signal.get("side", "BUY")).upper()
-    if side not in {"BUY", "SELL"}:
+def simulate(signal, candles, fee_rate, inverse):
+    original_side = str(signal.get("side", "BUY")).upper()
+    if original_side not in {"BUY", "SELL"}:
         return {"status": "SKIP", "reason": "unsupported_side"}
+    side = ({"BUY": "SELL", "SELL": "BUY"}[original_side] if inverse else original_side)
+    entry = float(signal["entry"])
+    old_sl = float(signal["sl"])
+    if inverse:
+        stop = entry + (entry - old_sl) if original_side == "BUY" else entry - (old_sl - entry)
+        targets = {
+            n: (entry - (float(signal[f"tp{n}"]) - entry) if original_side == "BUY"
+                else entry + (entry - float(signal[f"tp{n}"])))
+            for n, _ in TP_WEIGHTS
+        }
+    else:
+        stop = old_sl
+        targets = {n: float(signal[f"tp{n}"]) for n, _ in TP_WEIGHTS}
 
-    # Reverse direction while preserving the original entry-to-level distances.
-    inverse_side = "SELL" if side == "BUY" else "BUY"
-    original_sl = float(signal["sl"])
-    inverse_sl = entry + (entry - original_sl) if side == "BUY" else entry - (original_sl - entry)
-    targets = {}
-    for number, _ in TP_WEIGHTS:
-        original_tp = float(signal[f"tp{number}"])
-        targets[number] = entry - (original_tp - entry) if side == "BUY" else entry + (entry - original_tp)
-
-    start = parse_time(signal.get("created_at"))
-    end = parse_time(signal.get("closed_at") or signal.get("updated_at") or signal.get("expiry_at"))
-    if start is None:
-        return {"status": "SKIP", "reason": "missing_created_at"}
-    relevant = [bar for bar in candles if bar["ts"] >= start and (end is None or bar["ts"] <= end)]
-    if not relevant:
+    start = to_epoch(signal["created_at"])
+    end_raw = signal.get("closed_at") or signal.get("updated_at") or signal.get("expiry_at")
+    end = to_epoch(end_raw) if end_raw else None
+    bars = [bar for bar in candles if bar["ts"] >= start and (end is None or bar["ts"] <= end)]
+    if not bars:
         return {"status": "NO_DATA", "reason": "no_candles_in_trade_window"}
 
+    qty = float(signal.get("position_quantity") or signal.get("quantity") or 1.0)
     remaining = 1.0
-    gross_pnl = 0.0
-    fees = 0.0
+    gross = 0.0
+    fees = entry * qty * fee_rate
     hits = []
     exit_reason = "TIME_EXIT"
-    last_price = relevant[-1]["close"]
-
-    # Charge entry fee once on the full position. Exit fees are charged per closed slice.
-    fees += entry * fee_rate
-    for bar in relevant:
-        last_price = bar["close"]
-        if inverse_side == "SELL":
-            stop_hit = bar["high"] >= inverse_sl
-            hit_targets = [n for n, _ in TP_WEIGHTS if remaining > 1e-12 and bar["low"] <= targets[n] and n not in hits]
-        else:
-            stop_hit = bar["low"] <= inverse_sl
-            hit_targets = [n for n, _ in TP_WEIGHTS if remaining > 1e-12 and bar["high"] >= targets[n] and n not in hits]
-
-        # OHLC bars cannot establish intrabar ordering; choose the conservative stop-first path.
+    last = bars[-1]["close"]
+    for bar in bars:
+        last = bar["close"]
+        stop_hit = bar["high"] >= stop if side == "SELL" else bar["low"] <= stop
+        target_hits = [
+            n for n, _ in TP_WEIGHTS if n not in hits and remaining > 1e-12
+            and ((bar["low"] <= targets[n]) if side == "SELL" else (bar["high"] >= targets[n]))
+        ]
+        # If OHLC says stop and target were both touched, assume the worse stop-first path.
         if stop_hit:
-            exit_price = inverse_sl
-            gross_pnl += remaining * ((entry - exit_price) if inverse_side == "SELL" else (exit_price - entry))
-            fees += remaining * exit_price * fee_rate
+            gross += remaining * qty * ((entry - stop) if side == "SELL" else (stop - entry))
+            fees += remaining * qty * stop * fee_rate
             remaining = 0.0
             exit_reason = "SL"
             break
-
-        for number in hit_targets:
-            weight = dict(TP_WEIGHTS)[number]
-            fraction = min(weight, remaining)
-            exit_price = targets[number]
-            gross_pnl += fraction * ((entry - exit_price) if inverse_side == "SELL" else (exit_price - entry))
-            fees += fraction * exit_price * fee_rate
+        for n in target_hits:
+            fraction = min(dict(TP_WEIGHTS)[n], remaining)
+            price = targets[n]
+            gross += fraction * qty * ((entry - price) if side == "SELL" else (price - entry))
+            fees += fraction * qty * price * fee_rate
             remaining -= fraction
-            hits.append(number)
-            exit_reason = f"TP{number}" if remaining <= 1e-12 else exit_reason
-
+            hits.append(n)
+            if remaining <= 1e-12:
+                exit_reason = f"TP{n}"
     if remaining > 1e-12:
-        gross_pnl += remaining * ((entry - last_price) if inverse_side == "SELL" else (last_price - entry))
-        fees += remaining * last_price * fee_rate
-    net = gross_pnl - fees
+        gross += remaining * qty * ((entry - last) if side == "SELL" else (last - entry))
+        fees += remaining * qty * last * fee_rate
     return {
-        "status": "SIMULATED",
-        "symbol": signal.get("symbol"),
-        "original_side": side,
-        "inverse_side": inverse_side,
-        "entry": entry,
-        "inverse_sl": inverse_sl,
-        "inverse_targets": {f"tp{n}": value for n, value in targets.items()},
-        "tp_hits": hits,
-        "exit_reason": exit_reason,
-        "bars": len(relevant),
-        "gross_pnl_per_unit": round(gross_pnl, 10),
-        "fees_per_unit": round(fees, 10),
-        "net_pnl_per_unit": round(net, 10),
-        "assumed_position_value": float(signal.get("position_value") or 1.0),
-        "note": "PnL is per unit unless scaled; original position sizing may not suit the mirrored stop.",
+        "status": "SIMULATED", "symbol": signal.get("symbol"),
+        "strategy": "inverse" if inverse else "original", "side": side,
+        "position_quantity": qty, "entry": entry, "stop": stop,
+        "targets": {f"tp{n}": p for n, p in targets.items()},
+        "tp_hits": hits, "exit_reason": exit_reason, "bars": len(bars),
+        "gross_pnl_usd": round(gross, 8), "fees_usd": round(fees, 8),
+        "net_pnl_usd": round(gross - fees, 8),
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Backtest opposite-side versions of logged signals")
+    parser = argparse.ArgumentParser(description="Compare logged signals with opposite-side replay")
     parser.add_argument("--signals", default="signals.json")
     parser.add_argument("--candles-dir", default="candles")
     parser.add_argument("--fee-rate", type=float, default=0.001)
-    parser.add_argument("--out", default="inverse-backtest.json")
+    parser.add_argument("--out", default="direction-comparison.json")
     args = parser.parse_args()
-
     payload = json.loads(Path(args.signals).read_text(encoding="utf-8"))
     signals = payload if isinstance(payload, list) else payload.get("signals", [])
-    candle_dir = Path(args.candles_dir)
-    cache = {}
-    results = []
-    for signal in signals:
-        if not isinstance(signal, dict) or signal.get("status") not in {"CLOSED", "EXPIRED"}:
-            continue
-        symbol = signal.get("symbol", "")
-        path = find_candles(candle_dir, symbol)
+    directory = Path(args.candles_dir)
+    cache, results = {}, []
+    eligible = [s for s in signals if isinstance(s, dict) and s.get("status") in {"CLOSED", "EXPIRED"}]
+    for signal in eligible:
+        path = candle_file(directory, str(signal.get("symbol", "")))
         if path is None:
-            results.append({"status": "NO_DATA", "symbol": symbol, "reason": "missing_candle_file"})
+            results.append({"symbol": signal.get("symbol"), "status": "NO_DATA", "reason": "missing_candle_file"})
             continue
         try:
             if path not in cache:
                 cache[path] = read_candles(path)
-            results.append(simulate(signal, cache[path], args.fee_rate))
+            for inverse in (False, True):
+                results.append({"symbol": signal.get("symbol"), **simulate(signal, cache[path], args.fee_rate, inverse)})
         except (KeyError, TypeError, ValueError, OSError) as exc:
-            results.append({"status": "SKIP", "symbol": symbol, "reason": str(exc)})
+            results.append({"symbol": signal.get("symbol"), "status": "SKIP", "reason": str(exc)})
 
-    simulated = [row for row in results if row.get("status") == "SIMULATED"]
-    pnl = [row["net_pnl_per_unit"] for row in simulated]
+    summary = {}
+    for strategy in ("original", "inverse"):
+        rows = [r for r in results if r.get("status") == "SIMULATED" and r.get("strategy") == strategy]
+        pnls = [r["net_pnl_usd"] for r in rows]
+        summary[strategy] = {
+            "trades": len(rows), "wins": sum(p > 0 for p in pnls), "losses": sum(p < 0 for p in pnls),
+            "win_rate_pct": round(100 * sum(p > 0 for p in pnls) / len(pnls), 2) if pnls else None,
+            "net_pnl_usd": round(sum(pnls), 8),
+            "profit_factor": round(sum(p for p in pnls if p > 0) / abs(sum(p for p in pnls if p < 0)), 4)
+                if any(p < 0 for p in pnls) else None,
+        }
     report = {
-        "scope": "Mirrored trade replay; only as reliable as supplied OHLCV data and assumptions.",
-        "assumptions": {
-            "fee_rate_per_side": args.fee_rate,
-            "tp_weights": {"tp1": 0.5, "tp2": 0.3, "tp3": 0.2},
-            "same_bar_stop_and_target": "stop-first conservative",
-            "inverse_levels": "mirror each original entry-to-SL/TP distance around entry",
-            "position_sizing": "net PnL is per unit; position sizing is not normalized to equal risk",
-        },
-        "counts": {
-            "closed_or_expired_signals": len(results),
-            "simulated": len(simulated),
-            "missing_data": sum(row.get("status") == "NO_DATA" for row in results),
-            "skipped": sum(row.get("status") == "SKIP" for row in results),
-            "positive_per_unit": sum(value > 0 for value in pnl),
-            "negative_per_unit": sum(value < 0 for value in pnl),
-            "win_rate_pct": round(100 * sum(value > 0 for value in pnl) / len(pnl), 2) if pnl else None,
-            "net_pnl_per_unit_sum": round(sum(pnl), 10),
-        },
-        "results": results,
-        "warning": "Do not deploy a reverse strategy based on win rate alone. Normalize risk, verify candle coverage, and test out of sample.",
+        "scope": "Historical OHLCV replay, only for signals with supplied candles.",
+        "assumptions": {"fee_rate_per_side": args.fee_rate, "tp_weights": {"tp1": .5, "tp2": .3, "tp3": .2},
+                        "same_bar_stop_and_target": "stop-first", "inverse_levels": "mirror distances around entry",
+                        "position_sizing": "uses logged position_quantity; does not model slippage or funding"},
+        "eligible_logged_signals": len(eligible),
+        "signals_missing_candles": sum(r.get("status") == "NO_DATA" for r in results),
+        "summary": summary, "results": results,
+        "warning": "Do not enable inverse trading from this report alone; inspect data coverage, fills, and out-of-sample performance.",
     }
     Path(args.out).write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(json.dumps(report["counts"], indent=2))
+    print(json.dumps({"eligible": len(eligible), "missing_candles": report["signals_missing_candles"], "summary": summary}, indent=2))
     print(f"Saved report to {args.out}")
 
 
