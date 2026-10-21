@@ -68,6 +68,49 @@ def grouped(records: list[dict[str, Any]], key_fn) -> dict[str, Any]:
         for key, group in sorted(groups.items())
     }
 
+def component_value(row: dict[str, Any], key: str) -> Any:
+    components = row.get("components")
+    if isinstance(components, dict) and components.get(key) is not None:
+        return components.get(key)
+    return row.get(key)
+
+
+def bucket_resistance_room(value: Any) -> str:
+    room = finite_number(value)
+    if room is None:
+        return "UNKNOWN"
+    if room < 1:
+        return "<1R"
+    if room < 1.5:
+        return "1-1.5R"
+    return "1.5R+"
+
+
+def bucket_support_touches(value: Any) -> str:
+    touches = finite_number(value)
+    if touches is None:
+        return "UNKNOWN"
+    if touches <= 2:
+        return "1-2"
+    if touches <= 4:
+        return "3-4"
+    if touches <= 6:
+        return "5-6"
+    return "7+"
+
+
+def outcome_sensitivity_without_largest_winner(records: list[dict[str, Any]]) -> dict[str, Any]:
+    if not records:
+        return {"excluded_symbol": None, **summarize_group([])}
+    largest = max(records, key=lambda row: finite_number(row.get("realized_pnl")) or 0)
+    remaining = [row for row in records if row is not largest]
+    return {
+        "excluded_symbol": largest.get("symbol"),
+        "excluded_pnl": finite_number(largest.get("realized_pnl")),
+        **summarize_group(remaining),
+    }
+
+
 
 def audit_signals(payload: Any) -> dict[str, Any]:
     if isinstance(payload, list):
@@ -156,6 +199,18 @@ def audit_signals(payload: Any) -> dict[str, Any]:
         "by_score_bucket": grouped(closed, lambda row: bucket_score(row.get("score"))),
         "by_daily_trend": grouped(closed, lambda row: component(row, "daily_trend", component(row, "trend"))),
         "by_close_reason": grouped(closed, lambda row: row.get("closed_reason") or "UNKNOWN"),
+        "by_market_regime": grouped(closed, lambda row: component_value(row, "market_regime") or "UNKNOWN"),
+        "by_news_context": grouped(closed, lambda row: component_value(row, "news_context") or (row.get("news") or {}).get("label", "UNKNOWN")),
+        "by_resistance_room_bucket": grouped(closed, lambda row: bucket_resistance_room(component_value(row, "nearest_resistance_room_r"))),
+        "by_support_touches_bucket": grouped(closed, lambda row: bucket_support_touches(component_value(row, "sr_zone_touches"))),
+        "by_spike_detected": grouped(closed, lambda row: str(bool(component_value(row, "spike_detected"))).upper()),
+        "by_trendline_up_near": grouped(closed, lambda row: str(bool(component_value(row, "trendline_up_near"))).upper()),
+        "by_h2_detected": grouped(closed, lambda row: str(bool(component_value(row, "h2_detected"))).upper()),
+        "concentration_sensitivity": {
+            "all_closed": summarize_group(closed),
+            "excluding_largest_winner": outcome_sensitivity_without_largest_winner(closed),
+            "note": "Sensitivity check only; excluding a winner is not a performance estimate.",
+        },
         "by_tp1_hit": grouped(closed, lambda row: "YES" if row.get("tp1_hit") else "NO"),
         "top_winners": sorted(
             [{
