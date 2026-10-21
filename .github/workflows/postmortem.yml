@@ -8,6 +8,8 @@ on:
   pull_request:
     paths:
       - "postmortem_report.py"
+      - "historical_replay.py"
+      - "tests/test_historical_replay.py"
       - "tests/test_postmortem_report.py"
       - ".github/workflows/postmortem.yml"
       - "signals.json"
@@ -18,23 +20,41 @@ permissions:
 jobs:
   postmortem:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - name: Checkout latest recorded signal outcomes
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.event.pull_request.head.sha || 'main' }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Test postmortem report
-        run: python -m unittest discover -s tests -p 'test_postmortem_report.py'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Test postmortem and historical replay
+        run: |
+          python -m unittest discover -s tests -p 'test_postmortem_report.py'
+          python -m unittest discover -s tests -p 'test_historical_replay.py'
 
       - name: Generate read-only loss analysis
         run: python postmortem_report.py --input signals.json --output postmortem-report.json
+
+      - name: Replay closed signals against public historical candles
+        if: github.event_name != 'pull_request'
+        run: python historical_replay.py --input signals.json --output historical-replay-report.json
+
+      - name: Upload historical replay report
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-replay-${{ github.run_id }}
+          path: historical-replay-report.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload postmortem report
         uses: actions/upload-artifact@v4
