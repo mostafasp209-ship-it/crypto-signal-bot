@@ -49,6 +49,25 @@ class SignalAuditTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             audit_signals({"unexpected": []})
 
+    def test_audit_ignores_non_finite_pnl_and_flags_inconsistent_tp_order(self):
+        report = audit_signals({"signals": [
+            {"id": "nan", "status": "CLOSED", "realized_pnl": "nan"},
+            {"id": "tp-order", "status": "CLOSED", "realized_pnl": -2,
+             "tp1_hit": False, "tp2_hit": True, "tp3_hit": True},
+        ]})
+        self.assertEqual(report["counts"]["closed_with_pnl"], 1)
+        self.assertEqual(report["counts"]["net_realized_pnl"], -2)
+        self.assertIn(
+            "take_profit_flags_out_of_order",
+            [item["type"] for item in report["anomalies"]],
+        )
+
+    def test_audit_handles_empty_log_without_division_errors(self):
+        report = audit_signals([])
+        self.assertEqual(report["counts"]["all_records"], 0)
+        self.assertEqual(report["counts"]["closed_with_pnl"], 0)
+        self.assertIsNone(report["counts"]["win_rate_pct"])
+
 
 if __name__ == "__main__":
     unittest.main()
