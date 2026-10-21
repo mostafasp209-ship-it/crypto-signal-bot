@@ -923,11 +923,11 @@
       "symbol": "HBAR/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 18,
       "created_at": "2026-10-21T08:45:59.213632+00:00",
-      "updated_at": "2026-10-21T13:11:27.304718+00:00",
+      "updated_at": "2026-10-21T14:21:22.899519+00:00",
       "expiry_at": "2026-10-23T08:45:59.213643+00:00",
       "entry": 0.08462,
       "sl": 0.08462,
@@ -1015,10 +1015,14 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 0.9097376506735952,
-      "fees_paid": 0.20111084849917277,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": 0.686126211297554,
+      "fees_paid": 0.40108721342472226,
+      "closed_reason": "SL",
+      "last_exit_price": 0.0846,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 0.023635074450491754,
+      "sl_hit": true
     },
     {
       "id": "PUMP_USDT_BUY_1792572356",
@@ -1841,18 +1845,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 9,
+    "closed": 10,
     "tp3": 1,
     "tp2_then_sl": 0,
-    "tp1_then_sl": 1,
+    "tp1_then_sl": 2,
     "sl_direct": 7,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -1.2015737364781067,
-    "fees": 3.602400827090613,
+    "net_pnl": -0.5154475251805533,
+    "fees": 4.003488040515335,
     "sl_methods": {
-      "below_support_zone": 9
+      "below_support_zone": 10
     }
   },
   "last_run": "2026-10-21T12:51:54.845177+00:00",
