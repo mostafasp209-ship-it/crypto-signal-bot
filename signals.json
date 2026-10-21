@@ -1531,11 +1531,11 @@
       "symbol": "APE/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 13,
       "created_at": "2026-10-21T08:46:34.868255+00:00",
-      "updated_at": "2026-10-21T08:46:34.868263+00:00",
+      "updated_at": "2026-10-21T09:15:16.069407+00:00",
       "expiry_at": "2026-10-23T08:46:34.868265+00:00",
       "entry": 0.1469,
       "sl": 0.14602126310135277,
@@ -1624,25 +1624,26 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -1.6240980258679536,
+      "fees_paid": 0.3987746766507828,
+      "closed_reason": "SL",
+      "sl_hit": true
     }
   ],
   "historical_stats": {
-    "closed": 1,
+    "closed": 2,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
-    "sl_direct": 1,
+    "sl_direct": 2,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -5.482631578947368,
-    "fees": 0.39491228070175444,
+    "net_pnl": -7.106729604815321,
+    "fees": 0.7936869573525372,
     "sl_methods": {
-      "below_support_zone": 1
+      "below_support_zone": 2
     }
   },
   "last_run": "2026-10-21T08:46:59.916059+00:00",
