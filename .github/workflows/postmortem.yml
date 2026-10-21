@@ -5,6 +5,16 @@ on:
     # Daily report, after the UTC-day's scanner activity.
     - cron: "47 0 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "postmortem_report.py"
+      - "historical_replay.py"
+      - "tests/test_historical_replay.py"
+      - "tests/test_postmortem_report.py"
+      - ".github/workflows/postmortem.yml"
+      - "signals.json"
+      - "requirements.txt"
   pull_request:
     paths:
       - "postmortem_report.py"
