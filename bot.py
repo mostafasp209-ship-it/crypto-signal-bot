@@ -1867,7 +1867,7 @@ def main(manage_only=False):
         save_state(state)
         print(f"Signal history reset: cleared {previous_count} old signals.")
         telegram_send(
-            "♻️ <b>شروع تست جدید</b>\\n"
+            "♻️ <b>شروع تست جدید</b>\n"
             "تاریخچه قبلی و سیگنال‌های فعال پاک شدند. شمارنده‌ها از صفر شروع شدند؛ "
             "از این لحظه همه سیگنال‌های جدید گزارش می‌شوند."
         )
