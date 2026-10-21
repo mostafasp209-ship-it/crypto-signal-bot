@@ -93,6 +93,35 @@ class SignalAuditTests(unittest.TestCase):
         self.assertEqual(report["counts"]["closed_with_pnl"], 0)
         self.assertIsNone(report["counts"]["win_rate_pct"])
 
+    def test_stop_diagnostic_flags_counter_trend_and_tight_resistance(self):
+        from strategy_diagnostics import diagnose_signal
+        report = diagnose_signal({
+            "id": "loss-1", "symbol": "ABC/USDT", "status": "CLOSED",
+            "closed_reason": "SL", "realized_pnl": -4.0, "score": 16,
+            "entry_snapshot": {
+                "setup": "SR_BOUNCE", "daily_trend": "BEAR",
+                "market_regime": "DOWNTREND", "resistance_room_r": 0.4,
+                "ema20_distance_atr": 0.2, "rsi": 55,
+                "volume_vs_median": 1.0, "support_zone_touches": 1,
+                "score": 16,
+            },
+        })
+        codes = {item["code"] for item in report["findings"]}
+        self.assertIn("COUNTER_DAILY_TREND", codes)
+        self.assertIn("COUNTER_MARKET_REGIME", codes)
+        self.assertIn("LIMITED_RESISTANCE_ROOM", codes)
+        self.assertIn("HIGH_SCORE_DID_NOT_PREVENT_LOSS", codes)
+
+    def test_diagnostic_marks_missing_snapshot_instead_of_inventing_cause(self):
+        from strategy_diagnostics import diagnose_signal
+        report = diagnose_signal({
+            "id": "old", "status": "CLOSED", "closed_reason": "SL",
+            "realized_pnl": -1.0,
+        })
+        self.assertEqual(report["missing_evidence"], ["entry_snapshot"])
+        self.assertTrue(report["findings"])
+        self.assertIn("Hypotheses only", report["interpretation"])
+
 
 if __name__ == "__main__":
     unittest.main()
