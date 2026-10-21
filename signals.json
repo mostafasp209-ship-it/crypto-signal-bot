@@ -2916,11 +2916,11 @@
       "symbol": "ADA/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 18,
       "created_at": "2026-10-21T16:42:03.733138+00:00",
-      "updated_at": "2026-10-21T16:42:03.733147+00:00",
+      "updated_at": "2026-10-21T23:09:33.782986+00:00",
       "expiry_at": "2026-10-23T16:42:03.733149+00:00",
       "entry": 0.22901,
       "sl": 0.22630438131784272,
@@ -3008,10 +3008,14 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -3.183118641107374,
+      "fees_paid": 0.39721409545434694,
+      "closed_reason": "SL",
+      "last_exit_price": 0.22582,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 0.423021979688861,
+      "sl_hit": true
     },
     {
       "id": "MNT_USDT_BUY_1792600959",
@@ -3527,18 +3531,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 18,
+    "closed": 19,
     "tp3": 2,
     "tp2_then_sl": 0,
     "tp1_then_sl": 3,
-    "sl_direct": 13,
+    "sl_direct": 14,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -19.724988130167624,
-    "fees": 7.187462474344176,
+    "net_pnl": -22.908106771274998,
+    "fees": 7.584676569798523,
     "sl_methods": {
-      "below_support_zone": 18
+      "below_support_zone": 19
     }
   },
   "last_run": "2026-10-21T20:43:00.990541+00:00",
