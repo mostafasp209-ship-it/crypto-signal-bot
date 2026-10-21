@@ -1852,10 +1852,25 @@ def main(manage_only=False):
     print("=" * 70)
 
     state = load_state()
-    # Start a clean forward-test cohort without deleting prior signals or active trades.
-    if not state.get("forward_test_started_at"):
+
+    # One-time hard reset for the new forward-test run.
+    # This intentionally clears ALL previous signals (including active ones) and cached
+    # performance counters. The version marker prevents clearing the new test on every run.
+    if state.get("signal_history_reset_version", 0) < 2:
+        previous_count = len(state.get("signals", []))
+        state["signals"] = []
+        state["historical_stats"] = {}
         state["forward_test_started_at"] = iso_now()
+        state["signal_history_reset_version"] = 2
+        state["last_run"] = None
+        refresh_historical_stats(state)
         save_state(state)
+        print(f"Signal history reset: cleared {previous_count} old signals.")
+        telegram_send(
+            "♻️ <b>شروع تست جدید</b>\\n"
+            "تاریخچه قبلی و سیگنال‌های فعال پاک شدند. شمارنده‌ها از صفر شروع شدند؛ "
+            "از این لحظه همه سیگنال‌های جدید گزارش می‌شوند."
+        )
 
     manager = ExchangeManager()
 
