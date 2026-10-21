@@ -9698,11 +9698,11 @@
       "symbol": "PUMP/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-21T00:52:10.611434+00:00",
-      "updated_at": "2026-10-21T00:52:10.611444+00:00",
+      "updated_at": "2026-10-21T02:23:31.560037+00:00",
       "expiry_at": "2026-10-23T00:52:10.611447+00:00",
       "entry": 0.0048715,
       "sl": 0.004785005391869926,
@@ -9790,10 +9790,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -4.2471189572000325,
+      "fees_paid": 0.39614903007287283,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "XLM_USDT_BUY_1792543932",
@@ -9999,19 +10000,19 @@
     }
   ],
   "historical_stats": {
-    "closed": 83,
+    "closed": 84,
     "tp3": 6,
     "tp2_then_sl": 2,
     "tp1_then_sl": 13,
-    "sl_direct": 41,
+    "sl_direct": 42,
     "expired": 21,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -125.0369230065448,
-    "fees": 30.913663171028087,
+    "net_pnl": -129.28404196374484,
+    "fees": 31.30981220110096,
     "sl_methods": {
       "below_support": 2,
-      "below_support_zone": 68
+      "below_support_zone": 69
     }
   },
   "last_run": "2026-10-21T00:53:14.636003+00:00",
