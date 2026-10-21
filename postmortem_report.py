@@ -113,6 +113,24 @@ def metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def is_true(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "on"}
+    return value is True or value == 1
+
+
+def candidate_filter_metrics(rows: list[dict[str, Any]], keep) -> dict[str, Any]:
+    kept = [row for row in rows if keep(row)]
+    excluded = [row for row in rows if not keep(row)]
+    result = metrics(kept)
+    result["excluded_trades"] = len(excluded)
+    result["excluded_net_pnl_usd"] = round(
+        sum(number(row.get("realized_pnl")) or 0.0 for row in excluded), 6
+    )
+    result["interpretation"] = "IN_SAMPLE_DIAGNOSTIC_NOT_VALIDATION"
+    return result
+
+
 def build_report(payload: Any) -> dict[str, Any]:
     signals = payload if isinstance(payload, list) else payload.get("signals", []) if isinstance(payload, dict) else None
     if not isinstance(signals, list) or any(not isinstance(s, dict) for s in signals):
@@ -178,6 +196,26 @@ def build_report(payload: Any) -> dict[str, Any]:
         )
         winner_loser_profile[key] = profile_rows
 
+    # Historical counterfactuals are diagnostic only. They must not be
+    # treated as validated filters or applied to live trading automatically.
+    candidate_filters = {
+        "baseline_no_filter": lambda row: True,
+        "exclude_spike_detected": lambda row: not is_true(value_for(row, "spike_detected")),
+        "exclude_trendline_up_near": lambda row: not is_true(value_for(row, "trendline_up_near")),
+        "exclude_spike_or_trendline_near": lambda row: not (
+            is_true(value_for(row, "spike_detected"))
+            or is_true(value_for(row, "trendline_up_near"))
+        ),
+        "exclude_h2_second_entry": lambda row: str(value_for(row, "setup") or "").upper() != "H2_SECOND_ENTRY",
+        "exclude_sr_bounce": lambda row: str(value_for(row, "setup") or "").upper() != "SR_BOUNCE",
+        "exclude_h2_and_sr_bounce": lambda row: str(value_for(row, "setup") or "").upper()
+            not in {"H2_SECOND_ENTRY", "SR_BOUNCE"},
+    }
+    candidate_filter_results = {
+        name: candidate_filter_metrics(closed, keep)
+        for name, keep in candidate_filters.items()
+    }
+
     missing_snapshot = [s for s in closed if not isinstance(s.get("entry_snapshot"), dict)]
     slippage = [number(s.get("stop_slippage_usd")) or 0.0 for s in stopped]
     anomalies = []
@@ -211,6 +249,7 @@ def build_report(payload: Any) -> dict[str, Any]:
         "overall": metrics(closed),
         "by_feature": comparisons,
         "winner_loser_profile": winner_loser_profile,
+        "candidate_filter_diagnostics": candidate_filter_results,
         "largest_winner_sensitivity": {
             "largest_winner_symbol": max(winners, key=lambda s: number(s.get("realized_pnl"))).get("symbol") if winners else None,
             "overall_net_excluding_largest_winner_usd": round(
