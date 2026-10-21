@@ -126,6 +126,15 @@ def audit_signals(payload: Any) -> dict[str, Any]:
                 "type": "invalid_remaining_fraction", "remaining_fraction": remaining,
             })
 
+    stop_exits = [
+        row for row in closed
+        if str(row.get("closed_reason", "")).upper() in {"SL", "STOP_LOSS"}
+    ]
+    stop_slippage_values = [
+        finite_number(row.get("stop_slippage_usd")) for row in stop_exits
+    ]
+    stop_slippage_values = [value for value in stop_slippage_values if value is not None]
+
     return {
         "scope": "Recorded signal log only; not an independent historical-candle backtest.",
         "counts": {
@@ -136,6 +145,12 @@ def audit_signals(payload: Any) -> dict[str, Any]:
             "losses": len(losers),
             "win_rate_pct": round(100 * len(winners) / len(closed), 2) if closed else None,
             "net_realized_pnl": round(sum(finite_number(row.get("realized_pnl")) or 0 for row in closed), 8),
+        },
+        "stop_execution_audit": {
+            "closed_by_stop": len(stop_exits),
+            "records_with_slippage_data": len(stop_slippage_values),
+            "total_adverse_stop_slippage_usd": round(sum(stop_slippage_values), 8),
+            "note": "Only newly recorded stop exits have slippage data; older records cannot be reconstructed without exit-price history.",
         },
         "by_setup": grouped(closed, lambda row: component(row, "setup")),
         "by_score_bucket": grouped(closed, lambda row: bucket_score(row.get("score"))),
