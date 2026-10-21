@@ -1,0 +1,36 @@
+name: Automated Signal Postmortem
+
+on:
+  schedule:
+    # Daily report, after the UTC-day's scanner activity.
+    - cron: "47 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postmortem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout latest recorded signal outcomes
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Generate read-only loss analysis
+        run: python postmortem_report.py --input signals.json --output postmortem-report.json
+
+      - name: Upload postmortem report
+        uses: actions/upload-artifact@v4
+        with:
+          name: signal-postmortem-${{ github.run_id }}
+          path: postmortem-report.json
+          if-no-files-found: error
+          retention-days: 30
