@@ -1,0 +1,54 @@
+import unittest
+
+import pandas as pd
+
+import bot
+from analyze_signals import audit_signals
+
+
+class CandleSafetyTests(unittest.TestCase):
+    def test_closed_candles_excludes_forming_candle(self):
+        raw = []
+        for i in range(40):
+            raw.append([i * 14400000, 100 + i, 102 + i, 99 + i, 101 + i, 1000])
+        df = bot.closed_candles(raw)
+        self.assertEqual(len(df), 39)
+        self.assertEqual(int(df.iloc[-1]["timestamp"]), 38 * 14400000)
+
+    def test_closed_candles_rejects_short_input(self):
+        self.assertTrue(bot.closed_candles([]).empty)
+        self.assertTrue(bot.closed_candles([[0, 1, 1, 1, 1, 1]] * 29).empty)
+
+    def test_indicators_produce_expected_columns(self):
+        raw = []
+        for i in range(240):
+            close = 100 + i * 0.2
+            raw.append([i, close, close + 1, close - 1, close, 1000])
+        df = bot.add_indicators(pd.DataFrame(
+            raw, columns=["timestamp", "open", "high", "low", "close", "volume"]
+        ))
+        for col in ("ema20", "ema50", "ema200", "rsi", "atr", "bb_upper", "bb_lower"):
+            self.assertIn(col, df.columns)
+        self.assertTrue(pd.notna(df.iloc[-1]["ema200"]))
+
+
+class SignalAuditTests(unittest.TestCase):
+    def test_audit_reports_closed_pnl_and_anomalies(self):
+        report = audit_signals({"signals": [
+            {"id": "a", "status": "CLOSED", "realized_pnl": 3.0, "components": {"setup": "pullback"}, "score": 15},
+            {"id": "b", "status": "CLOSED", "realized_pnl": -1.0, "closed_reason": "SL", "tp1_hit": False},
+            {"id": "c", "status": "ACTIVE"},
+        ]})
+        self.assertEqual(report["counts"]["closed_with_pnl"], 2)
+        self.assertEqual(report["counts"]["active"], 1)
+        self.assertEqual(report["counts"]["wins"], 1)
+        self.assertEqual(report["counts"]["losses"], 1)
+        self.assertIn("pullback", report["by_setup"])
+
+    def test_audit_rejects_invalid_shape(self):
+        with self.assertRaises(ValueError):
+            audit_signals({"unexpected": []})
+
+
+if __name__ == "__main__":
+    unittest.main()
