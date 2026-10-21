@@ -48,3 +48,10 @@ Workflow مستقل `Automated Signal Postmortem` هر روز اجرا می‌ش
 - گزارش JSON را به‌صورت Artifact در صفحهٔ اجرای GitHub Actions برای ۳۰ روز نگه می‌دارد.
 
 این گزارش فقط‌خواندنی است و استراتژی زنده، حدها یا فایل `signals.json` را تغییر نمی‌دهد. گروه‌های کمتر از ۵ معامله صرفاً اکتشافی‌اند؛ هیچ فیلتری نباید صرفاً بر اساس همبستگی چند معامله به استراتژی زنده اضافه شود.
+
+
+## Historical candle replay (read-only)
+
+The daily/manual `Automated Signal Postmortem` workflow also downloads public 1-minute OHLCV candles for closed signals when the exchange still provides them, then publishes a separate `historical-replay-<run id>` artifact. It compares recorded PnL with a conservative, approximate replay and lists unavailable data/errors per signal. OHLCV cannot prove intraminute ordering or real fills, so the replay is diagnostic evidence—not a promise of realized results.
+
+The workflow does not modify `bot.py`, entry filters, stop-loss/target rules, or `signals.json`. Any strategy adjustment must be separately tested out-of-sample and reviewed before deployment; this automation never self-edits live rules.
