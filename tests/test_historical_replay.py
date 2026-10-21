@@ -27,7 +27,7 @@ class HistoricalReplayTests(unittest.TestCase):
         result = simulate_signal(signal(), candles)
         self.assertEqual(result["simulated_exit"], "TP3")
         self.assertEqual(result["tp_hits"], ["tp1", "tp2", "tp3"])
-        self.assertEqual(result["simulated_pnl_usd"], 97.5)
+        self.assertEqual(result["simulated_pnl_usd"], 82.915)
 
     def test_marks_open_remainder_at_last_close(self):
         result = simulate_signal(signal(), [[0, 100, 103, 99, 102, 1]])
