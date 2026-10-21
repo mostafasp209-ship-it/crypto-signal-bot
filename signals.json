@@ -1329,11 +1329,11 @@
       "symbol": "QNT/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-21T08:45:55.711418+00:00",
-      "updated_at": "2026-10-21T08:45:55.711426+00:00",
+      "updated_at": "2026-10-21T10:54:24.800548+00:00",
       "expiry_at": "2026-10-23T08:45:55.711429+00:00",
       "entry": 200.76,
       "sl": 198.1932620039695,
@@ -1420,10 +1420,11 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -3.992737597130888,
+      "fees_paid": 0.39640366606893807,
+      "closed_reason": "SL",
+      "sl_hit": true
     },
     {
       "id": "XMR_USDT_BUY_1792572374",
@@ -1635,18 +1636,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 5,
+    "closed": 6,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
-    "sl_direct": 5,
+    "sl_direct": 6,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -19.385084399380435,
-    "fees": 1.9825975131137334,
+    "net_pnl": -23.377821996511322,
+    "fees": 2.3790011791826715,
     "sl_methods": {
-      "below_support_zone": 5
+      "below_support_zone": 6
     }
   },
   "last_run": "2026-10-21T08:46:59.916059+00:00",
