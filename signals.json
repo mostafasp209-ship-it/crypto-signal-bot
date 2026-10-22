@@ -3139,11 +3139,11 @@
       "symbol": "MASK/USDT",
       "exchange": "cryptocom",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-21T16:42:54.221354+00:00",
-      "updated_at": "2026-10-21T17:06:51.081520+00:00",
+      "updated_at": "2026-10-22T08:28:31.917939+00:00",
       "expiry_at": "2026-10-23T16:42:54.221365+00:00",
       "entry": 0.4348,
       "sl": 0.4348,
@@ -3231,12 +3231,14 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 0.6041628334866611,
-      "fees_paid": 0.20080496780128793,
-      "closed_reason": null,
-      "last_exit_price": 0.4383,
-      "last_exit_label": "tp1"
+      "remaining_fraction": 0.0,
+      "realized_pnl": -0.7676172953081855,
+      "fees_paid": 0.39963201471941123,
+      "closed_reason": "SL",
+      "last_exit_price": 0.4297,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 1.1729530818767233,
+      "sl_hit": true
     },
     {
       "id": "NPC_USDT_BUY_1792615326",
@@ -3818,18 +3820,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 27,
+    "closed": 28,
     "tp3": 3,
     "tp2_then_sl": 0,
-    "tp1_then_sl": 6,
+    "tp1_then_sl": 7,
     "sl_direct": 18,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -42.015657055909685,
-    "fees": 10.683462887563454,
+    "net_pnl": -42.78327435121787,
+    "fees": 11.083094902282866,
     "sl_methods": {
-      "below_support_zone": 27
+      "below_support_zone": 28
     }
   },
   "last_run": "2026-10-22T04:41:37.593615+00:00",
