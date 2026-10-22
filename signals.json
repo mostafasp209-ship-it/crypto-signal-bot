@@ -3461,11 +3461,11 @@
       "symbol": "DUSK/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-21T20:41:59.396699+00:00",
-      "updated_at": "2026-10-21T20:41:59.396711+00:00",
+      "updated_at": "2026-10-22T12:19:52.217161+00:00",
       "expiry_at": "2026-10-23T20:41:59.396712+00:00",
       "entry": 0.1127,
       "sl": 0.11131903462174271,
@@ -3552,10 +3552,14 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -4.300266193433885,
+      "fees_paid": 0.3960958296362023,
+      "closed_reason": "SL",
+      "last_exit_price": 0.1105,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 1.4534775896055177,
+      "sl_hit": true
     },
     {
       "id": "CRV_USDT_BUY_1792630338",
@@ -4098,18 +4102,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 31,
+    "closed": 32,
     "tp3": 3,
     "tp2_then_sl": 0,
     "tp1_then_sl": 7,
-    "sl_direct": 21,
+    "sl_direct": 22,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -64.40811891376273,
-    "fees": 12.030512818251724,
+    "net_pnl": -68.70838510719662,
+    "fees": 12.426608647887926,
     "sl_methods": {
-      "below_support_zone": 31
+      "below_support_zone": 32
     }
   },
   "last_run": "2026-10-22T08:48:47.338952+00:00",
