@@ -3538,6 +3538,139 @@
       "realized_pnl": 0.0,
       "fees_paid": 0.0,
       "closed_reason": null
+    },
+    {
+      "id": "CRV_USDT_BUY_1792630338",
+      "symbol": "CRV/USDT",
+      "exchange": "binanceus",
+      "side": "BUY",
+      "status": "ACTIVE",
+      "strength": "قوی",
+      "score": 24,
+      "created_at": "2026-10-22T00:52:18.550298+00:00",
+      "updated_at": "2026-10-22T00:52:18.550299+00:00",
+      "expiry_at": "2026-10-24T00:52:18.550301+00:00",
+      "entry": 0.4054,
+      "sl": 0.3804293914083401,
+      "tp1": 0.43661326073957485,
+      "tp2": 0.4503470954649878,
+      "tp3": 0.4703235823383157,
+      "support": 0.3823,
+      "resistance": null,
+      "sl_method": "below_support_zone",
+      "tp_methods": [
+        "fallback_1.25R",
+        "fallback_R_multiple",
+        "fallback_R_multiple"
+      ],
+      "rr": 1.600477520555012,
+      "risk_pct": 6.159498912594942,
+      "initial_risk_per_unit": 0.024970608591659893,
+      "initial_sl": 0.3804293914083401,
+      "risk_usd": 10.0,
+      "risk_target_usd": 10.0,
+      "actual_risk_usd": 10.0,
+      "position_quantity": 388.25244416847545,
+      "quantity": 388.25244416847545,
+      "position_value": 157.39754086589994,
+      "position_capped": false,
+      "components": {
+        "setup": "H2_SECOND_ENTRY",
+        "daily_trend": "BULL",
+        "sr_zone_touches": 0,
+        "sr_zone_pivots": 1,
+        "sr_zone_fresh": true,
+        "first_touch": false,
+        "trendline_up_near": false,
+        "trendline_up_broken": false,
+        "spike_detected": false,
+        "two_leg_pullback": true,
+        "breakout_retest": false,
+        "failed_breakdown": false,
+        "market_regime": "UPTREND",
+        "h1_detected": true,
+        "h2_detected": true,
+        "h2_attempts": 2,
+        "h2_pullback_bars": 6,
+        "trend_alignment": 2,
+        "market_structure_confirmation": 2,
+        "h2_second_entry_bonus": 2,
+        "ema_structure": 1,
+        "strong_close": 1,
+        "news_context": "mixed/positive",
+        "news_score_adjustment": 0,
+        "nearest_resistance_room_r": null
+      },
+      "entry_snapshot": {
+        "timeframe": "4h",
+        "trend_timeframe": "1d",
+        "setup": "H2_SECOND_ENTRY",
+        "score": 24,
+        "daily_trend": "BULL",
+        "market_regime": "UPTREND",
+        "close_location_in_candle": 1.0,
+        "rsi": 72.7541,
+        "atr_pct": 2.0974,
+        "ema20_distance_atr": 3.4845,
+        "ema50_distance_atr": 4.9492,
+        "volume_vs_median": 1.1432,
+        "support_zone_touches": 0,
+        "support_zone_fresh": true,
+        "resistance_room_r": null,
+        "stop_distance_atr": 2.9368,
+        "reward_risk_net": 1.6005,
+        "trendline_broken": false,
+        "news_label": "mixed/positive",
+        "news_score_adjustment": 0,
+        "tp_methods": [
+          "fallback_1.25R",
+          "fallback_R_multiple",
+          "fallback_R_multiple"
+        ],
+        "sl_method": "below_support_zone",
+        "captured_at": "2026-10-22T00:52:18.550282+00:00"
+      },
+      "trend": "BULL",
+      "fundamentals": {
+        "funding": null,
+        "open_interest": null,
+        "long_short": null,
+        "source": null
+      },
+      "news": {
+        "score_adjustment": 0,
+        "label": "mixed/positive",
+        "headlines": [
+          {
+            "title": "Treasury Secretary Bessent likens GENIUS Act to Lincoln-era banking reform",
+            "link": "https://cointelegraph.com/news/occ-finalizes-stablecoin-rules-genius-act-bessent?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-21T17:10:54+00:00",
+            "sentiment": "mixed",
+            "age_hours": 7.7
+          },
+          {
+            "title": "Chainlink, Cardano, other blockchain groups push SEC for clearer crypto rules",
+            "link": "https://cointelegraph.com/news/chainlink-cardano-and-other-blockchain-groups-push-sec-for-clearer-crypto-rules?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+            "published_at": "2026-10-21T16:09:26+00:00",
+            "sentiment": "mixed",
+            "age_hours": 8.7
+          },
+          {
+            "title": "Why centralized exchanges refuse to list legacy crypto tokens without explicit SEC immunity",
+            "link": "https://www.coindesk.com/policy/2026/10/21/why-centralized-exchanges-refuse-to-list-legacy-crypto-tokens-without-explicit-sec-immunity",
+            "published_at": "2026-10-21T12:12:36+00:00",
+            "sentiment": "mixed",
+            "age_hours": 12.7
+          }
+        ]
+      },
+      "tp1_hit": false,
+      "tp2_hit": false,
+      "tp3_hit": false,
+      "remaining_fraction": 1.0,
+      "realized_pnl": 0.0,
+      "fees_paid": 0.0,
+      "closed_reason": null
     }
   ],
   "historical_stats": {
@@ -3555,7 +3688,7 @@
       "below_support_zone": 22
     }
   },
-  "last_run": "2026-10-21T20:43:00.990541+00:00",
+  "last_run": "2026-10-22T00:53:11.844718+00:00",
   "forward_test_started_at": "2026-10-21T02:56:34.278238+00:00",
   "signal_history_reset_version": 2
 }
