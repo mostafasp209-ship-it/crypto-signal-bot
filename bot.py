@@ -1197,35 +1197,60 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     trendline_pullback = bool(trendlines["up_near"] and bullish_trend and
                               low <= ema20 + 0.35*atr and close > opn and close_loc >= 0.58)
 
-    setup_candidates = []
-    if failed_breakdown:
-        setup_candidates.append(("FAILED_BREAKDOWN", 15, failure_zone))
-    if breakout_retest:
-        setup_candidates.append(("BREAKOUT_RETEST", 14, retest_zone))
-    if support_bounce:
-        setup_candidates.append(("SR_FIRST_TOUCH" if first_touch else "SR_BOUNCE", 12, support_zone))
-    if spike_two_leg:
-        setup_candidates.append(("SPIKE_TWO_LEG_PULLBACK", 13, support_zone))
-    if trendline_pullback:
-        setup_candidates.append(("TRENDLINE_PULLBACK", 12, nearest_support))
+    # SANDYYY-inspired strategy port (independently implemented; no score threshold).
+    # Adapted for spot crypto: long-only, 4h closed candles, no gold-specific session gate.
+    # All four conditions are mandatory; a high/low score cannot override a failed gate.
+    work = df.copy()
+    delta7 = work["close"].diff()
+    gain7 = delta7.clip(lower=0).rolling(7).mean()
+    loss7 = (-delta7.clip(upper=0)).rolling(7).mean()
+    rs7 = gain7 / loss7.replace(0, np.nan)
+    rsi7 = 100 - (100 / (1 + rs7))
+    low5 = work["low"].rolling(5).min()
+    high5 = work["high"].rolling(5).max()
+    stoch_k = 100 * (work["close"] - low5) / (high5 - low5 + 1e-10)
+    stoch_d = stoch_k.rolling(3).mean()
+    atr_baseline = work["atr"].rolling(50).mean()
+
+    rsi7_now = safe_float(rsi7.iloc[-1])
+    stoch_k_now = safe_float(stoch_k.iloc[-1])
+    stoch_d_now = safe_float(stoch_d.iloc[-1])
+    atr_baseline_now = safe_float(atr_baseline.iloc[-1])
+    trend_gate = bool(ema20 > ema50)
+    rsi_gate = rsi7_now is not None and rsi7_now < 30
+    stoch_gate = (stoch_k_now is not None and stoch_d_now is not None
+                  and stoch_k_now < 20 and stoch_k_now > stoch_d_now)
+    volatility_gate = (atr_baseline_now is not None and atr_baseline_now > 0
+                       and atr > atr_baseline_now * 0.8)
+
+    if not all((trend_gate, rsi_gate, stoch_gate, volatility_gate)):
+        print(
+            f"[FILTER] {symbol} Sandyyy-inspired gates failed: "
+            f"trend={trend_gate}, RSI7={rsi_gate}, stochastic={stoch_gate}, "
+            f"volatility={volatility_gate}"
+        )
+        return None
+
+    setup = "SANDYYY_INSPIRED_RSI_STOCH_PULLBACK"
+    setup_zone = nearest_support
+    regime_context = _market_regime(df.iloc[:i+1], atr)
     h1_h2 = _count_h1_h2(df.iloc[max(0, i-18):i+1])
-    h2_pullback = bool(h1_h2["h2"] and bullish_trend and close > opn and
-                       close_loc >= 0.58 and close > ema20 and not trendlines["up_break"])
-    if h2_pullback:
-        setup_candidates.append(("H2_SECOND_ENTRY", 16, support_zone or nearest_support))
-
-    if not setup_candidates:
-        return None
-    setup, base_score, setup_zone = max(setup_candidates, key=lambda x: x[1])
-
-    # Reject overextended entry candles; all decisions use closed 4h bars.
-    if body > 2.2*atr or span > 3.2*atr:
-        return None
-
-    score = base_score
+    # Compatibility fields for the existing signal schema only; this value is
+    # descriptive and is NOT used to decide whether an entry is allowed.
+    score = int(sum((trend_gate, rsi_gate, stoch_gate, volatility_gate)))
     components = {
         "setup": setup,
+        "strategy_mode": "hard_gates_no_score_threshold",
         "daily_trend": trend,
+        "ema20_above_ema50": trend_gate,
+        "rsi7": round(rsi7_now, 3) if rsi7_now is not None else None,
+        "rsi7_oversold": bool(rsi_gate),
+        "stoch_k": round(stoch_k_now, 3) if stoch_k_now is not None else None,
+        "stoch_d": round(stoch_d_now, 3) if stoch_d_now is not None else None,
+        "stoch_oversold_cross": bool(stoch_gate),
+        "atr": round(float(atr), 8),
+        "atr_50_mean": round(float(atr_baseline_now), 8) if atr_baseline_now is not None else None,
+        "volatility_gate": bool(volatility_gate),
         "sr_zone_touches": setup_zone.get("touches", 0) if isinstance(setup_zone, dict) else None,
         "sr_zone_pivots": setup_zone.get("pivot_count", 0) if isinstance(setup_zone, dict) else None,
         "sr_zone_fresh": bool(setup_zone.get("fresh")) if isinstance(setup_zone, dict) else False,
@@ -1236,55 +1261,16 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
         "two_leg_pullback": bool(two_leg_pullback),
         "breakout_retest": bool(breakout_retest),
         "failed_breakdown": bool(failed_breakdown),
-        "market_regime": _market_regime(df.iloc[:i+1], atr)["regime"],
+        "market_regime": regime_context["regime"],
         "h1_detected": bool(h1_h2["h1"]),
         "h2_detected": bool(h1_h2["h2"]),
         "h2_attempts": int(h1_h2["attempts"]),
         "h2_pullback_bars": int(h1_h2["pullback_bars"]),
     }
-    regime_context = _market_regime(df.iloc[:i+1], atr)
-    if bullish_trend:
-        score += 2
-        components["trend_alignment"] = 2
-    if regime_context["regime"] == "UPTREND":
-        score += 2
-        components["market_structure_confirmation"] = 2
-    elif regime_context["regime"] == "RANGE" and setup not in {"FAILED_BREAKDOWN", "SR_FIRST_TOUCH", "SR_BOUNCE"}:
-        return None
-    if setup == "H2_SECOND_ENTRY":
-        score += 2
-        components["h2_second_entry_bonus"] = 2
-    if close > ema20 > ema50:
-        score += 1
-        components["ema_structure"] = 1
-    if close_loc >= 0.75:
-        score += 1
-        components["strong_close"] = 1
-    if vol_base > 0 and volume >= vol_base*1.2:
-        score += 1
-        components["volume_confirmation"] = 1
-    if 48 <= rsi <= 68:
-        score += 1
-        components["momentum_confirmation"] = 1
-    if fresh_zone or first_touch:
-        score += 1
-        components["freshness_bonus"] = 1
-    if trendlines["up_break"]:
-        score -= 2
-        components["broken_uptrendline_penalty"] = -2
 
-    fundamentals = fundamentals or {}
-    fund_score = fundamental_score(fundamentals, "BUY")
-    if fund_score:
-        score += 1
-        components["fundamental_confirmation"] = fund_score
-    news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
-    news_adjustment = int(news_context.get("score_adjustment", 0))
-    score += news_adjustment
-    components["news_context"] = news_context.get("label", "unavailable")
-    components["news_score_adjustment"] = news_adjustment
-    if score < MIN_SCORE:
-        print(f"[FILTER] {symbol} BUY setup={setup} score={score} < MIN_SCORE={MIN_SCORE}")
+    # Existing safety checks retained: reject overextended candles, poor structural
+    # levels, insufficient net RR, excessive stop distance, and inadequate resistance room.
+    if body > 2.2*atr or span > 3.2*atr:
         return None
 
     levels = calculate_levels("BUY", close, atr, df)
@@ -1344,7 +1330,7 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     }
     if risk_pct > 15:
         return None
-    strength = "قوی" if score >= 16 else "متوسط" if score >= 13 else "ضعیف"
+    strength = "تأیید کامل"  # Strategy entry requires every hard gate; no score-based admission.
     net_risk_per_unit = safe_float(levels.get("net_risk_per_unit"), abs(levels["entry"]-levels["sl"]))
     if not net_risk_per_unit or net_risk_per_unit <= 0:
         return None
