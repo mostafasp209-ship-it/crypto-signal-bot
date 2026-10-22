@@ -1235,6 +1235,12 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     setup_zone = nearest_support
     regime_context = _market_regime(df.iloc[:i+1], atr)
     h1_h2 = _count_h1_h2(df.iloc[max(0, i-18):i+1])
+    # Normalize optional context so signal construction is safe when upstream
+    # news/fundamental providers are unavailable. News is metadata only here;
+    # it does not add or subtract an admission score.
+    fundamentals = fundamentals or {}
+    news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
+    news_adjustment = int(news_context.get("score_adjustment", 0) or 0)
     # Compatibility fields for the existing signal schema only; this value is
     # descriptive and is NOT used to decide whether an entry is allowed.
     score = int(sum((trend_gate, rsi_gate, stoch_gate, volatility_gate)))
