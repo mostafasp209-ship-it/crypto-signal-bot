@@ -1444,11 +1444,11 @@
       "symbol": "XMR/USDT",
       "exchange": "bitfinex",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "متوسط",
       "score": 15,
       "created_at": "2026-10-21T08:46:14.051726+00:00",
-      "updated_at": "2026-10-21T18:38:56.679121+00:00",
+      "updated_at": "2026-10-22T05:54:29.356838+00:00",
       "expiry_at": "2026-10-23T08:46:14.051737+00:00",
       "entry": 585.27,
       "sl": 585.27,
@@ -1536,14 +1536,14 @@
         ]
       },
       "tp1_hit": true,
-      "tp2_hit": false,
-      "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 3.533853606027987,
-      "fees_paid": 0.20373759119722523,
-      "closed_reason": null,
-      "last_exit_price": 607.145,
-      "last_exit_label": "tp1"
+      "tp2_hit": true,
+      "tp3_hit": true,
+      "remaining_fraction": 0,
+      "realized_pnl": 10.548306863884138,
+      "fees_paid": 0.4109592661300142,
+      "closed_reason": "TP3",
+      "last_exit_price": 629.3907421978346,
+      "last_exit_label": "tp3"
     },
     {
       "id": "APE_USDT_BUY_1792572394",
@@ -3812,18 +3812,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 24,
-    "tp3": 2,
+    "closed": 25,
+    "tp3": 3,
     "tp2_then_sl": 0,
     "tp1_then_sl": 5,
     "sl_direct": 17,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -38.69603712838532,
-    "fees": 9.570874837709324,
+    "net_pnl": -28.14773026450118,
+    "fees": 9.981834103839338,
     "sl_methods": {
-      "below_support_zone": 24
+      "below_support_zone": 25
     }
   },
   "last_run": "2026-10-22T04:41:37.593615+00:00",
