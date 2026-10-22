@@ -1214,6 +1214,17 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     if h2_pullback:
         setup_candidates.append(("H2_SECOND_ENTRY", 16, support_zone or nearest_support))
 
+    # Experimental loss-pattern gate (research branch only):
+    # The recorded main-branch log had 0 wins in 6 closed SR_BOUNCE trades and
+    # 0 wins in 6 closed H2_SECOND_ENTRY trades. This is a small, non-causal
+    # sample, so disable these setups only in this research branch and validate
+    # against historical candles before considering any production rollout.
+    disabled_research_setups = {"SR_BOUNCE", "H2_SECOND_ENTRY"}
+    setup_candidates = [
+        candidate for candidate in setup_candidates
+        if candidate[0] not in disabled_research_setups
+    ]
+
     if not setup_candidates:
         return None
     setup, base_score, setup_zone = max(setup_candidates, key=lambda x: x[1])
