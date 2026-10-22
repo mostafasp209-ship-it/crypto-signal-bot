@@ -132,7 +132,7 @@ def candidate_filter_metrics(rows: list[dict[str, Any]], keep) -> dict[str, Any]
 
 
 def build_report(payload: Any) -> dict[str, Any]:
-    signals = payload if isinstance(payload, list) else payload.get("signals", []) if isinstance(payload, dict) else None
+    signals = payload if isinstance(payload, list) else payload.get("signals") if isinstance(payload, dict) else None
     if not isinstance(signals, list) or any(not isinstance(s, dict) for s in signals):
         raise ValueError("signals.json must be a list or an object containing a signals list")
 
