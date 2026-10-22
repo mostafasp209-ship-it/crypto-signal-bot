@@ -3034,11 +3034,11 @@
       "symbol": "MNT/USDT",
       "exchange": "bitfinex",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "قوی",
       "score": 17,
       "created_at": "2026-10-21T16:42:39.776243+00:00",
-      "updated_at": "2026-10-21T17:06:50.929997+00:00",
+      "updated_at": "2026-10-22T07:56:00.976857+00:00",
       "expiry_at": "2026-10-23T16:42:39.776256+00:00",
       "entry": 0.55389,
       "sl": 0.55389,
@@ -3125,12 +3125,14 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.5,
-      "realized_pnl": 0.37895791583167165,
-      "fees_paid": 0.200579537453285,
-      "closed_reason": null,
-      "last_exit_price": 0.5571,
-      "last_exit_label": "tp1"
+      "remaining_fraction": 0.0,
+      "realized_pnl": -0.28817635270539915,
+      "fees_paid": 0.4001119355828775,
+      "closed_reason": "SL",
+      "last_exit_price": 0.5513,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 0.4676018704074783,
+      "sl_hit": true
     },
     {
       "id": "MASK_USDT_BUY_1792600974",
@@ -3816,18 +3818,18 @@
     }
   ],
   "historical_stats": {
-    "closed": 26,
+    "closed": 27,
     "tp3": 3,
     "tp2_then_sl": 0,
-    "tp1_then_sl": 5,
+    "tp1_then_sl": 6,
     "sl_direct": 18,
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": -41.72748070320428,
-    "fees": 10.283350951980577,
+    "net_pnl": -42.015657055909685,
+    "fees": 10.683462887563454,
     "sl_methods": {
-      "below_support_zone": 26
+      "below_support_zone": 27
     }
   },
   "last_run": "2026-10-22T04:41:37.593615+00:00",
