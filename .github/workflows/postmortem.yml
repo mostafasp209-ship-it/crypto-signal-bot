@@ -24,6 +24,10 @@ on:
       - ".github/workflows/postmortem.yml"
       - "signals.json"
 
+concurrency:
+  group: signal-postmortem-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
