@@ -32,6 +32,48 @@ class CandleSafetyTests(unittest.TestCase):
         self.assertTrue(pd.notna(df.iloc[-1]["ema200"]))
 
 
+class StrategyGateTests(unittest.TestCase):
+    def test_strategy_gate_outputs_are_finite_after_warmup(self):
+        rows = []
+        for i in range(140):
+            close = 100 + i * 0.1 + (0.8 if i % 5 == 0 else 0.0)
+            rows.append({
+                "open": close - 0.15, "high": close + 0.5,
+                "low": close - 0.5, "close": close, "volume": 1000,
+            })
+        result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
+        self.assertIsNotNone(result["rsi7"])
+        self.assertIsNotNone(result["stoch_k"])
+        self.assertIsNotNone(result["stoch_d"])
+        self.assertIsNotNone(result["atr"])
+        self.assertIsNotNone(result["atr_baseline"])
+        self.assertGreaterEqual(result["rsi7"], 0)
+        self.assertLessEqual(result["rsi7"], 100)
+
+    def test_strategy_gate_handles_zero_loss_rsi_without_nan(self):
+        rows = []
+        for i in range(100):
+            close = 100 + i
+            rows.append({
+                "open": close - 0.2, "high": close + 0.5,
+                "low": close - 0.5, "close": close, "volume": 1000,
+            })
+        result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
+        self.assertEqual(result["rsi7"], 100.0)
+        self.assertFalse(result["rsi_gate"])
+
+    def test_strategy_gate_rejects_insufficient_history(self):
+        df = pd.DataFrame([{
+            "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1
+        }] * 30)
+        result = bot.calculate_crypto_strategy_gates(df)
+        self.assertFalse(result["trend_gate"])
+        self.assertFalse(result["rsi_gate"])
+        self.assertFalse(result["stoch_gate"])
+        self.assertFalse(result["volatility_gate"])
+        self.assertIsNone(result["rsi7"])
+
+
 class SignalExecutionTests(unittest.TestCase):
     def test_stop_gap_is_recorded_separately_from_realized_pnl(self):
         signal = {
