@@ -144,7 +144,7 @@ def simulate(df, kind):
             "note":"Approximate OHLCV simulation; stop checked before target when both touched."}
 
 def main():
-    ex=ccxt.binance({"enableRateLimit":True,"timeout":20000})
+    ex=ccxt.kraken({"enableRateLimit":True,"timeout":20000})
     since=ex.milliseconds()-DAYS*24*60*60*1000
     report={"generated_at":datetime.now(timezone.utc).isoformat(),"days":DAYS,
             "symbols":SYMBOLS,"fee_per_side":FEE,"slippage_per_side":SLIPPAGE,
