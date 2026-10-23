@@ -26,7 +26,7 @@ jobs:
             -v "$PWD/user_data:/freqtrade/user_data" \
             freqtradeorg/freqtrade:stable_freqai \
             download-data --config user_data/configs/rl-backtest.json \
-            --timerange 20250101-20261001 --timeframes 1h
+            --timerange 20250101-20261001 --timeframes 1h --dl-trades
       - name: Train FreqAI RL model and backtest
         run: |
           docker run --rm \
