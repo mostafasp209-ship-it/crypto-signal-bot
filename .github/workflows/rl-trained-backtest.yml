@@ -1,0 +1,48 @@
+name: RL strategy historical backtest (isolated)
+on:
+  push:
+    branches:
+      - research/rl-trained-backtest
+    paths:
+      - 'user_data/strategies/RLStrategy.py'
+      - 'user_data/configs/rl-backtest.json'
+      - '.github/workflows/rl-trained-backtest.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate config JSON
+        run: python -m json.tool user_data/configs/rl-backtest.json >/dev/null
+      - name: Pull FreqAI image
+        run: docker pull freqtradeorg/freqtrade:stable_freqai
+      - name: Download historical 1h candles from Kraken
+        run: |
+          docker run --rm \
+            -v "$PWD/user_data:/freqtrade/user_data" \
+            freqtradeorg/freqtrade:stable_freqai \
+            download-data --config user_data/configs/rl-backtest.json \
+            --timerange 20250101-20261001 --timeframes 1h
+      - name: Train FreqAI RL model and backtest
+        run: |
+          docker run --rm \
+            -v "$PWD/user_data:/freqtrade/user_data" \
+            freqtradeorg/freqtrade:stable_freqai \
+            backtesting --config user_data/configs/rl-backtest.json \
+            --strategy RLStrategy --freqaimodel ReinforcementLearner \
+            --timerange 20250101-20261001 --export trades
+      - name: Upload raw backtest results and trained-model logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rl-trained-backtest-output
+          path: |
+            user_data/backtest_results/
+            user_data/models/
+            user_data/logs/
+          if-no-files-found: warn
+          retention-days: 14
