@@ -1109,6 +1109,71 @@ def calculate_levels(side, entry, atr, df):
     }
 
 
+def calculate_crypto_strategy_gates(df):
+    """Calculate mandatory long-entry gates for the 4h spot-crypto adaptation.
+
+    Indicator settings follow the published strategy's general parameters, but
+    calculations are implemented independently. The gold-specific session filter
+    is omitted because this bot scans 24/7 crypto markets on 4h candles.
+    """
+    if df is None or len(df) < 65:
+        return {
+            "rsi7": None, "stoch_k": None, "stoch_d": None,
+            "atr": None, "atr_baseline": None,
+            "trend_gate": False, "rsi_gate": False,
+            "stoch_gate": False, "volatility_gate": False,
+        }
+
+    close = pd.to_numeric(df["close"], errors="coerce")
+    high = pd.to_numeric(df["high"], errors="coerce")
+    low = pd.to_numeric(df["low"], errors="coerce")
+    delta = close.diff()
+    gains = delta.clip(lower=0).rolling(7, min_periods=7).mean()
+    losses = (-delta.clip(upper=0)).rolling(7, min_periods=7).mean()
+    rs = gains / losses.replace(0, np.nan)
+    rsi7 = 100 - (100 / (1 + rs))
+    # Define the zero-loss cases explicitly instead of turning RSI into NaN.
+    rsi7 = rsi7.mask((losses == 0) & (gains > 0), 100.0)
+    rsi7 = rsi7.mask((losses == 0) & (gains == 0), 50.0)
+
+    low_min = low.rolling(5, min_periods=5).min()
+    high_max = high.rolling(5, min_periods=5).max()
+    raw_k = 100 * (close - low_min) / (high_max - low_min).replace(0, np.nan)
+    slow_k = raw_k.rolling(3, min_periods=3).mean()
+    slow_d = slow_k.rolling(3, min_periods=3).mean()
+
+    previous_close = close.shift(1)
+    true_range = pd.concat([
+        high - low,
+        (high - previous_close).abs(),
+        (low - previous_close).abs(),
+    ], axis=1).max(axis=1)
+    atr14 = true_range.rolling(14, min_periods=14).mean()
+    atr_baseline = atr14.rolling(50, min_periods=50).mean()
+
+    rsi_now = safe_float(rsi7.iloc[-1])
+    k_now = safe_float(slow_k.iloc[-1])
+    d_now = safe_float(slow_d.iloc[-1])
+    atr_now = safe_float(atr14.iloc[-1])
+    atr_base_now = safe_float(atr_baseline.iloc[-1])
+    ema_fast = safe_float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+    ema_slow = safe_float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+
+    trend_gate = ema_fast is not None and ema_slow is not None and ema_fast > ema_slow
+    rsi_gate = rsi_now is not None and rsi_now < 30
+    stoch_gate = k_now is not None and d_now is not None and k_now < 20 and k_now > d_now
+    volatility_gate = (
+        atr_now is not None and atr_base_now is not None and atr_base_now > 0
+        and atr_now > atr_base_now * 0.8
+    )
+    return {
+        "rsi7": rsi_now, "stoch_k": k_now, "stoch_d": d_now,
+        "atr": atr_now, "atr_baseline": atr_base_now,
+        "trend_gate": bool(trend_gate), "rsi_gate": bool(rsi_gate),
+        "stoch_gate": bool(stoch_gate), "volatility_gate": bool(volatility_gate),
+    }
+
+
 def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=None):
     """Price-action setup engine: S/R zones, first touch, trendlines, spike/two-leg pullback,
     breakout-retest and failed breakdown. Long entries only because this is a spot bot.
@@ -1197,31 +1262,18 @@ def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=No
     trendline_pullback = bool(trendlines["up_near"] and bullish_trend and
                               low <= ema20 + 0.35*atr and close > opn and close_loc >= 0.58)
 
-    # SANDYYY-inspired strategy port (independently implemented; no score threshold).
-    # Adapted for spot crypto: long-only, 4h closed candles, no gold-specific session gate.
-    # All four conditions are mandatory; a high/low score cannot override a failed gate.
-    work = df.copy()
-    delta7 = work["close"].diff()
-    gain7 = delta7.clip(lower=0).rolling(7).mean()
-    loss7 = (-delta7.clip(upper=0)).rolling(7).mean()
-    rs7 = gain7 / loss7.replace(0, np.nan)
-    rsi7 = 100 - (100 / (1 + rs7))
-    low5 = work["low"].rolling(5).min()
-    high5 = work["high"].rolling(5).max()
-    stoch_k = 100 * (work["close"] - low5) / (high5 - low5 + 1e-10)
-    stoch_d = stoch_k.rolling(3).mean()
-    atr_baseline = work["atr"].rolling(50).mean()
-
-    rsi7_now = safe_float(rsi7.iloc[-1])
-    stoch_k_now = safe_float(stoch_k.iloc[-1])
-    stoch_d_now = safe_float(stoch_d.iloc[-1])
-    atr_baseline_now = safe_float(atr_baseline.iloc[-1])
-    trend_gate = bool(ema20 > ema50)
-    rsi_gate = rsi7_now is not None and rsi7_now < 30
-    stoch_gate = (stoch_k_now is not None and stoch_d_now is not None
-                  and stoch_k_now < 20 and stoch_k_now > stoch_d_now)
-    volatility_gate = (atr_baseline_now is not None and atr_baseline_now > 0
-                       and atr > atr_baseline_now * 0.8)
+    # Independently implemented adaptation of the public strategy concepts.
+    # Spot crypto uses closed 4h candles, so the gold-specific UTC session gate is
+    # intentionally not copied. All four entry gates are mandatory.
+    strategy = calculate_crypto_strategy_gates(df)
+    rsi7_now = strategy["rsi7"]
+    stoch_k_now = strategy["stoch_k"]
+    stoch_d_now = strategy["stoch_d"]
+    atr_baseline_now = strategy["atr_baseline"]
+    trend_gate = strategy["trend_gate"]
+    rsi_gate = strategy["rsi_gate"]
+    stoch_gate = strategy["stoch_gate"]
+    volatility_gate = strategy["volatility_gate"]
 
     if not all((trend_gate, rsi_gate, stoch_gate, volatility_gate)):
         print(
