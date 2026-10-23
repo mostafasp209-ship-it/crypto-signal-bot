@@ -1467,8 +1467,11 @@ def manage_signal(signal, current_price):
             if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
                 # Close remaining position at current price.
                 remaining = safe_float(signal.get("remaining_fraction"), 0)
-                if remaining > 0:
-                    close_piece(signal, current_price, remaining, "expiry")
+                if remaining > 0 and not close_piece(signal, current_price, remaining, "expiry"):
+                    # Do not finalize a trade when its exit could not be booked.
+                    # Keep it active so the accounting problem remains visible/retryable.
+                    print(f"[MANAGE ERROR] {signal.get('symbol')}: expiry exit not booked; keeping signal active")
+                    return False
                 signal["status"] = "EXPIRED"
                 signal["closed_reason"] = "48h expiry"
                 signal["updated_at"] = iso_now()
@@ -1479,25 +1482,32 @@ def manage_signal(signal, current_price):
     # Stop is checked before new TP levels.
     if stop_hit(signal, current_price):
         remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0:
-            close_piece(signal, current_price, remaining, "sl")
+        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+            print(f"[MANAGE ERROR] {signal.get('symbol')}: stop exit not booked; keeping signal active")
+            return False
         signal["status"] = "CLOSED"
         signal["closed_reason"] = "SL"
         signal["updated_at"] = iso_now()
         return True
 
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1")
-        # Breakeven after TP1.
+        if not close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
+            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP1 exit not booked; leaving trade state unchanged")
+            return changed
+        # Move the remaining position's stop to breakeven only after TP1 is booked.
         signal["sl"] = signal["entry"]
         changed = True
 
     if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2")
+        if not close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
+            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP2 exit not booked; leaving remaining state unchanged")
+            return changed
         changed = True
 
     if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3")
+        if not close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
+            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP3 exit not booked; leaving remaining state unchanged")
+            return changed
         changed = True
 
     if signal.get("remaining_fraction", 0) <= 0.000001:
