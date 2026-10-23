@@ -1597,10 +1597,15 @@ def format_signal(signal):
         f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
         f"({signal['risk_pct']:.2f}%)\n"
-        f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
-        f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
-        f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
-        f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
+        + (
+            f"🎯 TP: <b>{fmt_price(signal['tp1'])}</b> — 100%\n"
+            if signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
+            else
+            f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
+            f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
+            f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
+        )
+        + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
         f"RR وزنی خالص (با کارمزد): <b>{signal['rr']:.2f}</b>\n\n"
