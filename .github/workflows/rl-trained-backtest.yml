@@ -20,13 +20,13 @@ jobs:
         run: python -m json.tool user_data/configs/rl-backtest.json >/dev/null
       - name: Pull FreqAI image
         run: docker pull freqtradeorg/freqtrade:stable_freqai
-      - name: Download historical 1h candles from Kraken
+      - name: Download historical 1h candles from Binance
         run: |
           docker run --rm \
             -v "$PWD/user_data:/freqtrade/user_data" \
             freqtradeorg/freqtrade:stable_freqai \
             download-data --config user_data/configs/rl-backtest.json \
-            --timerange 20250101-20261001 --timeframes 1h --dl-trades
+            --timerange 20250101-20261001 --timeframes 1h
       - name: Train FreqAI RL model and backtest
         run: |
           docker run --rm \
