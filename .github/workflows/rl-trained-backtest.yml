@@ -27,14 +27,13 @@ jobs:
             freqtradeorg/freqtrade:stable_freqai \
             download-data --config user_data/configs/rl-backtest.json \
             --timerange 20250101-20261001 --timeframes 1h
-      - name: Train FreqAI RL model and backtest
+      - name: Install official FreqAI RL dependencies, train model and backtest
         run: |
           docker run --rm \
+            --entrypoint /bin/bash \
             -v "$PWD/user_data:/freqtrade/user_data" \
             freqtradeorg/freqtrade:stable_freqai \
-            backtesting --config user_data/configs/rl-backtest.json \
-            --strategy RLStrategy --freqaimodel ReinforcementLearner \
-            --timerange 20250101-20261001 --export trades
+            -lc "python -m pip install -r /freqtrade/requirements-freqai-rl.txt && freqtrade backtesting --config user_data/configs/rl-backtest.json --strategy RLStrategy --freqaimodel ReinforcementLearner --timerange 20250101-20261001 --export trades"
       - name: Upload raw backtest results and trained-model logs
         if: always()
         uses: actions/upload-artifact@v4
