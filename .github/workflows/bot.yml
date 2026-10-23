@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: crypto-signal-pro-panel
@@ -65,6 +66,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           GH_REPO: mostafasp209-ship-it/crypto-signal-bot
+          GH_PAT: ${{ github.token }}
           GH_BRANCH: main
           PYTHONUNBUFFERED: "1"
         run: python -u panel.py --once
