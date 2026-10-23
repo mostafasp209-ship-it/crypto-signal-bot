@@ -377,12 +377,12 @@ def broadcast_users(users: dict, message: str) -> tuple[int, int]:
 
 
 def trigger_scan(chat_id: Any) -> None:
-    pat = os.getenv("GH_PAT", "").strip()
-    repo = os.getenv("GH_REPO", "").strip()
+    pat = (os.getenv("GH_PAT", "").strip() or os.getenv("GITHUB_TOKEN", "").strip())
+    repo = os.getenv("GH_REPO", "mostafasp209-ship-it/crypto-signal-bot").strip()
     workflow = os.getenv("GH_WORKFLOW", "bot.yml").strip()
     branch = os.getenv("GH_BRANCH", "main").strip() or "main"
     if not pat or not repo:
-        send(chat_id, "❌ برای اجرای اسکن از پنل، متغیرهای <code>GH_PAT</code> و <code>GH_REPO</code> را در Secrets تنظیم کن.", admin_menu())
+        send(chat_id, "❌ برای اجرای اسکن، در محیط اجرای پنل یک توکن GitHub با دسترسی Actions: write تنظیم کن (GH_PAT یا GITHUB_TOKEN). مخزن پیش‌فرض همین مخزن است؛ اگر پنل بیرون GitHub Actions اجرا می‌شود، توکن باید در Secrets همان سرویس تنظیم شود.", admin_menu())
         return
     url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/dispatches"
     try:
