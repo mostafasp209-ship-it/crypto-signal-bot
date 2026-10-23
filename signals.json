@@ -1,7 +1,19 @@
 {
   "signals": [],
-  "last_run": null,
-  "historical_stats": {},
+  "last_run": "2026-10-23T03:38:40.671013+00:00",
+  "historical_stats": {
+    "closed": 0,
+    "tp3": 0,
+    "tp2_then_sl": 0,
+    "tp1_then_sl": 0,
+    "sl_direct": 0,
+    "expired": 0,
+    "no_risk": 0,
+    "other": 0,
+    "net_pnl": 0.0,
+    "fees": 0.0,
+    "sl_methods": {}
+  },
   "forward_test_started_at": "2026-10-23T03:21:00+00:00",
   "signal_history_reset_version": 2
 }
