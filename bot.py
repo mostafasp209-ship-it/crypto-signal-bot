@@ -33,8 +33,8 @@ FUNDING_SOURCES = [
 ]
 
 QUOTE = "USDT"
-TIMEFRAME = "4h"
-TREND_TIMEFRAME = "1d"
+TIMEFRAME = "5m"
+TREND_TIMEFRAME = "5m"
 
 MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
 MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
@@ -1110,37 +1110,33 @@ def calculate_levels(side, entry, atr, df):
 
 
 def calculate_crypto_strategy_gates(df):
-    """Calculate mandatory long-entry gates for the 4h spot-crypto adaptation.
-
-    Indicator settings follow the published strategy's general parameters, but
-    calculations are implemented independently. The gold-specific session filter
-    is omitted because this bot scans 24/7 crypto markets on 4h candles.
-    """
+    """Independent implementation of the reference XAUUSD strategy's exact entry rules."""
+    empty = {
+        "rsi7": None, "stoch_k": None, "stoch_d": None,
+        "atr": None, "atr_baseline": None, "ema20": None, "ema50": None,
+        "session_ok": False, "trend_up": False, "trend_down": False,
+        "signal_long": False, "signal_short": False,
+    }
     if df is None or len(df) < 65:
-        return {
-            "rsi7": None, "stoch_k": None, "stoch_d": None,
-            "atr": None, "atr_baseline": None,
-            "trend_gate": False, "rsi_gate": False,
-            "stoch_gate": False, "volatility_gate": False,
-        }
+        return empty
 
     close = pd.to_numeric(df["close"], errors="coerce")
     high = pd.to_numeric(df["high"], errors="coerce")
     low = pd.to_numeric(df["low"], errors="coerce")
-    delta = close.diff()
-    gains = delta.clip(lower=0).rolling(7, min_periods=7).mean()
-    losses = (-delta.clip(upper=0)).rolling(7, min_periods=7).mean()
-    rs = gains / losses.replace(0, np.nan)
-    rsi7 = 100 - (100 / (1 + rs))
-    # Define the zero-loss cases explicitly instead of turning RSI into NaN.
-    rsi7 = rsi7.mask((losses == 0) & (gains > 0), 100.0)
-    rsi7 = rsi7.mask((losses == 0) & (gains == 0), 50.0)
 
-    low_min = low.rolling(5, min_periods=5).min()
-    high_max = high.rolling(5, min_periods=5).max()
-    raw_k = 100 * (close - low_min) / (high_max - low_min).replace(0, np.nan)
-    slow_k = raw_k.rolling(3, min_periods=3).mean()
-    slow_d = slow_k.rolling(3, min_periods=3).mean()
+    ema20 = close.ewm(span=20, adjust=False).mean()
+    ema50 = close.ewm(span=50, adjust=False).mean()
+
+    delta = close.diff()
+    gain = delta.clip(lower=0).rolling(7).mean()
+    loss = -delta.clip(upper=0).rolling(7).mean()
+    rs = gain / loss.replace(0, np.nan)
+    rsi7 = 100 - (100 / (1 + rs))
+
+    low_min = low.rolling(5).min()
+    high_max = high.rolling(5).max()
+    stoch_k = 100 * (close - low_min) / (high_max - low_min + 1e-10)
+    stoch_d = stoch_k.rolling(3).mean()
 
     previous_close = close.shift(1)
     true_range = pd.concat([
@@ -1148,269 +1144,109 @@ def calculate_crypto_strategy_gates(df):
         (high - previous_close).abs(),
         (low - previous_close).abs(),
     ], axis=1).max(axis=1)
-    atr14 = true_range.rolling(14, min_periods=14).mean()
-    atr_baseline = atr14.rolling(50, min_periods=50).mean()
+    atr14 = true_range.rolling(14).mean()
+    atr_baseline = atr14.rolling(50).mean() * 0.8
 
-    rsi_now = safe_float(rsi7.iloc[-1])
-    k_now = safe_float(slow_k.iloc[-1])
-    d_now = safe_float(slow_d.iloc[-1])
-    atr_now = safe_float(atr14.iloc[-1])
-    atr_base_now = safe_float(atr_baseline.iloc[-1])
-    ema_fast = safe_float(close.ewm(span=20, adjust=False).mean().iloc[-1])
-    ema_slow = safe_float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+    session_ok = False
+    try:
+        ts = df.iloc[-1].get("timestamp")
+        if ts is not None:
+            ts = pd.to_datetime(ts, unit="ms", utc=True)
+            t = ts.time()
+            session_ok = (
+                (pd.Timestamp("07:00").time() <= t <= pd.Timestamp("11:00").time())
+                or (pd.Timestamp("13:00").time() <= t <= pd.Timestamp("17:00").time())
+            )
+    except (TypeError, ValueError, OverflowError):
+        session_ok = False
 
-    trend_gate = ema_fast is not None and ema_slow is not None and ema_fast > ema_slow
-    rsi_gate = rsi_now is not None and rsi_now < 30
-    stoch_gate = k_now is not None and d_now is not None and k_now < 20 and k_now > d_now
-    volatility_gate = (
-        atr_now is not None and atr_base_now is not None and atr_base_now > 0
-        and atr_now > atr_base_now * 0.8
-    )
-    return {
-        "rsi7": rsi_now, "stoch_k": k_now, "stoch_d": d_now,
-        "atr": atr_now, "atr_baseline": atr_base_now,
-        "trend_gate": bool(trend_gate), "rsi_gate": bool(rsi_gate),
-        "stoch_gate": bool(stoch_gate), "volatility_gate": bool(volatility_gate),
+    values = {
+        "rsi7": safe_float(rsi7.iloc[-1]),
+        "stoch_k": safe_float(stoch_k.iloc[-1]),
+        "stoch_d": safe_float(stoch_d.iloc[-1]),
+        "atr": safe_float(atr14.iloc[-1]),
+        "atr_baseline": safe_float(atr_baseline.iloc[-1]),
+        "ema20": safe_float(ema20.iloc[-1]),
+        "ema50": safe_float(ema50.iloc[-1]),
+        "session_ok": bool(session_ok),
     }
+    rsi_now, k_now, d_now = values["rsi7"], values["stoch_k"], values["stoch_d"]
+    atr_now, atr_gate = values["atr"], values["atr_baseline"]
+    trend_up = values["ema20"] is not None and values["ema50"] is not None and values["ema20"] > values["ema50"]
+    trend_down = values["ema20"] is not None and values["ema50"] is not None and values["ema20"] < values["ema50"]
+    vol_ok = atr_now is not None and atr_gate is not None and atr_now > atr_gate
+    long_trigger = rsi_now is not None and rsi_now < 30 and k_now is not None and d_now is not None and k_now < 20 and k_now > d_now
+    short_trigger = rsi_now is not None and rsi_now > 70 and k_now is not None and d_now is not None and k_now > 80 and k_now < d_now
+    values.update({
+        "trend_up": bool(trend_up),
+        "trend_down": bool(trend_down),
+        "signal_long": bool(trend_up and long_trigger and vol_ok and session_ok),
+        "signal_short": bool(trend_down and short_trigger and vol_ok and session_ok),
+    })
+    return values
 
 
-def build_signal(symbol, exchange_name, df, trend, fundamentals, news_context=None):
-    """Price-action setup engine: S/R zones, first touch, trendlines, spike/two-leg pullback,
-    breakout-retest and failed breakdown. Long entries only because this is a spot bot.
-    """
-    if df is None or len(df) < 205:
-        return None
-    df = add_indicators(df).dropna(subset=["atr", "ema20", "ema50", "ema200", "rsi"]).reset_index(drop=True)
-    if len(df) < 80:
-        return None
-
-    i = len(df) - 1
-    last = df.iloc[i]
-    close, opn = safe_float(last["close"]), safe_float(last["open"])
-    high, low = safe_float(last["high"]), safe_float(last["low"])
-    atr = safe_float(last["atr"])
-    volume = safe_float(last.get("volume"), 0.0) or 0.0
-    if not close or not atr or atr <= 0 or opn is None:
-        return None
-    span = max(high-low, 1e-12)
-    body = abs(close-opn)
-    close_loc = (close-low)/span
-    prior = df.iloc[max(0, i-20):i]
-    if len(prior) < 15:
-        return None
-    prior_high, prior_low = float(prior["high"].max()), float(prior["low"].min())
-    vol_base = safe_float(df["volume"].iloc[max(0, i-20):i].median(), 0.0) or 0.0
-    ema20, ema50, ema200 = map(float, (last["ema20"], last["ema50"], last["ema200"]))
-    rsi = safe_float(last["rsi"], 50.0)
-    bullish_trend = trend == "BULL" and close > ema50 and ema50 > ema200
-    bearish_trend = trend == "BEAR" and close < ema50 and ema50 < ema200
-
-    supports, resistances = find_support_resistance(df, close, atr)
-    if not supports and not resistances:
-        return None
-    nearest_support = supports[0][2] if supports else None
-    nearest_resistance = resistances[0][2] if resistances else None
-    trendlines = _trendline_context(df, atr)
-
-    # Zone bounce: price enters a support zone and closes with a bullish rejection.
-    support_bounce = False
-    support_zone = None
-    if nearest_support:
-        z = nearest_support
-        support_bounce = (low <= z["high"] and close >= z["low"] and
-                          _candle_rejection(last, "BUY", atr) and
-                          (bullish_trend or trend == "NEUTRAL" or trendlines["up_near"]))
-        if support_bounce:
-            support_zone = z
-
-    # Fresh/first-touch weighting: count a fresh zone only when the current bar is
-    # the first distinct revisit after the pivot zone became known.
-    first_touch = bool(support_zone and support_zone["touches"] <= 1)
-    fresh_zone = bool(support_zone and support_zone["fresh"])
-
-    # Al Brooks-inspired spike + pullback: recent bullish displacement followed by
-    # a two-leg pullback (at least two down-closes, with a second low not breaking structure).
-    recent = df.iloc[max(0, i-8):i]
-    spike = False
-    two_leg_pullback = False
-    if len(recent) >= 6:
-        bullish_bars = int((recent["close"] > recent["open"]).sum())
-        recent_body = (recent["close"]-recent["open"]).abs()
-        displacement = float((recent["close"].iloc[-1] - recent["close"].iloc[-5]))
-        spike = bullish_bars >= 3 and displacement >= 1.2*atr and float(recent_body.tail(3).mean()) >= 0.30*atr
-        pull = df.iloc[max(0, i-5):i]
-        down_closes = int((pull["close"] < pull["close"].shift(1)).sum())
-        local_low = float(pull["low"].min())
-        two_leg_pullback = down_closes >= 2 and local_low >= float(df.iloc[max(0, i-12):i-5]["low"].min()) - 0.15*atr if i >= 12 else False
-    spike_two_leg = bool(spike and two_leg_pullback and close > opn and close_loc >= 0.58 and close > ema20 and bullish_trend)
-
-    # Breakout then retest: a confirmed earlier close above a zone, followed by a revisit
-    # and a bullish trigger. It is not labelled a retest from a breakout candle alone.
-    retest_zone = _find_breakout_retest(df, atr, bullish_trend)
-    breakout_retest = retest_zone is not None
-
-    # Failed breakdown: a wick breaks support, but the candle closes back above the zone.
-    failed_breakdown = False
-    failure_zone = None
-    for item in supports:
-        z = item[2]
-        if low < z["low"] - 0.12*atr and close > z["high"] and close > opn and close_loc >= 0.60:
-            failed_breakdown, failure_zone = True, z
-            break
-
-    # Trendline pullback is a separate setup, not a substitute for horizontal structure.
-    trendline_pullback = bool(trendlines["up_near"] and bullish_trend and
-                              low <= ema20 + 0.35*atr and close > opn and close_loc >= 0.58)
-
-    # Independently implemented adaptation of the public strategy concepts.
-    # Spot crypto uses closed 4h candles, so the gold-specific UTC session gate is
-    # intentionally not copied. All four entry gates are mandatory.
+def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_context=None):
+    """Reference strategy: EMA20/50 + RSI(7) + Stochastic(5,3) + ATR/session gates."""
     strategy = calculate_crypto_strategy_gates(df)
-    rsi7_now = strategy["rsi7"]
-    stoch_k_now = strategy["stoch_k"]
-    stoch_d_now = strategy["stoch_d"]
-    atr_baseline_now = strategy["atr_baseline"]
-    trend_gate = strategy["trend_gate"]
-    rsi_gate = strategy["rsi_gate"]
-    stoch_gate = strategy["stoch_gate"]
-    volatility_gate = strategy["volatility_gate"]
-
-    if not all((trend_gate, rsi_gate, stoch_gate, volatility_gate)):
-        print(
-            f"[FILTER] {symbol} Sandyyy-inspired gates failed: "
-            f"trend={trend_gate}, RSI7={rsi_gate}, stochastic={stoch_gate}, "
-            f"volatility={volatility_gate}"
-        )
+    side = "BUY" if strategy["signal_long"] else ("SELL" if strategy["signal_short"] else None)
+    if side is None:
         return None
 
-    setup = "SANDYYY_INSPIRED_RSI_STOCH_PULLBACK"
-    setup_zone = nearest_support
-    regime_context = _market_regime(df.iloc[:i+1], atr)
-    h1_h2 = _count_h1_h2(df.iloc[max(0, i-18):i+1])
-    # Normalize optional context so signal construction is safe when upstream
-    # news/fundamental providers are unavailable. News is metadata only here;
-    # it does not add or subtract an admission score.
+    entry = safe_float(df.iloc[-1]["close"])
+    atr = strategy["atr"]
+    if entry is None or entry <= 0 or atr is None or atr <= 0:
+        return None
+
+    direction = 1 if side == "BUY" else -1
+    sl = entry - direction * atr
+    target = entry + direction * 1.5 * atr
+    risk_per_unit = abs(entry - sl)
+    risk_pct = risk_per_unit / entry * 100
+    risk_sized_quantity = RISK_USD / risk_per_unit
+    cap_quantity = MAX_POSITION_USD / entry if MAX_POSITION_USD > 0 else risk_sized_quantity
+    quantity = min(risk_sized_quantity, cap_quantity)
+    position_value = quantity * entry
+    actual_risk_usd = quantity * risk_per_unit
     fundamentals = fundamentals or {}
     news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
-    news_adjustment = int(news_context.get("score_adjustment", 0) or 0)
-    # Compatibility fields for the existing signal schema only; this value is
-    # descriptive and is NOT used to decide whether an entry is allowed.
-    score = int(sum((trend_gate, rsi_gate, stoch_gate, volatility_gate)))
+    score = 4
     components = {
-        "setup": setup,
-        "strategy_mode": "hard_gates_no_score_threshold",
-        "daily_trend": trend,
-        "ema20_above_ema50": trend_gate,
-        "rsi7": round(rsi7_now, 3) if rsi7_now is not None else None,
-        "rsi7_oversold": bool(rsi_gate),
-        "stoch_k": round(stoch_k_now, 3) if stoch_k_now is not None else None,
-        "stoch_d": round(stoch_d_now, 3) if stoch_d_now is not None else None,
-        "stoch_oversold_cross": bool(stoch_gate),
-        "atr": round(float(atr), 8),
-        "atr_50_mean": round(float(atr_baseline_now), 8) if atr_baseline_now is not None else None,
-        "volatility_gate": bool(volatility_gate),
-        "sr_zone_touches": setup_zone.get("touches", 0) if isinstance(setup_zone, dict) else None,
-        "sr_zone_pivots": setup_zone.get("pivot_count", 0) if isinstance(setup_zone, dict) else None,
-        "sr_zone_fresh": bool(setup_zone.get("fresh")) if isinstance(setup_zone, dict) else False,
-        "first_touch": bool(first_touch),
-        "trendline_up_near": bool(trendlines["up_near"]),
-        "trendline_up_broken": bool(trendlines["up_break"]),
-        "spike_detected": bool(spike),
-        "two_leg_pullback": bool(two_leg_pullback),
-        "breakout_retest": bool(breakout_retest),
-        "failed_breakdown": bool(failed_breakdown),
-        "market_regime": regime_context["regime"],
-        "h1_detected": bool(h1_h2["h1"]),
-        "h2_detected": bool(h1_h2["h2"]),
-        "h2_attempts": int(h1_h2["attempts"]),
-        "h2_pullback_bars": int(h1_h2["pullback_bars"]),
-    }
-
-    # Existing safety checks retained: reject overextended candles, poor structural
-    # levels, insufficient net RR, excessive stop distance, and inadequate resistance room.
-    if body > 2.2*atr or span > 3.2*atr:
-        return None
-
-    levels = calculate_levels("BUY", close, atr, df)
-    if not levels:
-        return None
-
-    # A high setup score does not make a poor entry location acceptable.
-    # Reject entries where the nearest overhead resistance is too close relative
-    # to the structural stop distance; otherwise the trade can run into resistance
-    # before it has room to develop. Resistance is calculated from confirmed pivots.
-    entry_price = safe_float(levels.get("entry"))
-    stop_price = safe_float(levels.get("sl"))
-    nearest_resistance_price = safe_float(levels.get("resistance"))
-    if entry_price and stop_price and nearest_resistance_price and nearest_resistance_price > entry_price:
-        initial_risk = entry_price - stop_price
-        resistance_room = nearest_resistance_price - entry_price
-        room_in_r = resistance_room / initial_risk if initial_risk > 0 else 0.0
-        if room_in_r < MIN_RESISTANCE_ROOM_R:
-            print(
-                f"[FILTER] {symbol} BUY rejected: nearest resistance only "
-                f"{resistance_room / entry_price * 100:.2f}% away "
-                f"({room_in_r:.2f}R < {MIN_RESISTANCE_ROOM_R:.2f}R)"
-            )
-            return None
-        components["nearest_resistance_room_r"] = round(room_in_r, 2)
-    else:
-        components["nearest_resistance_room_r"] = None
-
-    risk_pct = abs(levels["entry"]-levels["sl"])/levels["entry"]*100
-    # Immutable-at-entry evidence for later per-signal post-mortems. These are
-    # descriptive measurements, not claims that any factor caused the outcome.
-    resistance_room_r = components.get("nearest_resistance_room_r")
-    entry_snapshot = {
+        "setup": "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
+        "strategy_mode": "reference_rules_only",
         "timeframe": TIMEFRAME,
-        "trend_timeframe": TREND_TIMEFRAME,
-        "setup": setup,
-        "score": int(score),
-        "daily_trend": trend,
-        "market_regime": regime_context["regime"],
-        "close_location_in_candle": round(close_loc, 4),
-        "rsi": round(float(rsi), 4) if rsi is not None else None,
-        "atr_pct": round(float(atr / close * 100), 4),
-        "ema20_distance_atr": round(float((close - ema20) / atr), 4),
-        "ema50_distance_atr": round(float((close - ema50) / atr), 4),
-        "volume_vs_median": round(float(volume / vol_base), 4) if vol_base > 0 else None,
-        "support_zone_touches": components.get("sr_zone_touches"),
-        "support_zone_fresh": components.get("sr_zone_fresh"),
-        "resistance_room_r": resistance_room_r,
-        "stop_distance_atr": round(float(abs(levels["entry"] - levels["sl"]) / atr), 4),
-        "reward_risk_net": round(float(levels["rr"]), 4),
-        "trendline_broken": bool(trendlines["up_break"]),
-        "news_label": news_context.get("label", "unavailable"),
-        "news_score_adjustment": news_adjustment,
-        "tp_methods": list(levels.get("tp_methods", [])),
-        "sl_method": levels.get("sl_method"),
-        "captured_at": iso_now(),
+        "ema20": strategy["ema20"],
+        "ema50": strategy["ema50"],
+        "trend_up": strategy["trend_up"],
+        "trend_down": strategy["trend_down"],
+        "rsi7": strategy["rsi7"],
+        "stoch_k": strategy["stoch_k"],
+        "stoch_d": strategy["stoch_d"],
+        "atr14": atr,
+        "atr_50_mean_times_0_8": strategy["atr_baseline"],
+        "session_ok_utc": strategy["session_ok"],
     }
-    if risk_pct > 15:
-        return None
-    strength = "تأیید کامل"  # Strategy entry requires every hard gate; no score-based admission.
-    net_risk_per_unit = safe_float(levels.get("net_risk_per_unit"), abs(levels["entry"]-levels["sl"]))
-    if not net_risk_per_unit or net_risk_per_unit <= 0:
-        return None
-    risk_sized_quantity = RISK_USD/net_risk_per_unit
-    cap_quantity = MAX_POSITION_USD/levels["entry"] if MAX_POSITION_USD > 0 else risk_sized_quantity
-    position_quantity = min(risk_sized_quantity, cap_quantity)
-    position_value = position_quantity*levels["entry"]
-    actual_risk_usd = position_quantity*net_risk_per_unit
     return {
-        "id": f"{symbol.replace('/', '_')}_BUY_{int(time.time())}",
-        "symbol": symbol, "exchange": exchange_name, "side": "BUY", "status": "ACTIVE",
-        "strength": strength, "score": int(score), "created_at": iso_now(), "updated_at": iso_now(),
+        "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
+        "symbol": symbol, "exchange": exchange_name, "side": side, "status": "ACTIVE",
+        "strength": "مرجع اصلی", "score": score, "created_at": iso_now(), "updated_at": iso_now(),
         "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
-        "entry": levels["entry"], "sl": levels["sl"], "tp1": levels["tp1"],
-        "tp2": levels["tp2"], "tp3": levels["tp3"], "support": levels.get("support"),
-        "resistance": levels.get("resistance"), "sl_method": levels.get("sl_method"),
-        "tp_methods": levels.get("tp_methods", []), "rr": levels["rr"], "risk_pct": risk_pct,
-        "initial_risk_per_unit": abs(levels["entry"]-levels["sl"]), "initial_sl": levels["sl"],
+        "entry": entry, "sl": sl, "tp1": target, "tp2": target, "tp3": target,
+        "support": None, "resistance": None, "sl_method": "1x_ATR14",
+        "tp_methods": ["1.5x_ATR14"], "rr": 1.5, "risk_pct": risk_pct,
+        "initial_risk_per_unit": risk_per_unit, "initial_sl": sl,
         "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
-        "position_quantity": position_quantity, "quantity": position_quantity,
-        "position_value": position_value, "position_capped": position_quantity+1e-12 < risk_sized_quantity,
-        "components": components, "entry_snapshot": entry_snapshot, "trend": trend, "fundamentals": fundamentals, "news": news_context,
+        "position_quantity": quantity, "quantity": quantity, "position_value": position_value,
+        "position_capped": quantity + 1e-12 < risk_sized_quantity,
+        "components": components,
+        "entry_snapshot": {
+            "timeframe": TIMEFRAME, "setup": components["setup"], "score": score,
+            "rsi7": strategy["rsi7"], "stoch_k": strategy["stoch_k"], "stoch_d": strategy["stoch_d"],
+            "atr": atr, "sl_method": "1x_ATR14", "tp_method": "1.5x_ATR14",
+            "session_ok_utc": strategy["session_ok"], "captured_at": iso_now(),
+        },
+        "trend": "BULL" if side == "BUY" else "BEAR",
+        "fundamentals": fundamentals, "news": news_context,
         "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
         "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
     }
@@ -1851,29 +1687,13 @@ def scan_market(manager, state):
                 stats["checked"] += 1
                 raw = manager.fetch_ohlcv(exchange, symbol)
                 df = closed_candles(raw)
-                if len(df) < 210:
+                if len(df) < 65:
                     stats["no_setup_or_score"] += 1
                     break
 
-                # Cheap 4h filter first; most symbols skip the daily network request.
-                if not has_potential_long_setup(df):
-                    stats["no_setup_or_score"] += 1
-                    break
-
-                trend = daily_trend(exchange, symbol)
-                if trend == "RATE_LIMIT":
-                    rate_limited_exchanges.add(exchange_name)
-                    stats["rate_limited_exchanges"].add(exchange_name)
-                    print(f"[RATE LIMIT] {exchange_name}: skipping this venue for remaining scan")
-                    continue
-                if trend == "UNKNOWN":
-                    stats["unknown_trend"] += 1
-                    # Try another exchange for this symbol when the daily feed failed.
-                    continue
-
-                fundamentals = fundamental_data(manager, symbol)
-                news_context = news_context_for_symbol(symbol, headlines)
-                signal = build_signal(symbol, exchange_name, df, trend, fundamentals, news_context)
+                # Entry admission is exclusively the reference strategy's rules.
+                # Daily trend, price-action, news and fundamental filters are not used.
+                signal = build_signal(symbol, exchange_name, df)
 
                 if not signal:
                     stats["no_setup_or_score"] += 1
