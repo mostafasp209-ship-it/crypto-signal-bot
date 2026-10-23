@@ -33,44 +33,44 @@ class CandleSafetyTests(unittest.TestCase):
 
 
 class StrategyGateTests(unittest.TestCase):
-    def test_strategy_gate_outputs_are_finite_after_warmup(self):
+    def test_reference_strategy_calculates_indicators_after_warmup(self):
         rows = []
         for i in range(140):
             close = 100 + i * 0.1 + (0.8 if i % 5 == 0 else 0.0)
             rows.append({
+                "timestamp": 1735718400000 + i * 300000,
                 "open": close - 0.15, "high": close + 0.5,
                 "low": close - 0.5, "close": close, "volume": 1000,
             })
         result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
-        self.assertIsNotNone(result["rsi7"])
-        self.assertIsNotNone(result["stoch_k"])
-        self.assertIsNotNone(result["stoch_d"])
-        self.assertIsNotNone(result["atr"])
-        self.assertIsNotNone(result["atr_baseline"])
+        for key in ("rsi7", "stoch_k", "stoch_d", "atr", "atr_baseline", "ema20", "ema50"):
+            self.assertIsNotNone(result[key])
         self.assertGreaterEqual(result["rsi7"], 0)
         self.assertLessEqual(result["rsi7"], 100)
+        self.assertIn("signal_long", result)
+        self.assertIn("signal_short", result)
 
-    def test_strategy_gate_handles_zero_loss_rsi_without_nan(self):
+    def test_reference_strategy_matches_published_session_hours_utc(self):
         rows = []
+        base = pd.Timestamp("2026-10-24T08:00:00Z").value // 10**6
         for i in range(100):
-            close = 100 + i
+            close = 100 + i * 0.1 + (0.8 if i % 5 == 0 else 0.0)
             rows.append({
-                "open": close - 0.2, "high": close + 0.5,
+                "timestamp": base + i * 300000,
+                "open": close - 0.15, "high": close + 0.5,
                 "low": close - 0.5, "close": close, "volume": 1000,
             })
         result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
-        self.assertEqual(result["rsi7"], 100.0)
-        self.assertFalse(result["rsi_gate"])
+        self.assertTrue(result["session_ok"])
 
-    def test_strategy_gate_rejects_insufficient_history(self):
+    def test_reference_strategy_rejects_insufficient_history(self):
         df = pd.DataFrame([{
-            "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1
+            "timestamp": 1735718400000, "open": 100, "high": 101,
+            "low": 99, "close": 100, "volume": 1
         }] * 30)
         result = bot.calculate_crypto_strategy_gates(df)
-        self.assertFalse(result["trend_gate"])
-        self.assertFalse(result["rsi_gate"])
-        self.assertFalse(result["stoch_gate"])
-        self.assertFalse(result["volatility_gate"])
+        self.assertFalse(result["signal_long"])
+        self.assertFalse(result["signal_short"])
         self.assertIsNone(result["rsi7"])
 
 
