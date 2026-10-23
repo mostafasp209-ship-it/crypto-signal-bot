@@ -1964,7 +1964,7 @@ def main(manage_only=False):
     else:
         telegram_send(
             "🔎 <b>Crypto Signal Bot</b>\n"
-            "این دور سیگنال جدیدی با امتیاز کافی پیدا نشد."
+            "در این دور هیچ نمادی از تمام شرط‌های اجباری استراتژی عبور نکرد."
         )
 
     telegram_send(performance_report(state))
