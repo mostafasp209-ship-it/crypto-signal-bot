@@ -56,6 +56,33 @@ class SignalExecutionTests(unittest.TestCase):
         self.assertTrue(bot.close_piece(signal, 95.0, 1.0, "sl"))
         self.assertEqual(signal["stop_slippage_usd"], 0.0)
 
+    def test_unbookable_tp_does_not_move_stop_or_mark_target_hit(self):
+        signal = {
+            "symbol": "TEST/USDT", "side": "BUY", "status": "ACTIVE",
+            "entry": 100.0, "sl": 100.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0,
+            "remaining_fraction": 1.0, "realized_pnl": 0.0, "fees_paid": 0.0,
+            "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
+        }
+        changed = bot.manage_signal(signal, 106.0)
+        self.assertFalse(changed)
+        self.assertEqual(signal["status"], "ACTIVE")
+        self.assertEqual(signal["sl"], 100.0)
+        self.assertFalse(signal["tp1_hit"])
+        self.assertEqual(signal["remaining_fraction"], 1.0)
+
+    def test_unbookable_stop_does_not_close_signal(self):
+        signal = {
+            "symbol": "TEST/USDT", "side": "BUY", "status": "ACTIVE",
+            "entry": 100.0, "sl": 100.0, "tp1": 105.0, "tp2": 110.0, "tp3": 115.0,
+            "remaining_fraction": 1.0, "realized_pnl": 0.0, "fees_paid": 0.0,
+            "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
+        }
+        changed = bot.manage_signal(signal, 99.0)
+        self.assertFalse(changed)
+        self.assertEqual(signal["status"], "ACTIVE")
+        self.assertEqual(signal["remaining_fraction"], 1.0)
+        self.assertEqual(signal["realized_pnl"], 0.0)
+
 
 class SignalAuditTests(unittest.TestCase):
     def test_audit_reports_closed_pnl_and_anomalies(self):
