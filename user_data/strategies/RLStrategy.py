@@ -1,3 +1,4 @@
+# Faithful research copy of upstream Mohamed-sm/Freqtrade-RLStrategy-IA RLStrategy.py.
 import logging
 from typing import Dict, List, Optional, Tuple
 import numpy as np
