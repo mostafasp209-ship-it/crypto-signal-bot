@@ -241,11 +241,11 @@
       "symbol": "IOST/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "مرجع اصلی",
       "score": 4,
       "created_at": "2026-10-25T10:19:56.780616+00:00",
-      "updated_at": "2026-10-25T10:19:56.780626+00:00",
+      "updated_at": "2026-10-25T22:08:56.772366+00:00",
       "expiry_at": "2026-10-27T10:19:56.780628+00:00",
       "entry": 0.000786,
       "sl": 0.0007777142857142858,
@@ -307,10 +307,14 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -7.0091603053435065,
+      "fees_paid": 0.3933842239185751,
+      "closed_reason": "SL",
+      "last_exit_price": 0.00076,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 4.507451835696114,
+      "sl_hit": true
     },
     {
       "id": "ILV_USDT_SELL_1792923626",
@@ -869,18 +873,18 @@
   ],
   "last_run": "2026-10-25T21:53:44.402126+00:00",
   "historical_stats": {
-    "closed": 10,
+    "closed": 11,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
-    "sl_direct": 5,
+    "sl_direct": 6,
     "expired": 0,
     "no_risk": 0,
     "other": 5,
-    "net_pnl": -29.54606946723506,
-    "fees": 3.9106105766254515,
+    "net_pnl": -36.55522977257856,
+    "fees": 4.303994800544027,
     "sl_methods": {
-      "1x_ATR14": 10
+      "1x_ATR14": 11
     }
   },
   "forward_test_started_at": "2026-10-23T03:21:00+00:00",
