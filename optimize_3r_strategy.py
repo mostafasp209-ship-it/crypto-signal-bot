@@ -41,9 +41,17 @@ def features(raw):
  d["support"]=(l<=d.prior_low*1.003)&(c>d.prior_low)&(c>o)&(d.close_loc>=.7)&(d.rsi<55)&(c>d.ema50)
  k=100*(c-l.rolling(5).min())/(h.rolling(5).max()-l.rolling(5).min()+1e-12); kd=k.rolling(3).mean()
  d["baseline"]=(d.ema20>d.ema50)&(d.rsi<30)&(k<20)&(k>kd)&(d.atr>d.atr.rolling(50).mean()*.8)
+ # Higher-timeframe filter uses only the last completed 1h candle (no look-ahead).
+ idx=pd.DatetimeIndex(pd.to_datetime(d.timestamp,unit="ms",utc=True))
+ hourly=pd.Series(c.to_numpy(),index=idx).resample("1h",label="right",closed="left").last().dropna()
+ he20=hourly.ewm(span=20,adjust=False).mean(); he50=hourly.ewm(span=50,adjust=False).mean()
+ htf_bull=((hourly>he50)&(he20>he50)).reindex(idx,method="ffill").fillna(False).to_numpy()
+ d["htf_bull"]=htf_bull
+ for name in ["pull20","pull50","breakout","support","baseline"]:
+  d[name+"_htf"]=d[name]&d["htf_bull"]
  return d
 CANDIDATES=[{"setup":s,"rsi_min":r0,"rsi_max":r1,"atr_min":a,"sl_mult":m,"rr":3}
- for s in ["pull20","pull50","breakout","support","baseline"]
+ for s in ["pull20","pull50","breakout","support","baseline","pull20_htf","pull50_htf","breakout_htf","support_htf","baseline_htf"]
  for r0,r1 in [(30,70),(35,60),(40,60),(45,65)]
  for a in [.0005,.001,.0015] for m in [1.,1.25,1.5]]
 def run_one(d,p,start_i,end_i):
