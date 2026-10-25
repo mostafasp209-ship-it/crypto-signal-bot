@@ -4,8 +4,8 @@ on:
   schedule:
     # Telegram panel polling.
     - cron: "*/5 * * * *"
-    # Run the live-market scanner every 4 hours, independently of panel polling.
-    - cron: "17 */4 * * *"
+    # Scan the market every 15 minutes; manage active signals and poll panel every 5 minutes.
+    - cron: "2,17,32,47 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -23,8 +23,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: main
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -41,8 +39,8 @@ jobs:
       - name: Validate Python syntax
         run: python -m py_compile bot.py panel.py
 
-      - name: Run market scanner (every 4 hours)
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 */4 * * *'
+      - name: Run market scanner (every 15 minutes)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2,17,32,47 * * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}

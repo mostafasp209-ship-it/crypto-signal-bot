@@ -1203,6 +1203,11 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
     target = entry + direction * 1.5 * atr
     risk_per_unit = abs(entry - sl)
     risk_pct = risk_per_unit / entry * 100
+    # Include estimated entry/exit fees in the reported reward-to-risk ratio.
+    gross_reward_per_unit = abs(target - entry)
+    net_reward_per_unit = gross_reward_per_unit - (entry + target) * FEE_RATE
+    net_risk_per_unit = risk_per_unit + (entry + sl) * FEE_RATE
+    net_rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
     risk_sized_quantity = RISK_USD / risk_per_unit
     cap_quantity = MAX_POSITION_USD / entry if MAX_POSITION_USD > 0 else risk_sized_quantity
     quantity = min(risk_sized_quantity, cap_quantity)
@@ -1233,7 +1238,7 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
         "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
         "entry": entry, "sl": sl, "tp1": target, "tp2": target, "tp3": target,
         "support": None, "resistance": None, "sl_method": "1x_ATR14",
-        "tp_methods": ["1.5x_ATR14"], "rr": 1.5, "risk_pct": risk_pct,
+        "tp_methods": ["1.5x_ATR14"], "rr": net_rr, "risk_pct": risk_pct,
         "initial_risk_per_unit": risk_per_unit, "initial_sl": sl,
         "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
         "position_quantity": quantity, "quantity": quantity, "position_value": position_value,
@@ -1378,6 +1383,21 @@ def manage_signal(signal, current_price):
         signal["updated_at"] = iso_now()
         return True
 
+    # This reference setup has one final target; the repeated TP fields are legacy compatibility.
+    is_single_target = (
+        signal.get("components", {}).get("setup")
+        == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
+    )
+    if is_single_target and price_hit(signal, current_price, "tp1"):
+        remaining = safe_float(signal.get("remaining_fraction"), 1.0)
+        if remaining > 0 and not close_piece(signal, signal["tp1"], remaining, "tp1"):
+            print(f"[MANAGE ERROR] {signal.get('symbol')}: final target exit not booked; keeping signal active")
+            return False
+        signal["status"] = "CLOSED"
+        signal["closed_reason"] = "TP1"
+        signal["updated_at"] = iso_now()
+        return True
+
     if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
         if not close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP1 exit not booked; leaving trade state unchanged")
@@ -1444,7 +1464,10 @@ def update_open_signals(state, manager):
 
         side = signal.get("side", "BUY")
         header = f"<b>{symbol} — {side}</b>"
-        if not before["tp1_hit"] and signal.get("tp1_hit"):
+        if (
+            not before["tp1_hit"] and signal.get("tp1_hit")
+            and signal.get("components", {}).get("setup") != "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
+        ):
             events.append(
                 f"🎯 <b>TP1 فعال شد</b>\n{header}\n"
                 f"قیمت بررسی: <b>{fmt_price(price)}</b>\n"
@@ -1468,6 +1491,8 @@ def update_open_signals(state, manager):
                 title = "🛑 <b>حد ضرر (SL) فعال شد</b>"
             elif reason == "TP3":
                 title = "✅ <b>موقعیت با TP3 بسته شد</b>"
+            elif reason == "TP1" and signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION":
+                title = "✅ <b>هدف نهایی فعال شد؛ موقعیت کامل بسته شد</b>"
             else:
                 title = "📕 <b>موقعیت بسته شد</b>"
             events.append(
@@ -1584,7 +1609,7 @@ def format_signal(signal):
     return (
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
-        f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
+        f"قدرت: <b>{signal['strength']}</b>\n"
         f"روند روزانه: {signal['trend']}\n"
         f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
         f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n"
@@ -1608,7 +1633,7 @@ def format_signal(signal):
         + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
-        f"RR وزنی خالص (با کارمزد): <b>{signal['rr']:.2f}</b>\n\n"
+        f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
 
 
         f"💰 Funding: {funding_text}\n"
@@ -1748,7 +1773,7 @@ def scan_market(manager, state):
             )
         # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
-    signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
+    signals.sort(key=lambda x: x["rr"], reverse=True)
     print(
         "[SCAN SUMMARY] "
         f"candidates={stats['candidates']} checked={stats['checked']} "
