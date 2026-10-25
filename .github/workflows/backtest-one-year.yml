@@ -1,0 +1,46 @@
+name: One-year spot backtest
+
+on:
+  push:
+    branches:
+      - "backtest/one-year-spot-5m"
+    paths:
+      - "backtest_one_year.py"
+      - ".github/workflows/backtest-one-year.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: one-year-spot-backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install backtest dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ccxt numpy pandas
+      - name: Run one-year backtest
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u backtest_one_year.py
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: one-year-spot-backtest
+          path: backtest-results/
+          if-no-files-found: warn
+          retention-days: 30
