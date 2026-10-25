@@ -136,6 +136,6 @@ def main():
  "## Candidates selected on training only",""]+table(eligible[:20],"train") if eligible else ["# 3R strategy optimization","","No candidate passed the minimum training criteria."]
  lines += ["","## Held-out test leaders (diagnostic only; not used to select parameters)",""]+table(testrank[:20],"test")
  lines += ["","## Caveats",""]+["- "+x for x in result["caveats"]]
- (OUT/"report.md").write_text("\\n".join(lines)+"\\n",encoding="utf-8")
+ (OUT/"report.md").write_text("\n".join(lines)+"\n",encoding="utf-8")
  print((OUT/"report.md").read_text(encoding="utf-8"),flush=True)
 if __name__=="__main__": main()
