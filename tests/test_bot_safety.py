@@ -98,6 +98,26 @@ class SignalExecutionTests(unittest.TestCase):
         self.assertTrue(bot.close_piece(signal, 95.0, 1.0, "sl"))
         self.assertEqual(signal["stop_slippage_usd"], 0.0)
 
+    def test_reference_strategy_closes_full_position_at_single_target(self):
+        signal = {
+            "symbol": "TEST/USDT", "side": "BUY", "status": "ACTIVE",
+            "entry": 100.0, "sl": 95.0, "tp1": 105.0, "tp2": 105.0, "tp3": 105.0,
+            "components": {"setup": "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"},
+            "initial_sl": 95.0, "initial_risk_per_unit": 5.0,
+            "position_quantity": 2.0, "remaining_fraction": 1.0,
+            "realized_pnl": 0.0, "fees_paid": 0.0,
+            "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
+        }
+        changed = bot.manage_signal(signal, 105.0)
+        self.assertTrue(changed)
+        self.assertEqual(signal["status"], "CLOSED")
+        self.assertEqual(signal["closed_reason"], "TP1")
+        self.assertEqual(signal["remaining_fraction"], 0.0)
+        self.assertTrue(signal["tp1_hit"])
+        self.assertFalse(signal["tp2_hit"])
+        self.assertFalse(signal["tp3_hit"])
+        self.assertAlmostEqual(signal["realized_pnl"], 9.59, places=2)
+
     def test_unbookable_tp_does_not_move_stop_or_mark_target_hit(self):
         signal = {
             "symbol": "TEST/USDT", "side": "BUY", "status": "ACTIVE",
