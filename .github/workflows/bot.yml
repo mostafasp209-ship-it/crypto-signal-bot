@@ -5,7 +5,7 @@ on:
     # Telegram panel polling.
     - cron: "*/5 * * * *"
     # Scan the market every 15 minutes; manage active signals and poll panel every 5 minutes.
-    - cron: "*/15 * * * *"
+    - cron: "2,17,32,47 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,7 @@ jobs:
         run: python -m py_compile bot.py panel.py
 
       - name: Run market scanner (every 15 minutes)
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '*/15 * * * *'
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2,17,32,47 * * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
