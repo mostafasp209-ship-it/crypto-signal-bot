@@ -631,11 +631,11 @@
       "symbol": "MNT/USDT",
       "exchange": "bitfinex",
       "side": "SELL",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "مرجع اصلی",
       "score": 4,
       "created_at": "2026-10-25T18:44:25.873050+00:00",
-      "updated_at": "2026-10-25T18:44:25.873061+00:00",
+      "updated_at": "2026-10-25T19:09:05.670766+00:00",
       "expiry_at": "2026-10-27T18:44:25.873064+00:00",
       "entry": 0.5217,
       "sl": 0.5233157142857143,
@@ -697,26 +697,30 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -1.436112708453105,
+      "fees_paid": 0.4010350776308223,
+      "closed_reason": "SL",
+      "last_exit_price": 0.5244,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 0.41567403269528413,
+      "sl_hit": true
     }
   ],
   "last_run": "2026-10-25T18:45:00.171040+00:00",
   "historical_stats": {
-    "closed": 7,
+    "closed": 8,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
-    "sl_direct": 2,
+    "sl_direct": 3,
     "expired": 0,
     "no_risk": 0,
     "other": 5,
-    "net_pnl": -25.007484073330588,
-    "fees": 2.7072753264816907,
+    "net_pnl": -26.443596781783693,
+    "fees": 3.108310404112513,
     "sl_methods": {
-      "1x_ATR14": 7
+      "1x_ATR14": 8
     }
   },
   "forward_test_started_at": "2026-10-23T03:21:00+00:00",
