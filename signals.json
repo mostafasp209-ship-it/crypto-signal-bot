@@ -5,11 +5,11 @@
       "symbol": "BNB/USDT",
       "exchange": "binanceus",
       "side": "SELL",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "مرجع اصلی",
       "score": 4,
       "created_at": "2026-10-25T07:59:23.191212+00:00",
-      "updated_at": "2026-10-25T07:59:23.191224+00:00",
+      "updated_at": "2026-10-25T08:19:20.702290+00:00",
       "expiry_at": "2026-10-27T07:59:23.191227+00:00",
       "entry": 745.29,
       "sl": 745.7735714285714,
@@ -68,28 +68,32 @@
         "label": "unavailable",
         "headlines": []
       },
-      "tp1_hit": false,
+      "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -0.20515436944009735,
+      "fees_paid": 0.3998053490204197,
+      "closed_reason": "TP1",
+      "last_exit_price": 744.5646428571429,
+      "last_exit_label": "tp1"
     }
   ],
   "last_run": "2026-10-25T08:00:09.738377+00:00",
   "historical_stats": {
-    "closed": 0,
+    "closed": 1,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
     "sl_direct": 0,
     "expired": 0,
     "no_risk": 0,
-    "other": 0,
-    "net_pnl": 0.0,
-    "fees": 0.0,
-    "sl_methods": {}
+    "other": 1,
+    "net_pnl": -0.20515436944009735,
+    "fees": 0.3998053490204197,
+    "sl_methods": {
+      "1x_ATR14": 1
+    }
   },
   "forward_test_started_at": "2026-10-23T03:21:00+00:00",
   "signal_history_reset_version": 2
