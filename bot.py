@@ -1609,7 +1609,7 @@ def format_signal(signal):
     return (
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
-        f"قدرت: <b>{signal['strength']}</b> | Score: <b>{signal['score']}</b>\n"
+        f"قدرت: <b>{signal['strength']}</b>\n"
         f"روند روزانه: {signal['trend']}\n"
         f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
         f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n"
@@ -1633,7 +1633,7 @@ def format_signal(signal):
         + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
-        f"RR وزنی خالص (با کارمزد): <b>{signal['rr']:.2f}</b>\n\n"
+        f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
 
 
         f"💰 Funding: {funding_text}\n"
@@ -1773,7 +1773,7 @@ def scan_market(manager, state):
             )
         # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
-    signals.sort(key=lambda x: (x["score"], x["rr"]), reverse=True)
+    signals.sort(key=lambda x: x["rr"], reverse=True)
     print(
         "[SCAN SUMMARY] "
         f"candidates={stats['candidates']} checked={stats['checked']} "
