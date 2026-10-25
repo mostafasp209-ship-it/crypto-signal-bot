@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Research-only, approximate historical comparison. Does not place orders."""
+"""Research-only, approximate 365-day historical comparison. Does not place orders.
+Uses Binance OHLCV pagination because Kraken OHLC endpoints cap retrievable candles."""
 import json, time
 from datetime import datetime, timezone
 import ccxt
@@ -7,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 SYMBOLS = ["BTC/USDT", "ETH/USDT", "SOL/USDT"]
-DAYS = 30
+DAYS = 365
 FEE = 0.001
 SLIPPAGE = 0.0002
 START_USD = 1000.0
@@ -144,7 +145,7 @@ def simulate(df, kind):
             "note":"Approximate OHLCV simulation; stop checked before target when both touched."}
 
 def main():
-    ex=ccxt.kraken({"enableRateLimit":True,"timeout":20000})
+    ex=ccxt.binance({"enableRateLimit":True,"timeout":20000})
     since=ex.milliseconds()-DAYS*24*60*60*1000
     report={"generated_at":datetime.now(timezone.utc).isoformat(),"days":DAYS,
             "symbols":SYMBOLS,"fee_per_side":FEE,"slippage_per_side":SLIPPAGE,
