@@ -1214,11 +1214,13 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
         return None
 
     risk_pct = risk_per_unit / entry * 100.0
-    risk_sized_quantity = RISK_USD / risk_per_unit
+    # Size to stop loss plus estimated entry/stop fees, not price risk alone.
+    fee_adjusted_risk_per_unit = risk_per_unit + (entry + sl) * FEE_RATE
+    risk_sized_quantity = RISK_USD / fee_adjusted_risk_per_unit
     cap_quantity = MAX_POSITION_USD / entry if MAX_POSITION_USD > 0 else risk_sized_quantity
     quantity = min(risk_sized_quantity, cap_quantity)
     position_value = quantity * entry
-    actual_risk_usd = quantity * risk_per_unit
+    actual_risk_usd = quantity * fee_adjusted_risk_per_unit
     candle_timestamp = safe_float(candle.get("timestamp"))
     fundamentals = fundamentals or {}
     news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
@@ -1273,7 +1275,7 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
             "tp_method": "partial_1_3_at_0.75R_then_3xATR_chandelier",
             "candle_timestamp": candle_timestamp, "captured_at": created_at,
         },
-        "trend": "BULL",
+        "trend": "BULL — EMA200 4h",
         "fundamentals": fundamentals, "news": news_context,
         "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
         "remaining_fraction": 1.0, "realized_pnl": 0.0, "fees_paid": 0.0,
@@ -1483,7 +1485,14 @@ def manage_signal(signal, current_price):
                 print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
                 return False
             signal["status"] = "CLOSED"
-            signal["closed_reason"] = "TRAILING_SL" if signal.get("trailing_active") else "SL"
+            entry = safe_float(signal.get("entry"), 0.0) or 0.0
+            stop = safe_float(signal.get("sl"), entry) or entry
+            if signal.get("trailing_active") and stop > entry + 1e-12:
+                signal["closed_reason"] = "TRAILING_SL"
+            elif signal.get("trailing_active"):
+                signal["closed_reason"] = "BREAKEVEN_SL"
+            else:
+                signal["closed_reason"] = "SL"
             signal["updated_at"] = iso_now()
             return True
 
@@ -1651,6 +1660,8 @@ def update_open_signals(state, manager):
             reason = str(signal.get("closed_reason", "")).upper()
             if reason == "TRAILING_SL":
                 title = "📉 <b>تریلینگ استاپ چَندلیر فعال شد</b>"
+            elif reason == "BREAKEVEN_SL":
+                title = "🟰 <b>استاپ سربه‌سر فعال شد</b>"
             elif reason == "SL":
                 title = "🛑 <b>حد ضرر (SL) فعال شد</b>"
             elif reason == "TP3":
@@ -1686,7 +1697,8 @@ def refresh_historical_stats(state):
     closed = [s for s in signals if s.get("status") in {"CLOSED", "EXPIRED"}]
     stats = {
         "closed": len(closed), "tp3": 0, "tp2_then_sl": 0,
-        "tp1_then_sl": 0, "sl_direct": 0, "expired": 0,
+        "tp1_then_sl": 0, "sl_direct": 0, "trailing_stop": 0,
+        "breakeven_stop": 0, "expired": 0,
         "no_risk": 0, "other": 0, "net_pnl": 0.0,
         "fees": 0.0, "sl_methods": {},
     }
@@ -1699,6 +1711,10 @@ def refresh_historical_stats(state):
             stats["tp3"] += 1
         elif "expir" in reason:
             stats["expired"] += 1
+        elif reason == "trailing_sl":
+            stats["trailing_stop"] += 1
+        elif reason == "breakeven_sl":
+            stats["breakeven_stop"] += 1
         elif reason == "sl" and tp2:
             stats["tp2_then_sl"] += 1
         elif reason == "sl" and tp1:
@@ -1774,7 +1790,7 @@ def format_signal(signal):
         f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
         f"صرافی: {signal['exchange']}\n"
         f"قدرت: <b>{signal['strength']}</b>\n"
-        f"روند روزانه: {signal['trend']}\n"
+        f"فیلتر روند: {signal['trend']}\n"
         f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
         f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n"
         + "".join(
@@ -1804,6 +1820,9 @@ def format_signal(signal):
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
         + (
+            f"📊 ADX(14): <b>{safe_float(signal.get('components', {}).get('adx14'), 0.0):.1f}</b> | "
+            f"EMA200: <b>{fmt_price(signal.get('components', {}).get('ema200'))}</b>\n"
+            f"🧪 اعتبارسنجی دیتای واقعی: هنوز انجام نشده\n"
             "📐 RR نهایی: متغیر (بسته به تریلینگ استاپ)\n\n"
             if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
             else f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
@@ -1893,8 +1912,8 @@ def scan_market(manager, state):
                     stats["no_setup_or_score"] += 1
                     break
 
-                # Entry admission is exclusively the reference strategy's rules.
-                # Daily trend, price-action, news and fundamental filters are not used.
+                # V3 is the sole entry admission rule; news/fundamental context
+                # shown in the alert is informational and does not gate entry.
                 signal = build_signal(symbol, exchange_name, df)
 
                 if not signal:
