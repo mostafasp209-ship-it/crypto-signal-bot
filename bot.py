@@ -33,8 +33,8 @@ FUNDING_SOURCES = [
 ]
 
 QUOTE = "USDT"
-TIMEFRAME = "5m"
-TREND_TIMEFRAME = "5m"
+TIMEFRAME = "4h"
+TREND_TIMEFRAME = "1d"
 
 MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
 MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
@@ -1110,33 +1110,33 @@ def calculate_levels(side, entry, atr, df):
 
 
 def calculate_crypto_strategy_gates(df):
-    """Independent implementation of the reference XAUUSD strategy's exact entry rules."""
-    empty = {
-        "rsi7": None, "stoch_k": None, "stoch_d": None,
-        "atr": None, "atr_baseline": None, "ema20": None, "ema50": None,
-        "session_ok": False, "trend_up": False, "trend_down": False,
-        "signal_long": False, "signal_short": False,
+    """
+    Experimental long-only breakout + volume strategy.
+    Parameters taken from the best train/validation candidate in the BTCUSDT 4h
+    research run: lookback=10, volume multiplier=1.5, ATR stop=1.0,
+    target=1.5R, no MA200 trend gate. The untouched test was negative, so this
+    is a research deployment, not a validated profitability claim.
+    """
+    result = {
+        "atr": None, "volume_avg": None, "volume_ratio": None,
+        "breakout_level": None, "lookback": 10,
+        "volume_multiplier": 1.5, "atr_multiplier": 1.0,
+        "target_r": 1.5, "signal_long": False,
     }
-    if df is None or len(df) < 65:
-        return empty
+    if df is None or len(df) < 30:
+        return result
 
-    close = pd.to_numeric(df["close"], errors="coerce")
-    high = pd.to_numeric(df["high"], errors="coerce")
-    low = pd.to_numeric(df["low"], errors="coerce")
+    work = df.copy()
+    for col in ("open", "high", "low", "close", "volume"):
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work = work.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
+    if len(work) < 30:
+        return result
 
-    ema20 = close.ewm(span=20, adjust=False).mean()
-    ema50 = close.ewm(span=50, adjust=False).mean()
-
-    delta = close.diff()
-    gain = delta.clip(lower=0).rolling(7).mean()
-    loss = -delta.clip(upper=0).rolling(7).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi7 = 100 - (100 / (1 + rs))
-
-    low_min = low.rolling(5).min()
-    high_max = high.rolling(5).max()
-    stoch_k = 100 * (close - low_min) / (high_max - low_min + 1e-10)
-    stoch_d = stoch_k.rolling(3).mean()
+    close = work["close"]
+    high = work["high"]
+    low = work["low"]
+    volume = work["volume"]
 
     previous_close = close.shift(1)
     true_range = pd.concat([
@@ -1144,53 +1144,37 @@ def calculate_crypto_strategy_gates(df):
         (high - previous_close).abs(),
         (low - previous_close).abs(),
     ], axis=1).max(axis=1)
-    atr14 = true_range.rolling(14).mean()
-    atr_baseline = atr14.rolling(50).mean() * 0.8
+    atr = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
 
-    session_ok = False
-    try:
-        ts = df.iloc[-1].get("timestamp")
-        if ts is not None:
-            ts = pd.to_datetime(ts, unit="ms", utc=True)
-            t = ts.time()
-            session_ok = (
-                (pd.Timestamp("07:00").time() <= t <= pd.Timestamp("11:00").time())
-                or (pd.Timestamp("13:00").time() <= t <= pd.Timestamp("17:00").time())
-            )
-    except (TypeError, ValueError, OverflowError):
-        session_ok = False
+    # Shift the average so the breakout candle cannot inflate its own volume baseline.
+    volume_avg = volume.rolling(20, min_periods=20).mean().shift(1)
+    prior_high = high.shift(1).rolling(10, min_periods=10).max()
 
-    values = {
-        "rsi7": safe_float(rsi7.iloc[-1]),
-        "stoch_k": safe_float(stoch_k.iloc[-1]),
-        "stoch_d": safe_float(stoch_d.iloc[-1]),
-        "atr": safe_float(atr14.iloc[-1]),
-        "atr_baseline": safe_float(atr_baseline.iloc[-1]),
-        "ema20": safe_float(ema20.iloc[-1]),
-        "ema50": safe_float(ema50.iloc[-1]),
-        "session_ok": bool(session_ok),
-    }
-    rsi_now, k_now, d_now = values["rsi7"], values["stoch_k"], values["stoch_d"]
-    atr_now, atr_gate = values["atr"], values["atr_baseline"]
-    trend_up = values["ema20"] is not None and values["ema50"] is not None and values["ema20"] > values["ema50"]
-    trend_down = values["ema20"] is not None and values["ema50"] is not None and values["ema20"] < values["ema50"]
-    vol_ok = atr_now is not None and atr_gate is not None and atr_now > atr_gate
-    long_trigger = rsi_now is not None and rsi_now < 30 and k_now is not None and d_now is not None and k_now < 20 and k_now > d_now
-    short_trigger = rsi_now is not None and rsi_now > 70 and k_now is not None and d_now is not None and k_now > 80 and k_now < d_now
-    values.update({
-        "trend_up": bool(trend_up),
-        "trend_down": bool(trend_down),
-        "signal_long": bool(trend_up and long_trigger and vol_ok and session_ok),
-        "signal_short": bool(trend_down and short_trigger and vol_ok and session_ok),
+    atr_now = safe_float(atr.iloc[-1])
+    avg_now = safe_float(volume_avg.iloc[-1])
+    close_now = safe_float(close.iloc[-1])
+    vol_now = safe_float(volume.iloc[-1])
+    breakout = safe_float(prior_high.iloc[-1])
+
+    result.update({
+        "atr": atr_now,
+        "volume_avg": avg_now,
+        "volume_ratio": (vol_now / avg_now) if vol_now is not None and avg_now and avg_now > 0 else None,
+        "breakout_level": breakout,
     })
-    return values
+    if any(v is None for v in (atr_now, avg_now, close_now, vol_now, breakout)) or atr_now <= 0 or avg_now <= 0:
+        return result
+
+    result["signal_long"] = bool(
+        close_now > breakout and vol_now > 1.5 * avg_now
+    )
+    return result
 
 
 def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_context=None):
-    """Reference strategy: EMA20/50 + RSI(7) + Stochastic(5,3) + ATR/session gates."""
+    """Build a spot BUY signal from the experimental 4h breakout + volume setup."""
     strategy = calculate_crypto_strategy_gates(df)
-    side = "BUY" if strategy["signal_long"] else ("SELL" if strategy["signal_short"] else None)
-    if side is None:
+    if not strategy["signal_long"]:
         return None
 
     entry = safe_float(df.iloc[-1]["close"])
@@ -1198,13 +1182,15 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
     if entry is None or entry <= 0 or atr is None or atr <= 0:
         return None
 
-    direction = 1 if side == "BUY" else -1
-    sl = entry - direction * atr
-    target = entry + direction * 1.5 * atr
-    risk_per_unit = abs(entry - sl)
-    risk_pct = risk_per_unit / entry * 100
-    # Include estimated entry/exit fees in the reported reward-to-risk ratio.
-    gross_reward_per_unit = abs(target - entry)
+    risk_per_unit = atr * strategy["atr_multiplier"]
+    sl = entry - risk_per_unit
+    target = entry + strategy["target_r"] * risk_per_unit
+    if sl <= 0 or target <= entry:
+        return None
+
+    risk_pct = risk_per_unit / entry * 100.0
+    # Approximate round-trip fees in the displayed reward-to-risk ratio.
+    gross_reward_per_unit = target - entry
     net_reward_per_unit = gross_reward_per_unit - (entry + target) * FEE_RATE
     net_risk_per_unit = risk_per_unit + (entry + sl) * FEE_RATE
     net_rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
@@ -1217,28 +1203,29 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
     news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
     score = 4
     components = {
-        "setup": "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
-        "strategy_mode": "reference_rules_only",
+        "setup": "BREAKOUT_VOLUME_4H_EXPERIMENTAL",
+        "strategy_mode": "breakout_volume",
         "timeframe": TIMEFRAME,
-        "ema20": strategy["ema20"],
-        "ema50": strategy["ema50"],
-        "trend_up": strategy["trend_up"],
-        "trend_down": strategy["trend_down"],
-        "rsi7": strategy["rsi7"],
-        "stoch_k": strategy["stoch_k"],
-        "stoch_d": strategy["stoch_d"],
+        "lookback": strategy["lookback"],
+        "breakout_level": strategy["breakout_level"],
+        "volume": safe_float(df.iloc[-1]["volume"]),
+        "volume_avg_20_prev": strategy["volume_avg"],
+        "volume_ratio": strategy["volume_ratio"],
+        "volume_multiplier": strategy["volume_multiplier"],
         "atr14": atr,
-        "atr_50_mean_times_0_8": strategy["atr_baseline"],
-        "session_ok_utc": strategy["session_ok"],
+        "atr_multiplier": strategy["atr_multiplier"],
+        "target_r": strategy["target_r"],
+        "out_of_sample_status": "NOT_VALIDATED",
     }
     return {
-        "id": f"{symbol.replace('/', '_')}_{side}_{int(time.time())}",
-        "symbol": symbol, "exchange": exchange_name, "side": side, "status": "ACTIVE",
-        "strength": "مرجع اصلی", "score": score, "created_at": iso_now(), "updated_at": iso_now(),
-        "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
+        "id": f"{symbol.replace('/', '_')}_BUY_{int(time.time())}",
+        "symbol": symbol, "exchange": exchange_name, "side": "BUY", "status": "ACTIVE",
+        "strength": "آزمایشی", "score": score, "created_at": iso_now(), "updated_at": iso_now(),
+        "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
         "entry": entry, "sl": sl, "tp1": target, "tp2": target, "tp3": target,
-        "support": None, "resistance": None, "sl_method": "1x_ATR14",
-        "tp_methods": ["1.5x_ATR14"], "rr": net_rr, "risk_pct": risk_pct,
+        "support": None, "resistance": strategy["breakout_level"], "sl_method": "1x_ATR14",
+        "tp_methods": ["1.5R_single_target_split_50_30_20"],
+        "rr": net_rr, "risk_pct": risk_pct,
         "initial_risk_per_unit": risk_per_unit, "initial_sl": sl,
         "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
         "position_quantity": quantity, "quantity": quantity, "position_value": position_value,
@@ -1246,11 +1233,12 @@ def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_
         "components": components,
         "entry_snapshot": {
             "timeframe": TIMEFRAME, "setup": components["setup"], "score": score,
-            "rsi7": strategy["rsi7"], "stoch_k": strategy["stoch_k"], "stoch_d": strategy["stoch_d"],
-            "atr": atr, "sl_method": "1x_ATR14", "tp_method": "1.5x_ATR14",
-            "session_ok_utc": strategy["session_ok"], "captured_at": iso_now(),
+            "breakout_level": strategy["breakout_level"],
+            "volume_ratio": strategy["volume_ratio"],
+            "atr": atr, "sl_method": "1x_ATR14", "tp_method": "1.5R_single_target",
+            "captured_at": iso_now(),
         },
-        "trend": "BULL" if side == "BUY" else "BEAR",
+        "trend": "BULL",
         "fundamentals": fundamentals, "news": news_context,
         "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
         "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
