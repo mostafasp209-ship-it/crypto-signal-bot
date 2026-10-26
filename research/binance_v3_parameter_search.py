@@ -119,6 +119,14 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
     rsi_ok = pd.Series(True, index=x.index) if cfg["rsi_min"] is None else x.rsi >= cfg["rsi_min"]
     macd_ok = (x.macd > x.macd_signal) if cfg["macd_filter"] else pd.Series(True, index=x.index)
     signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & x.atr.notna()).fillna(False).to_numpy()
+    # Convert columns once: scalar pandas .iloc calls inside every trade were
+    # the dominant cost across thousands of parameter configurations.
+    opens = x.open.to_numpy(dtype=float)
+    highs = x.high.to_numpy(dtype=float)
+    lows = x.low.to_numpy(dtype=float)
+    closes = x.close.to_numpy(dtype=float)
+    atrs = x.atr.to_numpy(dtype=float)
+    timestamps = x.timestamp
     trades = []
     i = max(start_i, 220)
     while i < end_i - 1:
@@ -126,17 +134,17 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
             i += 1
             continue
         entry_i = i + 1
-        entry = float(x.open.iloc[entry_i]) * (1 + SLIPPAGE_PER_SIDE)
-        atr = float(x.atr.iloc[i])
+        entry = opens[entry_i] * (1 + SLIPPAGE_PER_SIDE)
+        atr = atrs[i]
         risk = atr * cfg["atr_mult"]
         if not np.isfinite(risk) or risk <= 0 or entry <= risk:
             i += 1
             continue
         stop = entry - risk
         target = entry + risk * cfg["rr"]
-        exit_i, exit_price, reason = end_i - 1, float(x.close.iloc[end_i - 1]), "TIME_END"
+        exit_i, exit_price, reason = end_i - 1, closes[end_i - 1], "TIME_END"
         for j in range(entry_i, end_i):
-            lo, hi = float(x.low.iloc[j]), float(x.high.iloc[j])
+            lo, hi = lows[j], highs[j]
             hit_sl, hit_tp = lo <= stop, hi >= target
             if hit_sl:  # conservative when both levels touched in one OHLC candle
                 exit_i, exit_price, reason = j, stop, "SL"
@@ -150,9 +158,9 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
         net_pnl = gross_pnl - costs
         trade = {
             "symbol": cfg.get("symbol", ""),
-            "signal_time": str(x.timestamp.iloc[i]),
-            "entry_time": str(x.timestamp.iloc[entry_i]),
-            "exit_time": str(x.timestamp.iloc[exit_i]),
+            "signal_time": str(timestamps.iloc[i]),
+            "entry_time": str(timestamps.iloc[entry_i]),
+            "exit_time": str(timestamps.iloc[exit_i]),
             "entry": round(entry, 8), "stop": round(stop, 8), "target": round(target, 8),
             "reason": reason, "net_r": float(net_pnl / risk),
             "net_return_pct": float(net_pnl / entry * 100),
