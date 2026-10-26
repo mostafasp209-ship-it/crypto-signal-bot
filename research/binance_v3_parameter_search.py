@@ -109,6 +109,48 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
+from numba import njit
+
+
+@njit(cache=True)
+def _simulate_core(signals, opens, highs, lows, closes, atrs, start_i, end_i, atr_mult, rr):
+    """Numba-compiled OHLC simulation loop; returns compact numeric trade rows."""
+    rows = []
+    i = max(start_i, 220)
+    n = len(signals)
+    while i < end_i - 1:
+        if not signals[i]:
+            i += 1
+            continue
+        entry_i = i + 1
+        entry = opens[entry_i] * (1.0 + SLIPPAGE_PER_SIDE)
+        atr = atrs[i]
+        risk = atr * atr_mult
+        if not np.isfinite(risk) or risk <= 0.0 or entry <= risk:
+            i += 1
+            continue
+        stop = entry - risk
+        target = entry + risk * rr
+        exit_i = end_i - 1
+        exit_price = closes[exit_i]
+        reason = 2  # TIME_END
+        j = entry_i
+        while j < end_i:
+            lo, hi = lows[j], highs[j]
+            if lo <= stop:
+                exit_i, exit_price, reason = j, stop, 0  # SL wins ties conservatively
+                break
+            if hi >= target:
+                exit_i, exit_price, reason = j, target, 1  # TP
+                break
+            j += 1
+        exit_fill = exit_price * (1.0 - SLIPPAGE_PER_SIDE)
+        net_pnl = (exit_fill - entry) - (entry * FEE_PER_SIDE + exit_fill * FEE_PER_SIDE)
+        rows.append((i, entry_i, exit_i, entry, stop, target, reason, net_pnl / risk, net_pnl / entry * 100.0))
+        i = exit_i + 1
+    return rows
+
+
 def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> list:
     """Simulate one strictly bounded time segment; positions cannot leak across split."""
     x = df.reset_index(drop=True)
@@ -118,56 +160,27 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
     adx_ok = pd.Series(True, index=x.index) if cfg["adx_min"] is None else x.adx >= cfg["adx_min"]
     rsi_ok = pd.Series(True, index=x.index) if cfg["rsi_min"] is None else x.rsi >= cfg["rsi_min"]
     macd_ok = (x.macd > x.macd_signal) if cfg["macd_filter"] else pd.Series(True, index=x.index)
-    signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & x.atr.notna()).fillna(False).to_numpy()
-    # Convert columns once: scalar pandas .iloc calls inside every trade were
-    # the dominant cost across thousands of parameter configurations.
-    opens = x.open.to_numpy(dtype=float)
-    highs = x.high.to_numpy(dtype=float)
-    lows = x.low.to_numpy(dtype=float)
-    closes = x.close.to_numpy(dtype=float)
-    atrs = x.atr.to_numpy(dtype=float)
+    signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & x.atr.notna()).fillna(False).to_numpy(dtype=np.bool_)
+    opens = x.open.to_numpy(dtype=np.float64)
+    highs = x.high.to_numpy(dtype=np.float64)
+    lows = x.low.to_numpy(dtype=np.float64)
+    closes = x.close.to_numpy(dtype=np.float64)
+    atrs = x.atr.to_numpy(dtype=np.float64)
     timestamps = x.timestamp
+    rows = _simulate_core(signals, opens, highs, lows, closes, atrs, start_i, end_i, cfg["atr_mult"], cfg["rr"])
+    reasons = {0: "SL", 1: "TP", 2: "TIME_END"}
     trades = []
-    i = max(start_i, 220)
-    while i < end_i - 1:
-        if not signals[i]:
-            i += 1
-            continue
-        entry_i = i + 1
-        entry = opens[entry_i] * (1 + SLIPPAGE_PER_SIDE)
-        atr = atrs[i]
-        risk = atr * cfg["atr_mult"]
-        if not np.isfinite(risk) or risk <= 0 or entry <= risk:
-            i += 1
-            continue
-        stop = entry - risk
-        target = entry + risk * cfg["rr"]
-        exit_i, exit_price, reason = end_i - 1, closes[end_i - 1], "TIME_END"
-        for j in range(entry_i, end_i):
-            lo, hi = lows[j], highs[j]
-            hit_sl, hit_tp = lo <= stop, hi >= target
-            if hit_sl:  # conservative when both levels touched in one OHLC candle
-                exit_i, exit_price, reason = j, stop, "SL"
-                break
-            if hit_tp:
-                exit_i, exit_price, reason = j, target, "TP"
-                break
-        exit_fill = exit_price * (1 - SLIPPAGE_PER_SIDE)
-        gross_pnl = exit_fill - entry
-        costs = entry * FEE_PER_SIDE + exit_fill * FEE_PER_SIDE
-        net_pnl = gross_pnl - costs
-        trade = {
+    for i, entry_i, exit_i, entry, stop, target, reason, net_r, net_return_pct in rows:
+        trades.append({
             "symbol": cfg.get("symbol", ""),
             "signal_time": str(timestamps.iloc[i]),
             "entry_time": str(timestamps.iloc[entry_i]),
             "exit_time": str(timestamps.iloc[exit_i]),
             "entry": round(entry, 8), "stop": round(stop, 8), "target": round(target, 8),
-            "reason": reason, "net_r": float(net_pnl / risk),
-            "net_return_pct": float(net_pnl / entry * 100),
+            "reason": reasons[reason], "net_r": float(net_r),
+            "net_return_pct": float(net_return_pct),
             "config": json.dumps({k:v for k,v in cfg.items() if k not in ("symbol","ema_col")}, sort_keys=True),
-        }
-        trades.append(trade)
-        i = exit_i + 1
+        })
     return trades
 
 def stats(trades: list[dict]) -> dict:
