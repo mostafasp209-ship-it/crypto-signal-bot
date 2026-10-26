@@ -239,14 +239,14 @@ def main():
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 70/30 split per symbol. Grid is selected on train only.
-    # Expanded 25,920-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
+    # Expanded 103,680-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
     # four trend EMAs and four ATR stop distances.
     grids = itertools.product(
         ["breakout", "pullback", "ema_cross", "macd_cross", "bollinger_breakout"],
         [10, 20, 30, 40, 55, 75],
         [None, 1.2, 1.5],
         [None, 20, 25],
-        [None, 45, 50],
+        [None, 40, 45, 50, 55, 60],
         [False, True],
         [False, True],
         [1.0, 1.25, 1.5, 2.0],
@@ -272,7 +272,7 @@ def main():
     results.sort(key=lambda r: (r["train"]["net_expectancy_R"], r["train"]["profit_factor"] or 0), reverse=True)
     (OUT/"all_parameter_results.json").write_text(json.dumps(results, indent=2))
     summary = {
-        "research_scope": "Breakout, EMA20 pullback, EMA20/50 cross, MACD cross and Bollinger breakout; optional volume, ADX, RSI, MACD and Stochastic filters; EMA50/100/150/200 trend filters; fixed 3R target",
+        "research_scope": "103,680-combination grid: breakout, EMA20 pullback, EMA20/50 cross, MACD cross and Bollinger breakout; optional volume, ADX, RSI thresholds 40/45/50/55/60, MACD and Stochastic filters; EMA50/100/150/200 trend filters; fixed 3R target. Indicator families reviewed against TradingView built-ins; no private/invite-only scripts or TradingView proprietary feed assumed.",
         "market": "Binance Spot",
         "symbols_requested": BASES,
         "symbols_downloaded": list(datasets),
@@ -284,7 +284,7 @@ def main():
         "split": "chronological 70% train / 30% untouched holdout",
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
-        "grid_size_expected": 25920,
+        "grid_size_expected": 103680,
         "eligible_holdout_configs": len(eligible),
         "best_holdout_configs": eligible[:10],
         "best_train_configs": results[:5],
