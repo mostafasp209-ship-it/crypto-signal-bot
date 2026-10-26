@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Walk-forward parameter research for the V3 4h spot-long breakout.
+"""Comparative research of spot-long entry styles and indicator filters at a fixed 3R target.
 Downloads public Binance Spot klines; never places orders. Conservative OHLC fills:
 if SL and TP are touched in the same candle, SL is assumed first.
 """
@@ -96,19 +96,29 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     for lb in [20, 30, 40, 55]:
         x[f"break_{lb}"] = x.high.shift(1).rolling(lb, min_periods=lb).max()
     x["vol_ratio"] = x.volume / x.vol_avg.replace(0, np.nan)
+    delta = x.close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rs = gain / loss.replace(0, np.nan)
+    x["rsi"] = 100 - (100 / (1 + rs))
+    ema12 = x.close.ewm(span=12, adjust=False, min_periods=12).mean()
+    ema26 = x.close.ewm(span=26, adjust=False, min_periods=26).mean()
+    x["macd"] = ema12 - ema26
+    x["macd_signal"] = x["macd"].ewm(span=9, adjust=False, min_periods=9).mean()
+    x["ema20"] = x.close.ewm(span=20, adjust=False, min_periods=20).mean()
     return x
 
 
 def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> list:
     """Simulate one strictly bounded time segment; positions cannot leak across split."""
     x = df.reset_index(drop=True)
-    signals = (
-        (x.close > x[f"break_{cfg['lookback']}"]) &
-        (x.vol_ratio >= cfg["vol_mult"]) &
-        (x.adx >= cfg["adx_min"]) &
-        (x.close > x[cfg["ema_col"]]) &
-        x.atr.notna()
-    ).fillna(False).to_numpy()
+    trend = x.close > x[cfg["ema_col"]]
+    setup = (x.close > x[f"break_{cfg['lookback']}"]) if cfg["style"] == "breakout" else ((x.close > x.ema20) & (x.low.shift(1) <= x.ema20.shift(1)) & (x.close.shift(1) <= x.ema20.shift(1)))
+    vol_ok = pd.Series(True, index=x.index) if cfg["vol_mult"] is None else x.vol_ratio >= cfg["vol_mult"]
+    adx_ok = pd.Series(True, index=x.index) if cfg["adx_min"] is None else x.adx >= cfg["adx_min"]
+    rsi_ok = pd.Series(True, index=x.index) if cfg["rsi_min"] is None else x.rsi >= cfg["rsi_min"]
+    macd_ok = (x.macd > x.macd_signal) if cfg["macd_filter"] else pd.Series(True, index=x.index)
+    signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & x.atr.notna()).fillna(False).to_numpy()
     trades = []
     i = max(start_i, 220)
     while i < end_i - 1:
@@ -190,16 +200,13 @@ def main():
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 70/30 split per symbol. Grid is selected on train only.
     grids = itertools.product(
-        [20, 30, 40, 55],       # breakout lookback
-        [1.2, 1.5, 1.8],        # volume multiple
-        [20, 25, 32],           # ADX minimum
-        [1.5, 2.0, 2.5],        # ATR stop
-        [2.0, 3.0],             # target R multiple
-        ["ema100", "ema200"],   # trend filter
+        ["breakout", "pullback"], [20, 30, 40, 55], [None, 1.2, 1.5],
+        [None, 20, 25], [None, 50, 55], [False, True], [1.5, 2.0], ["ema100", "ema200"]
     )
     results = []
-    for lookback, vol_mult, adx_min, atr_mult, rr, ema_col in grids:
-        cfg = {"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
+    for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, atr_mult, ema_col in grids:
+        rr = 3.0
+        cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
         tr_all, te_all = [], []
         for symbol, df in datasets.items():
             split_at = int(len(df)*0.70)
@@ -216,6 +223,7 @@ def main():
     results.sort(key=lambda r: (r["train"]["net_expectancy_R"], r["train"]["profit_factor"] or 0), reverse=True)
     (OUT/"all_parameter_results.json").write_text(json.dumps(results, indent=2))
     summary = {
+        "research_scope": "Breakout vs EMA20 pullback; optional volume, ADX, RSI and MACD filters; fixed 3R target",
         "market": "Binance Spot",
         "symbols_requested": BASES,
         "symbols_downloaded": list(datasets),
@@ -230,7 +238,7 @@ def main():
         "eligible_holdout_configs": len(eligible),
         "best_holdout_configs": eligible[:10],
         "best_train_configs": results[:5],
-        "warning": "Grid search is exploratory. 70% win rate and 3R are targets, not promises; inspect holdout trades and regime stability before deployment."
+        "warning": "Grid search is exploratory and prone to selection bias. 70% win rate and 3R are targets, not promises; validate via walk-forward and regime stability before deployment."
     }
     (OUT/"summary.json").write_text(json.dumps(summary, indent=2))
     with (OUT/"summary.md").open("w") as f:
@@ -240,10 +248,10 @@ def main():
         if not eligible:
             f.write("No configuration met minimum trade counts on train and holdout. Do not claim a validated edge.\n")
         else:
-            f.write("| Lookback | Vol x | ADX | SL ATR x | Target R | EMA | Test trades | Win rate | Expectancy (R) | PF | Max DD (R) |\n|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---:|\n")
-            for r in eligible[:10]:
+            f.write("| Style | Lookback | Vol x | ADX | RSI min | MACD | SL ATR x | Target R | EMA | Test trades | Win rate | Expectancy (R) | PF | Max DD (R) |\n|---|---:|---:|---:|---:|---|---:|---:|---|---:|---:|---:|---:|---:|\n")
+            for r in eligible[:20]:
                 s=r["test"]
-                f.write(f"| {r['lookback']} | {r['vol_mult']} | {r['adx_min']} | {r['atr_mult']} | {r['rr']} | {r['ema_col']} | {s['trades']} | {s['win_rate_pct']}% | {s['net_expectancy_R']} | {s['profit_factor']} | {s['max_drawdown_R']} |\n")
+                f.write(f"| {r['style']} | {r['lookback']} | {r['vol_mult']} | {r['adx_min']} | {r['rsi_min']} | {r['macd_filter']} | {r['atr_mult']} | {r['rr']} | {r['ema_col']} | {s['trades']} | {s['win_rate_pct']}% | {s['net_expectancy_R']} | {s['profit_factor']} | {s['max_drawdown_R']} |\n")
         f.write("\n## Notes\n\n")
         f.write("- Entry occurs at the next candle open, not at the signal close.\n- When stop and target are both touched in one candle, stop is counted first.\n- Fixed target backtest is a research variant and is not the current Chandelier runner implementation.\n- This is spot-long only; no shorts, funding, or leverage.\n- 3R target with 70% win rate is an unusually ambitious combination and is not assumed achievable.\n")
     print("SUMMARY_JSON")
