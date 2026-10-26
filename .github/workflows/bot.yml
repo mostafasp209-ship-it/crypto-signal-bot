@@ -1,6 +1,9 @@
 name: Crypto Signal Pro + Telegram Panel
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     # Telegram panel polling.
     - cron: "*/5 * * * *"
