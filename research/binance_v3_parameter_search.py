@@ -241,9 +241,11 @@ def main():
     # Chronological 70/30 split per symbol. Grid is selected on train only.
     # Expanded 103,680-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
     # four trend EMAs and four ATR stop distances.
-    grids = itertools.product(
+    # Avoid redundant configurations: lookback only changes breakout entries.
+    # The old Cartesian product repeated each non-breakout setup six times.
+    grid_axes = itertools.product(
         ["breakout", "pullback", "ema_cross", "macd_cross", "bollinger_breakout"],
-        [10, 20, 30, 40, 55, 75],
+        [None, 10, 20, 30, 40, 55, 75],
         [None, 1.2, 1.5],
         [None, 20, 25],
         [None, 40, 45, 50, 55, 60],
@@ -252,8 +254,20 @@ def main():
         [1.0, 1.25, 1.5, 2.0],
         ["ema50", "ema100", "ema150", "ema200"]
     )
+    grids = (
+        (style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col)
+        for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col in grid_axes
+        if (style == "breakout" and lookback is not None) or (style != "breakout" and lookback is None)
+    )
     results = []
-    for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col in grids:
+    total_configs = 34560
+    started = time.time()
+    for config_i, (style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col) in enumerate(grids, 1):
+        if config_i == 1 or config_i % 250 == 0:
+            elapsed = time.time() - started
+            rate = config_i / max(elapsed, 1e-9)
+            eta_min = (total_configs - config_i) / max(rate, 1e-9) / 60
+            print("PROGRESS {}/{} ({:.1f}%) | {:.2f} configs/s | ETA {:.1f} min".format(config_i, total_configs, 100*config_i/total_configs, rate, eta_min), flush=True)
         rr = 3.0
         cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"stoch_filter":stoch_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
         tr_all, te_all = [], []
@@ -284,7 +298,8 @@ def main():
         "split": "chronological 70% train / 30% untouched holdout",
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
-        "grid_size_expected": 103680,
+        "grid_size_expected": total_configs,
+        "grid_optimization": "Removed sixfold duplicate non-breakout configurations; lookback is now varied only for breakout setups. Uses existing Numba-compiled OHLC simulator and periodic ETA logs.",
         "eligible_holdout_configs": len(eligible),
         "best_holdout_configs": eligible[:10],
         "best_train_configs": results[:5],
