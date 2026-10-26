@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-URL = "https://api.binance.com/api/v3/klines"
+URLS = ["https://data-api.binance.vision/api/v3/klines", "https://api.binance.us/api/v3/klines", "https://api.binance.com/api/v3/klines"]
 COLS = ["open_time", "open", "high", "low", "close", "volume",
         "close_time", "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
 FEE = 0.0004  # approximate fee per side; slippage is not included
@@ -23,8 +23,21 @@ def fetch_klines(symbol="BTCUSDT", interval="4h", limit=5000):
             params = {"symbol": symbol, "interval": interval, "limit": n}
             if end_time is not None:
                 params["endTime"] = end_time
-            response = session.get(URL, params=params, timeout=30)
-            response.raise_for_status()
+            response = None
+            errors = []
+            for endpoint in URLS:
+                try:
+                    candidate = session.get(endpoint, params=params, timeout=30)
+                    if candidate.status_code in (403, 451):
+                        errors.append(f"{endpoint}: HTTP {candidate.status_code}")
+                        continue
+                    candidate.raise_for_status()
+                    response = candidate
+                    break
+                except requests.RequestException as exc:
+                    errors.append(f"{endpoint}: {exc}")
+            if response is None:
+                raise RuntimeError("All Binance market-data endpoints failed: " + " | ".join(errors))
             batch = response.json()
             if not batch:
                 break
