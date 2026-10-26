@@ -1890,7 +1890,7 @@ def format_signal(signal):
 
     if is_v3:
         lines.extend([
-            "Exit plan  · Dynamic; final RR depends on trailing stop",
+            "RR نهایی: متغیر  · Dynamic; depends on trailing stop",
             "Validation  · Live-market performance not yet established",
         ])
     else:
