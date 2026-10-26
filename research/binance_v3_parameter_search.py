@@ -106,6 +106,15 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     x["macd"] = ema12 - ema26
     x["macd_signal"] = x["macd"].ewm(span=9, adjust=False, min_periods=9).mean()
     x["ema20"] = x.close.ewm(span=20, adjust=False, min_periods=20).mean()
+    x["ema50"] = x.close.ewm(span=50, adjust=False, min_periods=50).mean()
+    x["ema150"] = x.close.ewm(span=150, adjust=False, min_periods=150).mean()
+    low14 = x.low.rolling(14, min_periods=14).min()
+    high14 = x.high.rolling(14, min_periods=14).max()
+    x["stoch_k"] = 100 * (x.close - low14) / (high14 - low14).replace(0, np.nan)
+    x["stoch_d"] = x["stoch_k"].rolling(3, min_periods=3).mean()
+    x["bb_mid"] = x.close.rolling(20, min_periods=20).mean()
+    x["bb_std"] = x.close.rolling(20, min_periods=20).std()
+    x["bb_upper"] = x.bb_mid + 2 * x.bb_std
     return x
 
 
@@ -155,12 +164,22 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
     """Simulate one strictly bounded time segment; positions cannot leak across split."""
     x = df.reset_index(drop=True)
     trend = x.close > x[cfg["ema_col"]]
-    setup = (x.close > x[f"break_{cfg['lookback']}"]) if cfg["style"] == "breakout" else ((x.close > x.ema20) & (x.low.shift(1) <= x.ema20.shift(1)) & (x.close.shift(1) <= x.ema20.shift(1)))
+    if cfg["style"] == "breakout":
+        setup = x.close > x[f"break_{cfg['lookback']}"]
+    elif cfg["style"] == "pullback":
+        setup = (x.close > x.ema20) & (x.low.shift(1) <= x.ema20.shift(1)) & (x.close.shift(1) <= x.ema20.shift(1))
+    elif cfg["style"] == "ema_cross":
+        setup = (x.ema20 > x.ema50) & (x.ema20.shift(1) <= x.ema50.shift(1))
+    elif cfg["style"] == "macd_cross":
+        setup = (x.macd > x.macd_signal) & (x.macd.shift(1) <= x.macd_signal.shift(1))
+    else:
+        setup = x.close > x.bb_upper)
     vol_ok = pd.Series(True, index=x.index) if cfg["vol_mult"] is None else x.vol_ratio >= cfg["vol_mult"]
     adx_ok = pd.Series(True, index=x.index) if cfg["adx_min"] is None else x.adx >= cfg["adx_min"]
     rsi_ok = pd.Series(True, index=x.index) if cfg["rsi_min"] is None else x.rsi >= cfg["rsi_min"]
     macd_ok = (x.macd > x.macd_signal) if cfg["macd_filter"] else pd.Series(True, index=x.index)
-    signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & x.atr.notna()).fillna(False).to_numpy(dtype=np.bool_)
+    stoch_ok = (x.stoch_k > x.stoch_d) & (x.stoch_k < 80) if cfg["stoch_filter"] else pd.Series(True, index=x.index)
+    signals = (setup & vol_ok & adx_ok & trend & rsi_ok & macd_ok & stoch_ok & x.atr.notna()).fillna(False).to_numpy(dtype=np.bool_)
     opens = x.open.to_numpy(dtype=np.float64)
     highs = x.high.to_numpy(dtype=np.float64)
     lows = x.low.to_numpy(dtype=np.float64)
@@ -220,22 +239,23 @@ def main():
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 70/30 split per symbol. Grid is selected on train only.
-    # 5,184 deterministic combinations: styles, breakout windows, optional filters,
-    # RSI/MACD confirmations, stop distances and long-term trend EMAs.
+    # Expanded 25,920-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
+    # four trend EMAs and four ATR stop distances.
     grids = itertools.product(
-        ["breakout", "pullback"],
+        ["breakout", "pullback", "ema_cross", "macd_cross", "bollinger_breakout"],
         [10, 20, 30, 40, 55, 75],
         [None, 1.2, 1.5],
         [None, 20, 25],
         [None, 45, 50],
         [False, True],
+        [False, True],
         [1.0, 1.25, 1.5, 2.0],
-        ["ema100", "ema200"]
+        ["ema50", "ema100", "ema150", "ema200"]
     )
     results = []
-    for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, atr_mult, ema_col in grids:
+    for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col in grids:
         rr = 3.0
-        cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
+        cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"stoch_filter":stoch_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
         tr_all, te_all = [], []
         for symbol, df in datasets.items():
             split_at = int(len(df)*0.70)
@@ -252,7 +272,7 @@ def main():
     results.sort(key=lambda r: (r["train"]["net_expectancy_R"], r["train"]["profit_factor"] or 0), reverse=True)
     (OUT/"all_parameter_results.json").write_text(json.dumps(results, indent=2))
     summary = {
-        "research_scope": "Breakout vs EMA20 pullback; optional volume, ADX, RSI and MACD filters; fixed 3R target",
+        "research_scope": "Breakout, EMA20 pullback, EMA20/50 cross, MACD cross and Bollinger breakout; optional volume, ADX, RSI, MACD and Stochastic filters; EMA50/100/150/200 trend filters; fixed 3R target",
         "market": "Binance Spot",
         "symbols_requested": BASES,
         "symbols_downloaded": list(datasets),
@@ -264,7 +284,7 @@ def main():
         "split": "chronological 70% train / 30% untouched holdout",
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
-        "grid_size_expected": 5184,
+        "grid_size_expected": 25920,
         "eligible_holdout_configs": len(eligible),
         "best_holdout_configs": eligible[:10],
         "best_train_configs": results[:5],
