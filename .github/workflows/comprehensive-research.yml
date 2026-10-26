@@ -1,0 +1,58 @@
+name: Comprehensive Strategy Family Lab
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Binance Strategy Parameter Research"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comprehensive-strategy-lab
+  cancel-in-progress: false
+
+jobs:
+  lab:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate research lab
+        run: python -m py_compile research/comprehensive_strategy_lab.py
+
+      - name: Run comprehensive family comparison
+        timeout-minutes: 38
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/comprehensive_strategy_lab.py
+
+      - name: Upload comprehensive research reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprehensive-strategy-family-lab
+          path: |
+            research_results/comprehensive/
+            research_cache/
+          if-no-files-found: warn
+          retention-days: 30
