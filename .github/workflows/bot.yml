@@ -45,6 +45,22 @@ jobs:
       - name: Run strategy and position-management tests
         run: python -m unittest discover -s tests -v
 
+      - name: Research V3 parameters on Binance Spot history
+        if: github.event_name == 'push'
+        timeout-minutes: 15
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/binance_v3_parameter_search.py
+
+      - name: Upload Binance research report
+        if: always() && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-v3-parameter-research
+          path: research_results/
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Run market scanner (every 15 minutes)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2,17,32,47 * * * *'
         env:
