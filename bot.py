@@ -1610,16 +1610,16 @@ def update_open_signals(state, manager):
         ):
             if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
                 events.append(
-                    f"🎯 <b>برداشت جزئی V3 ثبت شد</b>\\n{header}\\n"
-                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\\n"
-                    f"یک‌سوم موقعیت در +0.75R ثبت شد؛ استاپ دوسوم باقی‌مانده به نقطه ورود منتقل شد.\\n"
+                    f"🎯 <b>برداشت جزئی V3 ثبت شد</b>\n{header}\n"
+                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\n"
+                    f"یک‌سوم موقعیت در +0.75R ثبت شد؛ استاپ دوسوم باقی‌مانده به نقطه ورود منتقل شد.\n"
                     f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
                 )
             else:
                 events.append(
-                    f"🎯 <b>TP1 فعال شد</b>\\n{header}\\n"
-                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\\n"
-                    f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\\n"
+                    f"🎯 <b>TP1 فعال شد</b>\n{header}\n"
+                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\n"
+                    f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\n"
                     f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
                 )
         if (
@@ -1631,8 +1631,8 @@ def update_open_signals(state, manager):
             and safe_float(signal.get("sl")) > before["sl"]
         ):
             events.append(
-                f"📈 <b>تریلینگ استاپ به‌روزرسانی شد</b>\\n{header}\\n"
-                f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>\\n"
+                f"📈 <b>تریلینگ استاپ به‌روزرسانی شد</b>\n{header}\n"
+                f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>\n"
                 f"بالاترین کلوز ثبت‌شده: <b>{fmt_price(signal.get('highest_close_since_entry'))}</b>"
             )
 
@@ -1787,30 +1787,28 @@ def format_signal(signal):
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
         f"({signal['risk_pct']:.2f}%)\n"
         + (
-            f"🎯 هدف نهایی: <b>{fmt_price(signal['tp1'])}</b> — 100%\\n"
+            f"🎯 هدف نهایی: <b>{fmt_price(signal['tp1'])}</b> — 100%\n"
             if signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
             else
             (
-                f"🎯 برداشت اول: <b>{fmt_price(signal['tp1'])}</b> — یک‌سوم در +0.75R\\n"
-                f"📈 ادامه موقعیت: دوسوم باقی‌مانده با تریلینگ چَندلیر 3×ATR\\n"
+                f"🎯 برداشت اول: <b>{fmt_price(signal['tp1'])}</b> — یک‌سوم در +0.75R\n"
+                f"📈 ادامه موقعیت: دوسوم باقی‌مانده با تریلینگ چَندلیر 3×ATR\n"
                 if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
                 else
-                f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\\n"
-                f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\\n"
-                f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\\n"
+                f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
+                f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
+                f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
             )
         )
         + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
         + (
-            "📐 RR نهایی: متغیر (بسته به تریلینگ استاپ)\\n\\n"
+            "📐 RR نهایی: متغیر (بسته به تریلینگ استاپ)\n\n"
             if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-            else f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\\n\\n"
+            else f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
         )
-
-
-        f"💰 Funding: {funding_text}\n"
+        + f"💰 Funding: {funding_text}\n"
         f"📊 OI: {oi_text}\n"
         f"⏱ Expiry: 48h\n"
         f"⚖️ ریسک اسمی: ${signal['risk_usd']:.2f}"
@@ -1903,7 +1901,7 @@ def scan_market(manager, state):
                     stats["no_setup_or_score"] += 1
                     break
 
-                if duplicate_exists(state, symbol, signal["side"]):
+                if duplicate_exists(state, symbol, signal["side"]) or duplicate_on_candle_exists(state, signal):
                     stats["duplicates"] += 1
                     break
 
