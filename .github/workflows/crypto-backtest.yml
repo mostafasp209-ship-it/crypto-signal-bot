@@ -1,9 +1,6 @@
 name: BTCUSDT 4h strategy backtest
 
 on:
-  push:
-    branches:
-      - backtest/run-btcusdt-4h-strategies
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
