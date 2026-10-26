@@ -1818,10 +1818,11 @@ def format_signal(signal):
     news = signal.get("news", {}) or {}
     news_label = html.escape(str(news.get("label", "Unavailable")))
     news_adjustment = safe_float(news.get("score_adjustment"), 0) or 0
+    news_items = news.get("headlines", []) or []
     headline_lines = "".join(
-        f"  • {html.escape(str(item.get('title', ''))[:140])}\n"
-        for item in news.get("headlines", [])[:2]
-    )
+        f"  • {html.escape(str(item.get('title', ''))[:140])}\\n"
+        for item in news_items[:3]
+    ).rstrip("\\n")
     trend = html.escape(str(signal.get("trend", "N/A")))
     exchange = html.escape(str(signal.get("exchange", "N/A")))
     symbol = html.escape(str(signal.get("symbol", "N/A")))
@@ -1836,6 +1837,16 @@ def format_signal(signal):
         f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
         + (f"  <i>(-{risk_pct:.2f}%)</i>" if risk_pct is not None else ""),
     ]
+
+    lines.extend([
+        "",
+        "<b>NEWS CHECK</b>",
+        f"Status  · {news_label}  |  Score adjustment  · {news_adjustment:+g}",
+    ])
+    if headline_lines:
+        lines.extend(["Recent relevant headlines:", headline_lines])
+    else:
+        lines.append("No relevant headline found in the feeds checked; this does not mean the market has no news.")
 
     if is_v3:
         lines.extend([
@@ -1883,7 +1894,6 @@ def format_signal(signal):
     lines.extend([
         "",
         "<b>CONTEXT</b>",
-        f"News  · {news_label} (score adjustment {news_adjustment:+g})",
         f"Funding  · {funding_text}  |  OI  · {oi_text}",
         f"Signal expiry  · 48h",
     ])
