@@ -140,43 +140,72 @@ def backtest(df, start, end, strategy, p):
 
 def main():
     df=indicators(fetch_klines())
-    split=int(len(df)*.70)
-    print(f"DATA: BTCUSDT 4h | closed={len(df)} | {df.open_time.iloc[0]} -> {df.close_time.iloc[-1]}")
-    print(f"CHRONOLOGICAL SPLIT: train={split} candles; test={len(df)-split} candles")
+    n=len(df)
+    train_end=int(n*0.60)
+    val_end=int(n*0.80)
+    print(f"DATA: BTCUSDT 4h | closed={n} | {df.open_time.iloc[0]} -> {df.close_time.iloc[-1]}")
+    print(f"CHRONOLOGICAL SPLIT: train={train_end}; validation={val_end-train_end}; final_test={n-val_end}")
     rows=[]
     bo_grid=[]
-    for rr,vm,am,lb,trend in itertools.product([1.5,2.0,2.5,3.0],[1.0,1.5,2.0],[1.0,1.5],[10,20,30],[True,False]):
+    for rr,vm,am,lb,trend in itertools.product([1.0,1.2,1.5,2.0],[1.0,1.5,2.0],[0.8,1.0,1.2],[5,10,20],[True,False]):
         bo_grid.append({"rr":rr,"vm":vm,"am":am,"lb":lb,"trend":trend})
     mc_grid=[]
-    for rr,vm,am,tol,lb,mode in itertools.product([1.5,2.0,2.5],[1.5,2.0],[1.0,1.5],[0.5,1.0,1.5],[50,100],["resistance","fib","either"]):
+    for rr,vm,am,tol,lb,mode in itertools.product([1.0,1.5,2.0],[1.5,2.0],[1.0,1.5],[0.5,1.0,1.5],[50,100],["fib","either"]):
         mc_grid.append({"rr":rr,"vm":vm,"am":am,"tol":tol,"lb":lb,"mode":mode})
     for name,grid in [("BO",bo_grid),("MC",mc_grid)]:
         print(f"GRID {name}: {len(grid)} parameter sets",flush=True)
-        for n,p in enumerate(grid,1):
-            tr=metrics(backtest(df,201,split,name,p))
-            te=metrics(backtest(df,split,len(df)-1,name,p))
-            rows.append({"strategy":name,"params":json.dumps(p,sort_keys=True),**{"train_"+k:v for k,v in tr.items()},**{"test_"+k:v for k,v in te.items()}})
-            if n%100==0: print(f"  {name}: {n}/{len(grid)}",flush=True)
+        for k,p in enumerate(grid,1):
+            tr=metrics(backtest(df,201,train_end,name,p))
+            va=metrics(backtest(df,train_end,val_end,name,p))
+            te=metrics(backtest(df,val_end,n-1,name,p))
+            rows.append({
+                "strategy":name,"params":json.dumps(p,sort_keys=True),
+                **{"train_"+key:value for key,value in tr.items()},
+                **{"val_"+key:value for key,value in va.items()},
+                **{"test_"+key:value for key,value in te.items()},
+            })
+            if k%100==0: print(f"  {name}: {k}/{len(grid)}",flush=True)
+
     out=Path("backtest-results"); out.mkdir(exist_ok=True)
     result=pd.DataFrame(rows)
     result.to_csv(out/"optimization.csv",index=False)
-    # Select only on training set, then report those exact params on untouched test set.
-    train_candidates=result[(result.train_n>=30)&(result.train_pf.apply(lambda x: isinstance(x,(float,int)) and x>1.0))].copy()
-    train_candidates=train_candidates.sort_values(["train_sum_r","train_pf"],ascending=False)
-    print("\nBEST BY TRAIN SUM R (>=30 train trades, PF>1):")
-    print(train_candidates.head(10).to_string(index=False) if len(train_candidates) else "No eligible candidates")
-    print("\nTEST RESULTS FOR TOP TRAIN-SELECTED CANDIDATES:")
-    cols=["strategy","params","train_n","train_wr","train_sum_r","train_pf","test_n","test_wr","test_sum_r","test_pf","test_maxdd"]
-    print(train_candidates.head(15)[cols].to_string(index=False) if len(train_candidates) else "No eligible candidates")
-    # Also provide exploratory test leaderboard, clearly marked as selection-biased.
-    test_candidates=result[(result.test_n>=20)&result.test_pf.apply(lambda x:isinstance(x,(float,int)) and x>0)].sort_values(["test_sum_r","test_pf"],ascending=False)
-    print("\nEXPLORATORY TEST LEADERBOARD (selection-biased; do NOT treat as validation):")
-    print(test_candidates.head(10)[cols].to_string(index=False) if len(test_candidates) else "No test candidates with >=20 trades")
-    summary={"candles":len(df),"start":str(df.open_time.iloc[0]),"end":str(df.close_time.iloc[-1]),"split_index":split,
-             "train_end":str(df.close_time.iloc[split-1]),"test_start":str(df.open_time.iloc[split]),
+
+    def numeric_gt_one(x):
+        return isinstance(x,(float,int,np.floating,np.integer)) and x>1.0
+    train_candidates=result[(result.train_n>=30)&result.train_pf.apply(numeric_gt_one)].copy()
+    if train_candidates.empty:
+        train_candidates=result[result.train_n>=30].copy()
+    # Use validation only to choose candidates; final test is not used for selection.
+    eligible=train_candidates[(train_candidates.val_n>=15)&
+        train_candidates.val_pf.apply(numeric_gt_one)&(train_candidates.val_sum_r>0)].copy()
+    if eligible.empty:
+        eligible=train_candidates[train_candidates.val_n>=15].copy()
+    eligible=eligible.sort_values(["val_sum_r","val_pf","val_wr"],ascending=False)
+
+    print("\nTOP 10 SELECTED USING TRAIN + VALIDATION ONLY (FINAL TEST NOT USED FOR SELECTION):")
+    cols=["strategy","params","train_n","train_wr","train_sum_r","train_pf",
+          "val_n","val_wr","val_sum_r","val_pf","test_n","test_wr","test_sum_r","test_pf","test_maxdd"]
+    print(eligible.head(10)[cols].to_string(index=False) if len(eligible) else "No candidate met minimum trade counts")
+
+    if len(eligible):
+        best=eligible.iloc[0]
+        print("\nFINAL UNTOUCHED TEST — BEST VALIDATION CANDIDATE:")
+        print(f'Strategy={best["strategy"]} | params={best["params"]}')
+        print(f'Train: n={best["train_n"]}, WR={best["train_wr"]}%, sumR={best["train_sum_r"]}, PF={best["train_pf"]}')
+        print(f'Validation: n={best["val_n"]}, WR={best["val_wr"]}%, sumR={best["val_sum_r"]}, PF={best["val_pf"]}')
+        print(f'FINAL TEST: n={best["test_n"]}, WR={best["test_wr"]}%, avgR={best["test_avg_r"]}, sumR={best["test_sum_r"]}, PF={best["test_pf"]}, MaxDD={best["test_maxdd"]}R')
+    else:
+        print("\nNo sufficiently traded candidate survived train/validation filters; no best strategy can be recommended.")
+
+    summary={"candles":n,"start":str(df.open_time.iloc[0]),"end":str(df.close_time.iloc[-1]),
+             "train_end":str(df.close_time.iloc[train_end-1]),
+             "validation_end":str(df.close_time.iloc[val_end-1]),
+             "final_test_start":str(df.open_time.iloc[val_end]),
              "fee_per_side":FEE,"slippage_included":False,"overlapping_trades":False,
+             "split_percentages":{"train":60,"validation":20,"final_test":20},
              "strategy_sets":{"BO":len(bo_grid),"MC":len(mc_grid)}}
     (out/"summary.json").write_text(json.dumps(summary,indent=2),encoding="utf-8")
     print("\nSaved backtest-results/optimization.csv and summary.json")
-    print("CAUTION: parameter search is large; test leaderboard is selection-biased. Prefer train-selected candidates and run a second untouched period.")
+    print("CAUTION: do not optimize on the final test segment; fees are approximated and slippage is excluded.")
+
 if __name__=="__main__": main()
