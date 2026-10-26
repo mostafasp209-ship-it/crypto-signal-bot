@@ -1111,137 +1111,173 @@ def calculate_levels(side, entry, atr, df):
 
 def calculate_crypto_strategy_gates(df):
     """
-    Experimental long-only breakout + volume strategy.
-    Parameters taken from the best train/validation candidate in the BTCUSDT 4h
-    research run: lookback=10, volume multiplier=1.5, ATR stop=1.0,
-    target=1.5R, no MA200 trend gate. The untouched test was negative, so this
-    is a research deployment, not a validated profitability claim.
+    V3 spot-long breakout strategy using only fully closed 4h candles.
+    The strictest of the 10/20/30-bar levels is used (equivalent to the 30-bar high).
+    Entry gates: volume >= 1.5x prior 20-bar average, close > EMA200, ADX(14) > 32.
     """
     result = {
         "atr": None, "volume_avg": None, "volume_ratio": None,
-        "breakout_level": None, "lookback": 10,
-        "volume_multiplier": 1.5, "atr_multiplier": 1.0,
-        "target_r": 1.5, "signal_long": False,
+        "breakout_level": None, "lookback": 30,
+        "lookbacks": [10, 20, 30], "volume_multiplier": 1.5,
+        "atr_multiplier": 2.0, "partial_r": 0.75, "partial_pct": 1.0 / 3.0,
+        "chandelier_atr_multiplier": 3.0, "ema200": None, "adx": None,
+        "signal_long": False,
     }
-    if df is None or len(df) < 30:
+    required = {"open", "high", "low", "close", "volume"}
+    if df is None or len(df) < 220 or not required.issubset(df.columns):
         return result
 
     work = df.copy()
     for col in ("open", "high", "low", "close", "volume"):
         work[col] = pd.to_numeric(work[col], errors="coerce")
     work = work.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
-    if len(work) < 30:
+    if len(work) < 220:
         return result
 
-    close = work["close"]
-    high = work["high"]
-    low = work["low"]
-    volume = work["volume"]
-
-    previous_close = close.shift(1)
+    close, high, low, volume = work["close"], work["high"], work["low"], work["volume"]
+    prev_close = close.shift(1)
     true_range = pd.concat([
         high - low,
-        (high - previous_close).abs(),
-        (low - previous_close).abs(),
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
     ], axis=1).max(axis=1)
     atr = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
 
-    # Shift the average so the breakout candle cannot inflate its own volume baseline.
+    up_move, down_move = high.diff(), -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=work.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=work.index)
+    smoothed_plus = plus_dm.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    smoothed_minus = minus_dm.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+    plus_di = 100.0 * smoothed_plus / atr.replace(0, np.nan)
+    minus_di = 100.0 * smoothed_minus / atr.replace(0, np.nan)
+    di_sum = (plus_di + minus_di).replace(0, np.nan)
+    dx = (100.0 * (plus_di - minus_di).abs() / di_sum).replace([np.inf, -np.inf], np.nan)
+    adx = dx.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
+
+    levels = {
+        lookback: high.shift(1).rolling(lookback, min_periods=lookback).max()
+        for lookback in (10, 20, 30)
+    }
+    # Levels are shifted: the breakout candle never contributes to its own level.
+    breakout = pd.concat(list(levels.values()), axis=1).max(axis=1)
     volume_avg = volume.rolling(20, min_periods=20).mean().shift(1)
-    prior_high = high.shift(1).rolling(10, min_periods=10).max()
+    ema200 = close.ewm(span=200, adjust=False, min_periods=200).mean()
 
-    atr_now = safe_float(atr.iloc[-1])
-    avg_now = safe_float(volume_avg.iloc[-1])
-    close_now = safe_float(close.iloc[-1])
-    vol_now = safe_float(volume.iloc[-1])
-    breakout = safe_float(prior_high.iloc[-1])
-
+    values = {
+        "atr": safe_float(atr.iloc[-1]),
+        "volume_avg": safe_float(volume_avg.iloc[-1]),
+        "close": safe_float(close.iloc[-1]),
+        "volume": safe_float(volume.iloc[-1]),
+        "breakout": safe_float(breakout.iloc[-1]),
+        "ema200": safe_float(ema200.iloc[-1]),
+        "adx": safe_float(adx.iloc[-1]),
+    }
     result.update({
-        "atr": atr_now,
-        "volume_avg": avg_now,
-        "volume_ratio": (vol_now / avg_now) if vol_now is not None and avg_now and avg_now > 0 else None,
-        "breakout_level": breakout,
+        "atr": values["atr"],
+        "volume_avg": values["volume_avg"],
+        "volume_ratio": (
+            values["volume"] / values["volume_avg"]
+            if values["volume"] is not None and values["volume_avg"] is not None
+            and values["volume_avg"] > 0 else None
+        ),
+        "breakout_level": values["breakout"],
+        "ema200": values["ema200"],
+        "adx": values["adx"],
     })
-    if any(v is None for v in (atr_now, avg_now, close_now, vol_now, breakout)) or atr_now <= 0 or avg_now <= 0:
+    if any(value is None for value in values.values()) or values["atr"] <= 0 or values["volume_avg"] <= 0:
         return result
 
     result["signal_long"] = bool(
-        close_now > breakout and vol_now > 1.5 * avg_now
+        values["close"] > values["breakout"]
+        and values["volume"] >= 1.5 * values["volume_avg"]
+        and values["close"] > values["ema200"]
+        and values["adx"] > 32.0
     )
     return result
 
-
 def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_context=None):
-    """Build a spot BUY signal from the experimental 4h breakout + volume setup."""
+    """Create a V3 spot BUY signal from a confirmed 4h breakout."""
     strategy = calculate_crypto_strategy_gates(df)
     if not strategy["signal_long"]:
         return None
 
-    entry = safe_float(df.iloc[-1]["close"])
+    candle = df.iloc[-1]
+    entry = safe_float(candle.get("close"))
     atr = strategy["atr"]
     if entry is None or entry <= 0 or atr is None or atr <= 0:
         return None
 
     risk_per_unit = atr * strategy["atr_multiplier"]
     sl = entry - risk_per_unit
-    target = entry + strategy["target_r"] * risk_per_unit
-    if sl <= 0 or target <= entry:
+    partial_target = entry + strategy["partial_r"] * risk_per_unit
+    if sl <= 0 or partial_target <= entry:
         return None
 
     risk_pct = risk_per_unit / entry * 100.0
-    # Approximate round-trip fees in the displayed reward-to-risk ratio.
-    gross_reward_per_unit = target - entry
-    net_reward_per_unit = gross_reward_per_unit - (entry + target) * FEE_RATE
-    net_risk_per_unit = risk_per_unit + (entry + sl) * FEE_RATE
-    net_rr = net_reward_per_unit / net_risk_per_unit if net_risk_per_unit > 0 else 0.0
     risk_sized_quantity = RISK_USD / risk_per_unit
     cap_quantity = MAX_POSITION_USD / entry if MAX_POSITION_USD > 0 else risk_sized_quantity
     quantity = min(risk_sized_quantity, cap_quantity)
     position_value = quantity * entry
     actual_risk_usd = quantity * risk_per_unit
+    candle_timestamp = safe_float(candle.get("timestamp"))
     fundamentals = fundamentals or {}
     news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
-    score = 4
+    setup = "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
     components = {
-        "setup": "BREAKOUT_VOLUME_4H_EXPERIMENTAL",
-        "strategy_mode": "breakout_volume",
+        "setup": setup,
+        "strategy_mode": "breakout_adx_ema200_partial_chandelier",
         "timeframe": TIMEFRAME,
-        "lookback": strategy["lookback"],
+        "lookback": 30,
+        "lookbacks_checked": [10, 20, 30],
         "breakout_level": strategy["breakout_level"],
-        "volume": safe_float(df.iloc[-1]["volume"]),
+        "volume": safe_float(candle.get("volume")),
         "volume_avg_20_prev": strategy["volume_avg"],
         "volume_ratio": strategy["volume_ratio"],
         "volume_multiplier": strategy["volume_multiplier"],
         "atr14": atr,
         "atr_multiplier": strategy["atr_multiplier"],
-        "target_r": strategy["target_r"],
-        "out_of_sample_status": "NOT_VALIDATED",
+        "ema200": strategy["ema200"],
+        "adx14": strategy["adx"],
+        "adx_threshold": 32.0,
+        "partial_r": strategy["partial_r"],
+        "partial_pct": strategy["partial_pct"],
+        "chandelier_atr_multiplier": strategy["chandelier_atr_multiplier"],
+        "out_of_sample_status": "NOT_VALIDATED_ON_REAL_MARKET_DATA",
     }
+    created_at = iso_now()
     return {
         "id": f"{symbol.replace('/', '_')}_BUY_{int(time.time())}",
         "symbol": symbol, "exchange": exchange_name, "side": "BUY", "status": "ACTIVE",
-        "strength": "آزمایشی", "score": score, "created_at": iso_now(), "updated_at": iso_now(),
+        "strength": "آزمایشی V3", "score": 4, "created_at": created_at, "updated_at": created_at,
         "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
-        "entry": entry, "sl": sl, "tp1": target, "tp2": target, "tp3": target,
-        "support": None, "resistance": strategy["breakout_level"], "sl_method": "1x_ATR14",
-        "tp_methods": ["1.5R_single_target_split_50_30_20"],
-        "rr": net_rr, "risk_pct": risk_pct,
+        "entry": entry, "sl": sl, "tp1": partial_target, "tp2": None, "tp3": None,
+        "support": None, "resistance": strategy["breakout_level"], "sl_method": "2x_ATR14",
+        "tp_methods": ["partial_1_3_at_0.75R_then_3xATR_chandelier"],
+        # Final RR is path-dependent because the remaining position uses a trailing stop.
+        "rr": None, "risk_pct": risk_pct,
         "initial_risk_per_unit": risk_per_unit, "initial_sl": sl,
         "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
         "position_quantity": quantity, "quantity": quantity, "position_value": position_value,
         "position_capped": quantity + 1e-12 < risk_sized_quantity,
+        "signal_candle_timestamp": candle_timestamp,
+        "last_trailing_candle_ts": candle_timestamp,
+        "highest_close_since_entry": entry,
+        "trailing_active": False,
         "components": components,
         "entry_snapshot": {
-            "timeframe": TIMEFRAME, "setup": components["setup"], "score": score,
+            "timeframe": TIMEFRAME, "setup": setup, "score": 4,
             "breakout_level": strategy["breakout_level"],
-            "volume_ratio": strategy["volume_ratio"],
-            "atr": atr, "sl_method": "1x_ATR14", "tp_method": "1.5R_single_target",
-            "captured_at": iso_now(),
+            "volume_ratio": strategy["volume_ratio"], "atr": atr,
+            "ema200": strategy["ema200"], "adx14": strategy["adx"],
+            "sl_method": "2x_ATR14",
+            "tp_method": "partial_1_3_at_0.75R_then_3xATR_chandelier",
+            "candle_timestamp": candle_timestamp, "captured_at": created_at,
         },
         "trend": "BULL",
         "fundamentals": fundamentals, "news": news_context,
-        "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
-        "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
+        "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
+        "remaining_fraction": 1.0, "realized_pnl": 0.0, "fees_paid": 0.0,
+        "closed_reason": None,
     }
 
 
@@ -1254,6 +1290,20 @@ def duplicate_exists(state, symbol, side):
         if signal.get("symbol") == symbol and signal.get("side") == side:
             if signal.get("status") == "ACTIVE":
                 return True
+    return False
+
+def duplicate_on_candle_exists(state, candidate):
+    """Prevent repeated entries from the same closed 4h breakout candle."""
+    candle_ts = candidate.get("signal_candle_timestamp")
+    if candle_ts is None:
+        return False
+    for signal in state.get("signals", []):
+        if (
+            signal.get("symbol") == candidate.get("symbol")
+            and signal.get("side") == candidate.get("side")
+            and signal.get("signal_candle_timestamp") == candle_ts
+        ):
+            return True
     return False
 
 
@@ -1335,6 +1385,67 @@ def stop_hit(signal, price):
     return price >= sl
 
 
+def update_chandelier_stop(signal, df):
+    """Ratchet the V3 stop using closed-candle highest close minus 3*ATR(14)."""
+    if signal.get("components", {}).get("setup") != "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
+        return False
+    if df is None or len(df) < 20 or not {"high", "low", "close", "timestamp"}.issubset(df.columns):
+        return False
+
+    work = df.copy()
+    for col in ("high", "low", "close", "timestamp"):
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work = work.dropna(subset=["high", "low", "close", "timestamp"]).reset_index(drop=True)
+    if len(work) < 20:
+        return False
+
+    latest_ts = safe_float(work.iloc[-1]["timestamp"])
+    previous_ts = safe_float(signal.get("last_trailing_candle_ts"))
+    if latest_ts is None or (previous_ts is not None and latest_ts <= previous_ts):
+        return False
+
+    entry_ts = safe_float(signal.get("signal_candle_timestamp"))
+    if entry_ts is not None:
+        post_entry = work[work["timestamp"] >= entry_ts]
+    else:
+        post_entry = work
+    if post_entry.empty:
+        post_entry = work.tail(1)
+
+    highest_close = safe_float(post_entry["close"].max())
+    signal["last_trailing_candle_ts"] = latest_ts
+    if highest_close is not None:
+        signal["highest_close_since_entry"] = max(
+            safe_float(signal.get("highest_close_since_entry"), safe_float(signal.get("entry"), 0.0)) or 0.0,
+            highest_close,
+        )
+
+    # Before the first partial, the original 2*ATR stop remains in force.
+    if not signal.get("tp1_hit") or not signal.get("trailing_active"):
+        return False
+
+    close = work["close"]
+    previous_close = close.shift(1)
+    true_range = pd.concat([
+        work["high"] - work["low"],
+        (work["high"] - previous_close).abs(),
+        (work["low"] - previous_close).abs(),
+    ], axis=1).max(axis=1)
+    atr = safe_float(true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean().iloc[-1])
+    peak = safe_float(signal.get("highest_close_since_entry"))
+    entry = safe_float(signal.get("entry"))
+    current_sl = safe_float(signal.get("sl"))
+    if any(value is None for value in (atr, peak, entry, current_sl)) or atr <= 0:
+        return False
+
+    candidate = max(entry, peak - 3.0 * atr)
+    if candidate > current_sl:
+        signal["sl"] = candidate
+        signal["updated_at"] = iso_now()
+        return True
+    return False
+
+
 def manage_signal(signal, current_price):
     if signal.get("status") != "ACTIVE":
         return False
@@ -1359,6 +1470,37 @@ def manage_signal(signal, current_price):
                 return True
         except Exception:
             pass
+
+    is_v3 = (
+        signal.get("components", {}).get("setup")
+        == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+    )
+    if is_v3:
+        # Stop takes priority over an unbooked partial target.
+        if stop_hit(signal, current_price):
+            remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+            if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+                print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
+                return False
+            signal["status"] = "CLOSED"
+            signal["closed_reason"] = "TRAILING_SL" if signal.get("trailing_active") else "SL"
+            signal["updated_at"] = iso_now()
+            return True
+
+        if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+            partial_pct = safe_float(signal.get("components", {}).get("partial_pct"), 1.0 / 3.0)
+            partial_target = safe_float(signal.get("tp1"))
+            if partial_target is None or not close_piece(signal, partial_target, partial_pct, "tp1"):
+                print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 partial exit not booked; leaving trade active")
+                return False
+            entry = safe_float(signal.get("entry"))
+            if entry is None:
+                return False
+            signal["sl"] = max(entry, safe_float(signal.get("sl"), entry) or entry)
+            signal["trailing_active"] = True
+            signal["updated_at"] = iso_now()
+            return True
+        return False
 
     # Stop is checked before new TP levels.
     if stop_hit(signal, current_price):
@@ -1444,9 +1586,19 @@ def update_open_signals(state, manager):
             "tp1_hit": bool(signal.get("tp1_hit")),
             "tp2_hit": bool(signal.get("tp2_hit")),
             "tp3_hit": bool(signal.get("tp3_hit")),
+            "trailing_active": bool(signal.get("trailing_active")),
             "sl": safe_float(signal.get("sl")),
         }
-        changed = manage_signal(signal, price)
+        trailing_updated = False
+        if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
+            try:
+                raw = manager.fetch_ohlcv(exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT)
+                closed_df = closed_candles(raw)
+                trailing_updated = update_chandelier_stop(signal, closed_df)
+            except Exception as exc:
+                print(f"[TRAILING SKIP] {symbol}: {type(exc).__name__}: {exc}")
+
+        changed = manage_signal(signal, price) or trailing_updated
         if not changed:
             continue
 
@@ -1456,12 +1608,34 @@ def update_open_signals(state, manager):
             not before["tp1_hit"] and signal.get("tp1_hit")
             and signal.get("components", {}).get("setup") != "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
         ):
+            if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
+                events.append(
+                    f"🎯 <b>برداشت جزئی V3 ثبت شد</b>\\n{header}\\n"
+                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\\n"
+                    f"یک‌سوم موقعیت در +0.75R ثبت شد؛ استاپ دوسوم باقی‌مانده به نقطه ورود منتقل شد.\\n"
+                    f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
+                )
+            else:
+                events.append(
+                    f"🎯 <b>TP1 فعال شد</b>\\n{header}\\n"
+                    f"قیمت بررسی: <b>{fmt_price(price)}</b>\\n"
+                    f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\\n"
+                    f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
+                )
+        if (
+            signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+            and before["trailing_active"]
+            and signal.get("status") == "ACTIVE"
+            and before["sl"] is not None
+            and safe_float(signal.get("sl")) is not None
+            and safe_float(signal.get("sl")) > before["sl"]
+        ):
             events.append(
-                f"🎯 <b>TP1 فعال شد</b>\n{header}\n"
-                f"قیمت بررسی: <b>{fmt_price(price)}</b>\n"
-                f"۵۰٪ از موقعیت ثبت شد؛ حد ضرر باقی‌مانده به نقطه ورود منتقل شد.\n"
-                f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>"
+                f"📈 <b>تریلینگ استاپ به‌روزرسانی شد</b>\\n{header}\\n"
+                f"SL جدید: <b>{fmt_price(signal.get('sl'))}</b>\\n"
+                f"بالاترین کلوز ثبت‌شده: <b>{fmt_price(signal.get('highest_close_since_entry'))}</b>"
             )
+
         if not before["tp2_hit"] and signal.get("tp2_hit"):
             events.append(
                 f"🥈 <b>TP2 فعال شد</b>\n{header}\n"
@@ -1475,7 +1649,9 @@ def update_open_signals(state, manager):
 
         if before["status"] == "ACTIVE" and signal.get("status") == "CLOSED":
             reason = str(signal.get("closed_reason", "")).upper()
-            if reason == "SL":
+            if reason == "TRAILING_SL":
+                title = "📉 <b>تریلینگ استاپ چَندلیر فعال شد</b>"
+            elif reason == "SL":
                 title = "🛑 <b>حد ضرر (SL) فعال شد</b>"
             elif reason == "TP3":
                 title = "✅ <b>موقعیت با TP3 بسته شد</b>"
@@ -1611,17 +1787,27 @@ def format_signal(signal):
         f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
         f"({signal['risk_pct']:.2f}%)\n"
         + (
-            f"🎯 TP: <b>{fmt_price(signal['tp1'])}</b> — 100%\n"
+            f"🎯 هدف نهایی: <b>{fmt_price(signal['tp1'])}</b> — 100%\\n"
             if signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
             else
-            f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
-            f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
-            f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
+            (
+                f"🎯 برداشت اول: <b>{fmt_price(signal['tp1'])}</b> — یک‌سوم در +0.75R\\n"
+                f"📈 ادامه موقعیت: دوسوم باقی‌مانده با تریلینگ چَندلیر 3×ATR\\n"
+                if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+                else
+                f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\\n"
+                f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\\n"
+                f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\\n"
+            )
         )
         + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
         f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
         f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
-        f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
+        + (
+            "📐 RR نهایی: متغیر (بسته به تریلینگ استاپ)\\n\\n"
+            if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+            else f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\\n\\n"
+        )
 
 
         f"💰 Funding: {funding_text}\n"
@@ -1761,7 +1947,7 @@ def scan_market(manager, state):
             )
         # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
-    signals.sort(key=lambda x: x["rr"], reverse=True)
+    signals.sort(key=lambda x: safe_float(x.get("rr"), 0.0) or 0.0, reverse=True)
     print(
         "[SCAN SUMMARY] "
         f"candidates={stats['candidates']} checked={stats['checked']} "
