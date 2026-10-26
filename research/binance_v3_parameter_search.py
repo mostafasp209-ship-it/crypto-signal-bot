@@ -93,7 +93,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     x["ema200"] = x.close.ewm(span=200, adjust=False, min_periods=200).mean()
     x["ema100"] = x.close.ewm(span=100, adjust=False, min_periods=100).mean()
     x["vol_avg"] = x.volume.rolling(20, min_periods=20).mean().shift(1)
-    for lb in [20, 30, 40, 55]:
+    for lb in [10, 20, 30, 40, 55, 75]:
         x[f"break_{lb}"] = x.high.shift(1).rolling(lb, min_periods=lb).max()
     x["vol_ratio"] = x.volume / x.vol_avg.replace(0, np.nan)
     delta = x.close.diff()
