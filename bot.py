@@ -1781,69 +1781,124 @@ def performance_report(state):
 
 
 def format_signal(signal):
-    side = signal["side"]
-    emoji = "🟢" if side == "BUY" else "🔴"
+    """Render a compact, professional Telegram alert with only actionable levels."""
+    side = str(signal.get("side", "BUY")).upper()
+    is_long = side == "BUY"
+    emoji = "🟢" if is_long else "🔴"
+    components = signal.get("components", {}) or {}
+    setup = components.get("setup", "")
+    is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+    is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
 
-    f = signal.get("fundamentals", {})
-    funding = f.get("funding")
-    oi = f.get("open_interest")
+    entry = safe_float(signal.get("entry"))
+    sl = safe_float(signal.get("sl"))
+    tp1 = safe_float(signal.get("tp1"))
+    support = safe_float(signal.get("support"))
+    resistance = safe_float(signal.get("resistance"))
+    ema200 = safe_float(components.get("ema200"))
+    adx = safe_float(components.get("adx14"))
+    risk_pct = safe_float(signal.get("risk_pct"))
+    rr = safe_float(signal.get("rr"))
+    actual_risk = safe_float(signal.get("actual_risk_usd"))
+    risk_target = safe_float(signal.get("risk_target_usd"))
 
-    funding_text = (
-        f"{funding * 100:.4f}%"
-        if funding is not None else "N/A"
-    )
-    oi_text = (
-        f"{oi:,.2f}"
-        if oi is not None else "N/A"
-    )
+    # Never publish a level on the wrong side of price as "nearby support/resistance".
+    if entry is not None:
+        if support is not None and support >= entry:
+            support = None
+        if resistance is not None and resistance <= entry:
+            resistance = None
 
-    return (
-        f"{emoji} <b>{signal['symbol']} — {side}</b>\n"
-        f"صرافی: {signal['exchange']}\n"
-        f"قدرت: <b>{signal['strength']}</b>\n"
-        f"فیلتر روند: {signal['trend']}\n"
-        f"📰 وضعیت خبر: {signal.get('news', {}).get('label', 'N/A')} "
-        f"(تعدیل امتیاز: {signal.get('news', {}).get('score_adjustment', 0)})\n"
-        + "".join(
-            f"• {html.escape(str(item.get('title', ''))[:180])}\n"
-            for item in signal.get("news", {}).get("headlines", [])[:2]
-        )
-        + "\n\n"
-        + (
-        f"🎯 Entry: <b>{fmt_price(signal['entry'])}</b>\n"
-        f"🛑 SL: <b>{fmt_price(signal['sl'])}</b> "
-        f"({signal['risk_pct']:.2f}%)\n"
-        + (
-            f"🎯 هدف نهایی: <b>{fmt_price(signal['tp1'])}</b> — 100%\n"
-            if signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
-            else
-            (
-                f"🎯 برداشت اول: <b>{fmt_price(signal['tp1'])}</b> — یک‌سوم در +0.75R\n"
-                f"📈 ادامه موقعیت: دوسوم باقی‌مانده با تریلینگ چَندلیر 3×ATR\n"
-                if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-                else
-                f"🥇 TP1: <b>{fmt_price(signal['tp1'])}</b> — 50%\n"
-                f"🥈 TP2: <b>{fmt_price(signal['tp2'])}</b> — 30%\n"
-                f"🥉 TP3: <b>{fmt_price(signal['tp3'])}</b> — 20%\n"
-            )
-        )
-        + f"🟩 حمایت نزدیک: <b>{fmt_price(signal.get('support'))}</b>\n"
-        f"🟥 مقاومت نزدیک: <b>{fmt_price(signal.get('resistance'))}</b>\n"
-        f"📐 مبنای SL: {html.escape(str(signal.get('sl_method', 'ساختار بازار')))}\n"
-        + (
-            f"📊 ADX(14): <b>{safe_float(signal.get('components', {}).get('adx14'), 0.0):.1f}</b> | "
-            f"EMA200: <b>{fmt_price(signal.get('components', {}).get('ema200'))}</b>\n"
-            f"🧪 اعتبارسنجی دیتای واقعی: هنوز انجام نشده\n"
-            "📐 RR نهایی: متغیر (بسته به تریلینگ استاپ)\n\n"
-            if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-            else f"RR تخمینی خالص با کارمزد: <b>{signal['rr']:.2f}</b>\n\n"
-        )
-        + f"💰 Funding: {funding_text}\n"
-        f"📊 OI: {oi_text}\n"
-        f"⏱ Expiry: 48h\n"
-        f"⚖️ ریسک هدف: ${signal['risk_target_usd']:.2f} | ریسک محاسبه‌شده با کارمزد: ${safe_float(signal.get('actual_risk_usd'), 0.0):.2f}"
-        )
+    fundamentals = signal.get("fundamentals", {}) or {}
+    funding = safe_float(fundamentals.get("funding"))
+    oi = safe_float(fundamentals.get("open_interest"))
+    funding_text = f"{funding * 100:.4f}%" if funding is not None else "Unavailable"
+    oi_text = f"{oi:,.2f}" if oi is not None else "Unavailable"
+
+    news = signal.get("news", {}) or {}
+    news_label = html.escape(str(news.get("label", "Unavailable")))
+    news_adjustment = safe_float(news.get("score_adjustment"), 0) or 0
+    headline_lines = "".join(
+        f"  • {html.escape(str(item.get('title', ''))[:140])}\n"
+        for item in news.get("headlines", [])[:2]
     )
+    trend = html.escape(str(signal.get("trend", "N/A")))
+    exchange = html.escape(str(signal.get("exchange", "N/A")))
+    symbol = html.escape(str(signal.get("symbol", "N/A")))
+    strength = html.escape(str(signal.get("strength", "N/A")))
+    sl_method = html.escape(str(signal.get("sl_method", "Market structure")))
+
+    lines = [
+        f"{emoji} <b>{symbol}  |  {side}</b>",
+        f"<i>{exchange} Spot · 4H strategy</i>",
+        f"━━━━━━━━━━━━━━━━━━",
+        f"<b>ENTRY</b>  <code>{fmt_price(entry)}</code>",
+        f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
+        + (f"  <i>(-{risk_pct:.2f}%)</i>" if risk_pct is not None else ""),
+    ]
+
+    if is_v3:
+        lines.extend([
+            "",
+            "<b>TRADE MANAGEMENT</b>",
+            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · Close ⅓ at +0.75R",
+            "📈 <b>Runner</b>  · Remaining ⅔ managed by Chandelier (3×ATR)",
+            "🔒 After TP1  · Stop moves to breakeven; trail updates on closed 4H candles",
+        ])
+    elif is_legacy_single_tp:
+        lines.extend(["", f"🎯 <b>FINAL TARGET</b>  <code>{fmt_price(tp1)}</code>  · Close 100%"])
+    else:
+        lines.extend([
+            "",
+            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · 50%",
+            f"🎯 <b>TP2</b>  <code>{fmt_price(signal.get('tp2'))}</code>  · 30%",
+            f"🎯 <b>TP3</b>  <code>{fmt_price(signal.get('tp3'))}</code>  · 20%",
+        ])
+
+    levels = []
+    if support is not None:
+        levels.append(f"🟩 Support  <code>{fmt_price(support)}</code>")
+    if resistance is not None:
+        levels.append(f"🟥 Resistance  <code>{fmt_price(resistance)}</code>")
+    if levels:
+        lines.extend(["", "<b>MARKET LEVELS</b>", *levels])
+
+    lines.extend([
+        "",
+        "<b>SETUP & RISK</b>",
+        f"Trend  · {trend}",
+        f"ADX(14)  · {f'{adx:.1f}' if adx is not None else 'N/A'}"
+        + (f"  |  EMA200  <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
+        f"Stop model  · {sl_method}",
+    ])
+
+    if is_v3:
+        lines.extend([
+            "Exit plan  · Dynamic; final RR depends on trailing stop",
+            "Validation  · Live-market performance not yet established",
+        ])
+    else:
+        lines.append(f"Estimated net RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
+
+    lines.extend([
+        "",
+        "<b>CONTEXT</b>",
+        f"News  · {news_label} (score adjustment {news_adjustment:+g})",
+        f"Funding  · {funding_text}  |  OI  · {oi_text}",
+        f"Signal expiry  · 48h",
+    ])
+    if risk_target is not None or actual_risk is not None:
+        lines.append(
+            f"Risk budget  · Target ${risk_target:.2f}" if risk_target is not None
+            else "Risk budget  · Target N/A"
+        )
+        if actual_risk is not None:
+            lines.append(f"Estimated risk incl. fees  · ${actual_risk:.2f}")
+
+    if headline_lines:
+        lines.extend(["", "<b>NEWS HEADLINES</b>", headline_lines.rstrip()])
+
+    return "\n".join(lines)
 
 
 # ============================================================
