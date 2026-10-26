@@ -40,18 +40,14 @@ python -u panel.py --loop
 - این ربات توصیهٔ مالی نیست.
 
 
-## گزارش خودکار علت معاملات زیان‌ده
+## گزارش دستی عملکرد سیگنال‌ها
 
-Workflow مستقل `Automated Signal Postmortem` هر روز اجرا می‌شود و با اجرای دستی هم قابل شروع است. این workflow:
-- نتایج معاملات بسته‌شده را بر اساس setup، روند روزانه، رژیم بازار، spike، نزدیکی خط روند، فضای مقاومت، تعداد برخورد با حمایت و امتیاز سیگنال گروه‌بندی می‌کند.
-- نرخ برد، سود/زیان خالص، ضریب سود، پوشش `entry_snapshot` و لغزش ثبت‌شدهٔ حد ضرر را گزارش می‌کند.
-- گزارش JSON را به‌صورت Artifact در صفحهٔ اجرای GitHub Actions برای ۳۰ روز نگه می‌دارد.
+برای اینکه فقط Workflow اصلی ربات در GitHub Actions باقی بماند، Workflowهای جداگانهٔ گزارش‌گیری و ممیزی حذف شده‌اند؛ فایل‌های پایتون مربوط به تحلیل هنوز در مخزن هستند و می‌توان آن‌ها را دستی اجرا کرد:
 
-این گزارش فقط‌خواندنی است و استراتژی زنده، حدها یا فایل `signals.json` را تغییر نمی‌دهد. گروه‌های کمتر از ۵ معامله صرفاً اکتشافی‌اند؛ هیچ فیلتری نباید صرفاً بر اساس همبستگی چند معامله به استراتژی زنده اضافه شود.
+```bash
+python analyze_signals.py --input signals.json --out outcome-report.json
+python postmortem_report.py --input signals.json --output postmortem-report.json
+python historical_replay.py --input signals.json --output historical-replay-report.json
+```
 
-
-## Historical candle replay (read-only)
-
-The daily/manual `Automated Signal Postmortem` workflow also downloads public 1-minute OHLCV candles for closed signals when the exchange still provides them, then publishes a separate `historical-replay-<run id>` artifact. It compares recorded PnL with a conservative, approximate replay and lists unavailable data/errors per signal. OHLCV cannot prove intraminute ordering or real fills, so the replay is diagnostic evidence—not a promise of realized results.
-
-The workflow does not modify `bot.py`, entry filters, stop-loss/target rules, or `signals.json`. Any strategy adjustment must be separately tested out-of-sample and reviewed before deployment; this automation never self-edits live rules.
+این گزارش‌ها فقط‌خواندنی‌اند و منطق ربات، حد ضرر/هدف یا `signals.json` را به‌عنوان بخشی از تحلیل تغییر نمی‌دهند. بازپخش OHLCV تقریبی است و ترتیب حرکت قیمت داخل کندل یا قیمت اجرای واقعی سفارش را اثبات نمی‌کند. نمونه‌های کم‌تعداد نیز برای نتیجه‌گیری قطعی کافی نیستند.
