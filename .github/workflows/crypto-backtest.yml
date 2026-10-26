@@ -5,6 +5,7 @@ on:
     branches:
       - backtest/run-btcusdt-4h-strategies
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     paths:
       - "crypto_backtest.py"
