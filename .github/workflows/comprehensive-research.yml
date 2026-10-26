@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   lab:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
