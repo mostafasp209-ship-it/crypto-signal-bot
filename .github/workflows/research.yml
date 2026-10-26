@@ -41,10 +41,16 @@ jobs:
         run: python -m py_compile research/binance_v3_parameter_search.py
 
       - name: Run strategy parameter search
-        timeout-minutes: 45
+        timeout-minutes: 35
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u research/binance_v3_parameter_search.py
+
+      - name: Run targeted trade-frequency optimization
+        timeout-minutes: 35
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/frequency_optimizer.py
 
       - name: Upload Binance research report
         if: always()
