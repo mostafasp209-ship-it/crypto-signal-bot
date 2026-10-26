@@ -20,7 +20,7 @@ concurrency:
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
         run: python -m py_compile research/binance_v3_parameter_search.py
 
       - name: Run strategy parameter search
-        timeout-minutes: 25
+        timeout-minutes: 45
         env:
           PYTHONUNBUFFERED: "1"
         run: python -u research/binance_v3_parameter_search.py
