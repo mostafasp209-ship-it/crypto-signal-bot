@@ -173,7 +173,7 @@ def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> l
     elif cfg["style"] == "macd_cross":
         setup = (x.macd > x.macd_signal) & (x.macd.shift(1) <= x.macd_signal.shift(1))
     else:
-        setup = x.close > x.bb_upper)
+        setup = x.close > x.bb_upper
     vol_ok = pd.Series(True, index=x.index) if cfg["vol_mult"] is None else x.vol_ratio >= cfg["vol_mult"]
     adx_ok = pd.Series(True, index=x.index) if cfg["adx_min"] is None else x.adx >= cfg["adx_min"]
     rsi_ok = pd.Series(True, index=x.index) if cfg["rsi_min"] is None else x.rsi >= cfg["rsi_min"]
