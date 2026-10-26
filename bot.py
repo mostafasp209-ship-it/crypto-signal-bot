@@ -1841,7 +1841,7 @@ def format_signal(signal):
         + f"💰 Funding: {funding_text}\n"
         f"📊 OI: {oi_text}\n"
         f"⏱ Expiry: 48h\n"
-        f"⚖️ ریسک اسمی: ${signal['risk_usd']:.2f}"
+        f"⚖️ ریسک هدف: ${signal['risk_target_usd']:.2f} | ریسک محاسبه‌شده با کارمزد: ${safe_float(signal.get('actual_risk_usd'), 0.0):.2f}"
         )
     )
 
