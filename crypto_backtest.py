@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-URLS = ["https://data-api.binance.vision/api/v3/klines", "https://api.binance.us/api/v3/klines", "https://api.binance.com/api/v3/klines"]
+URLS = ["https://api.binance.us/api/v3/klines", "https://data-api.binance.vision/api/v3/klines", "https://api.binance.com/api/v3/klines"]
 COLS = ["open_time", "open", "high", "low", "close", "volume",
         "close_time", "quote_volume", "trades", "taker_base", "taker_quote", "ignore"]
 FEE = 0.0004  # approximate fee per side; slippage is not included
@@ -19,6 +19,7 @@ def fetch_klines(symbol="BTCUSDT", interval="4h", limit=5000):
     end_time = None
     with requests.Session() as session:
         while len(pages) < limit:
+            count_before = len(pages)
             n = min(1000, limit - len(pages))
             params = {"symbol": symbol, "interval": interval, "limit": n}
             if end_time is not None:
@@ -43,6 +44,8 @@ def fetch_klines(symbol="BTCUSDT", interval="4h", limit=5000):
                 break
             for candle in batch:
                 pages[int(candle[0])] = candle
+            if len(pages) == count_before:
+                raise RuntimeError("Pagination made no progress; endpoint may be ignoring endTime.")
             oldest = min(int(x[0]) for x in batch)
             end_time = oldest - 1
             if len(batch) < n:
