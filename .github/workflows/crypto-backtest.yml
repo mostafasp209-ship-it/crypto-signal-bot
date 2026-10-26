@@ -1,0 +1,43 @@
+name: BTCUSDT 4h strategy backtest
+
+on:
+  push:
+    branches:
+      - backtest/run-btcusdt-4h-strategies
+  pull_request:
+    branches: [main]
+    paths:
+      - "crypto_backtest.py"
+      - ".github/workflows/crypto-backtest.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip requests pandas numpy
+      - name: Syntax check
+        run: python -m py_compile crypto_backtest.py
+      - name: Run historical backtest
+        run: python -u crypto_backtest.py | tee backtest-output.txt
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btcusdt-4h-backtest-results
+          path: |
+            backtest-output.txt
+            backtest-results/
+          if-no-files-found: warn
+          retention-days: 30
