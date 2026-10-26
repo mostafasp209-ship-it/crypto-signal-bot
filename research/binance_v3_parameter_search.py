@@ -283,7 +283,7 @@ def main():
     # Score is net expectancy and PF; do not optimize for win rate alone.
     eligible = [r for r in results if r["eligible"] and r["test"]["profit_factor"] is not None]
     eligible.sort(key=lambda r: (r["test"]["net_expectancy_R"], r["test"]["profit_factor"], r["test"]["win_rate_pct"]), reverse=True)
-    results.sort(key=lambda r: (r["train"]["net_expectancy_R"], r["train"]["profit_factor"] or 0), reverse=True)
+    results.sort(key=lambda r: (r["train"]["net_expectancy_R"] if r["train"]["net_expectancy_R"] is not None else -1e9, r["train"]["profit_factor"] if r["train"]["profit_factor"] is not None else 0), reverse=True)
     (OUT/"all_parameter_results.json").write_text(json.dumps(results, indent=2))
     summary = {
         "research_scope": "103,680-combination grid: breakout, EMA20 pullback, EMA20/50 cross, MACD cross and Bollinger breakout; optional volume, ADX, RSI thresholds 40/45/50/55/60, MACD and Stochastic filters; EMA50/100/150/200 trend filters; fixed 3R target. Indicator families reviewed against TradingView built-ins; no private/invite-only scripts or TradingView proprietary feed assumed.",
