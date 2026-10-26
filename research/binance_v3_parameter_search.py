@@ -99,9 +99,8 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
-def simulate(df: pd.DataFrame, cfg: dict, split_at: int) -> tuple[list, list]:
-    # All signals are evaluated at candle close, entry is at next candle open.
-    # This avoids optimistic same-close fills. One position per symbol at a time.
+def simulate_segment(df: pd.DataFrame, cfg: dict, start_i: int, end_i: int) -> list:
+    """Simulate one strictly bounded time segment; positions cannot leak across split."""
     x = df.reset_index(drop=True)
     signals = (
         (x.close > x[f"break_{cfg['lookback']}"]) &
@@ -110,9 +109,9 @@ def simulate(df: pd.DataFrame, cfg: dict, split_at: int) -> tuple[list, list]:
         (x.close > x[cfg["ema_col"]]) &
         x.atr.notna()
     ).fillna(False).to_numpy()
-    train, test = [], []
-    i = 220
-    while i < len(x) - 1:
+    trades = []
+    i = max(start_i, 220)
+    while i < end_i - 1:
         if not signals[i]:
             i += 1
             continue
@@ -125,8 +124,8 @@ def simulate(df: pd.DataFrame, cfg: dict, split_at: int) -> tuple[list, list]:
             continue
         stop = entry - risk
         target = entry + risk * cfg["rr"]
-        exit_i, exit_price, reason = len(x)-1, float(x.close.iloc[-1]), "TIME_END"
-        for j in range(entry_i, len(x)):
+        exit_i, exit_price, reason = end_i - 1, float(x.close.iloc[end_i - 1]), "TIME_END"
+        for j in range(entry_i, end_i):
             lo, hi = float(x.low.iloc[j]), float(x.high.iloc[j])
             hit_sl, hit_tp = lo <= stop, hi >= target
             if hit_sl:  # conservative when both levels touched in one OHLC candle
@@ -135,26 +134,23 @@ def simulate(df: pd.DataFrame, cfg: dict, split_at: int) -> tuple[list, list]:
             if hit_tp:
                 exit_i, exit_price, reason = j, target, "TP"
                 break
-        # Net return relative to initial price risk; fees/slippage on both sides.
         exit_fill = exit_price * (1 - SLIPPAGE_PER_SIDE)
         gross_pnl = exit_fill - entry
         costs = entry * FEE_PER_SIDE + exit_fill * FEE_PER_SIDE
         net_pnl = gross_pnl - costs
-        initial_risk = risk
-        net_r = net_pnl / initial_risk
         trade = {
             "symbol": cfg.get("symbol", ""),
             "signal_time": str(x.timestamp.iloc[i]),
             "entry_time": str(x.timestamp.iloc[entry_i]),
             "exit_time": str(x.timestamp.iloc[exit_i]),
             "entry": round(entry, 8), "stop": round(stop, 8), "target": round(target, 8),
-            "reason": reason, "net_r": float(net_r), "net_return_pct": float(net_pnl/entry*100),
+            "reason": reason, "net_r": float(net_pnl / risk),
+            "net_return_pct": float(net_pnl / entry * 100),
             "config": json.dumps({k:v for k,v in cfg.items() if k not in ("symbol","ema_col")}, sort_keys=True),
         }
-        (train if i < split_at else test).append(trade)
+        trades.append(trade)
         i = exit_i + 1
-    return train, test
-
+    return trades
 
 def stats(trades: list[dict]) -> dict:
     if not trades:
@@ -208,7 +204,8 @@ def main():
         for symbol, df in datasets.items():
             split_at = int(len(df)*0.70)
             local = dict(cfg, symbol=symbol)
-            tr, te = simulate(df, local, split_at)
+            tr = simulate_segment(df, local, 220, split_at)
+            te = simulate_segment(df, local, split_at, len(df))
             tr_all.extend(tr); te_all.extend(te)
         train_stats, test_stats = stats(tr_all), stats(te_all)
         results.append({**cfg,"train":train_stats,"test":test_stats,
