@@ -83,6 +83,28 @@ class V3StrategyTests(unittest.TestCase):
         self.assertAlmostEqual(signal["sl"], signal["entry"], places=8)
         self.assertGreater(signal["realized_pnl"], 0.0)
 
+    def test_v3_alert_formats_variable_rr_without_crashing(self):
+        signal = make_v3_signal()
+        signal.update({
+            "strength": "V3",
+            "trend": "BULL — EMA200 4h",
+            "risk_pct": 4.0,
+            "rr": None,
+            "risk_usd": 10.0,
+            "risk_target_usd": 10.0,
+            "actual_risk_usd": 8.5,
+            "support": None,
+            "resistance": 100.0,
+            "sl_method": "2x_ATR14",
+            "fundamentals": {},
+            "news": {},
+        })
+        signal["components"].update({"adx14": 36.0, "ema200": 95.0})
+        message = bot.format_signal(signal)
+        self.assertIn("RR نهایی: متغیر", message)
+        self.assertIn("ADX(14)", message)
+        self.assertIn("تریلینگ", message)
+
     def test_chandelier_stop_only_ratchets_up_after_partial(self):
         n = 220
         close = 100.0 + np.arange(n, dtype=float) * 0.05
