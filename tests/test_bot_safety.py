@@ -33,45 +33,51 @@ class CandleSafetyTests(unittest.TestCase):
 
 
 class StrategyGateTests(unittest.TestCase):
-    def test_reference_strategy_calculates_indicators_after_warmup(self):
+    def test_v3_strategy_calculates_indicators_after_warmup(self):
         rows = []
-        for i in range(140):
-            close = 100 + i * 0.1 + (0.8 if i % 5 == 0 else 0.0)
+        for i in range(260):
+            close = 100 + i * 0.1
+            if i == 259:
+                close += 4.0  # Confirm a breakout above the prior 30-bar high.
             rows.append({
-                "timestamp": 1735718400000 + i * 300000,
+                "timestamp": 1735718400000 + i * 14400000,
                 "open": close - 0.15, "high": close + 0.5,
-                "low": close - 0.5, "close": close, "volume": 1000,
+                "low": close - 0.5, "close": close,
+                "volume": 2000 if i == 259 else 1000,
             })
         result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
-        for key in ("rsi7", "stoch_k", "stoch_d", "atr", "atr_baseline", "ema20", "ema50"):
-            self.assertIsNotNone(result[key])
-        self.assertGreaterEqual(result["rsi7"], 0)
-        self.assertLessEqual(result["rsi7"], 100)
-        self.assertIn("signal_long", result)
-        self.assertIn("signal_short", result)
+        for key in ("atr", "volume_avg", "ema200", "adx", "breakout_level", "volume_ratio"):
+            self.assertIsNotNone(result[key], key)
+        self.assertGreater(result["adx"], 32.0)
+        self.assertGreater(result["volume_ratio"], 1.5)
+        self.assertTrue(result["signal_long"])
 
-    def test_reference_strategy_matches_published_session_hours_utc(self):
+    def test_v3_gate_requires_sufficient_closed_candle_history(self):
         rows = []
         base = pd.Timestamp("2026-10-24T08:00:00Z").value // 10**6
         for i in range(100):
-            close = 100 + i * 0.1 + (0.8 if i % 5 == 0 else 0.0)
+            close = 100 + i * 0.1
             rows.append({
-                "timestamp": base + i * 300000,
+                "timestamp": base + i * 14400000,
                 "open": close - 0.15, "high": close + 0.5,
                 "low": close - 0.5, "close": close, "volume": 1000,
             })
         result = bot.calculate_crypto_strategy_gates(pd.DataFrame(rows))
-        self.assertTrue(result["session_ok"])
+        self.assertFalse(result["signal_long"])
+        self.assertIsNone(result["atr"])
+        self.assertIsNone(result["ema200"])
+        self.assertIsNone(result["adx"])
 
-    def test_reference_strategy_rejects_insufficient_history(self):
+    def test_v3_strategy_rejects_insufficient_history(self):
         df = pd.DataFrame([{
             "timestamp": 1735718400000, "open": 100, "high": 101,
             "low": 99, "close": 100, "volume": 1
         }] * 30)
         result = bot.calculate_crypto_strategy_gates(df)
         self.assertFalse(result["signal_long"])
-        self.assertFalse(result["signal_short"])
-        self.assertIsNone(result["rsi7"])
+        self.assertIsNone(result["atr"])
+        self.assertIsNone(result["ema200"])
+        self.assertIsNone(result["adx"])
 
 
 class SignalExecutionTests(unittest.TestCase):
