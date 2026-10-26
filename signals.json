@@ -904,8 +904,8 @@
       "position_value": 200.0,
       "position_capped": true,
       "signal_candle_timestamp": 1792771200000.0,
-      "last_trailing_candle_ts": 1792771200000.0,
-      "highest_close_since_entry": 481.83,
+      "last_trailing_candle_ts": 1793030400000.0,
+      "highest_close_since_entry": 486.8517,
       "trailing_active": true,
       "components": {
         "setup": "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3",
@@ -1237,7 +1237,7 @@
       "closed_reason": null
     }
   ],
-  "last_run": "2026-10-26T22:15:33.652855+00:00",
+  "last_run": "2026-10-26T22:49:04.288948+00:00",
   "historical_stats": {
     "closed": 11,
     "tp3": 0,
