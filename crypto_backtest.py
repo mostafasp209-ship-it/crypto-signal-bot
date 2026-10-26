@@ -145,10 +145,10 @@ def main():
     print(f"CHRONOLOGICAL SPLIT: train={split} candles; test={len(df)-split} candles")
     rows=[]
     bo_grid=[]
-    for rr,vm,am,lb,trend in itertools.product([1.5,2.0,2.5,3.0],[1.0,1.25,1.5,2.0],[1.0,1.2,1.5,2.0],[10,20,30,50],[True,False]):
+    for rr,vm,am,lb,trend in itertools.product([1.5,2.0,2.5,3.0],[1.0,1.5,2.0],[1.0,1.5],[10,20,30],[True,False]):
         bo_grid.append({"rr":rr,"vm":vm,"am":am,"lb":lb,"trend":trend})
     mc_grid=[]
-    for rr,vm,am,tol,lb,mode in itertools.product([1.5,2.0,2.5,3.0],[1.0,1.5,2.0],[1.0,1.5],[0.5,1.0,1.5,2.0],[50,100,150],["resistance","fib","either"]):
+    for rr,vm,am,tol,lb,mode in itertools.product([1.5,2.0,2.5],[1.5,2.0],[1.0,1.5],[0.5,1.0,1.5],[50,100],["resistance","fib","either"]):
         mc_grid.append({"rr":rr,"vm":vm,"am":am,"tol":tol,"lb":lb,"mode":mode})
     for name,grid in [("BO",bo_grid),("MC",mc_grid)]:
         print(f"GRID {name}: {len(grid)} parameter sets",flush=True)
