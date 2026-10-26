@@ -1,0 +1,56 @@
+name: Binance Strategy Parameter Research
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "research/**"
+      - "requirements.txt"
+      - ".github/workflows/research.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binance-strategy-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate research script syntax
+        run: python -m py_compile research/binance_v3_parameter_search.py
+
+      - name: Run strategy parameter search
+        timeout-minutes: 25
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/binance_v3_parameter_search.py
+
+      - name: Upload Binance research report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-v3-parameter-research
+          path: research_results/
+          if-no-files-found: warn
+          retention-days: 30
