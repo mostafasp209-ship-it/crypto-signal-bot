@@ -1599,11 +1599,22 @@ def update_open_signals(state, manager):
             "sl": safe_float(signal.get("sl")),
         }
         trailing_updated = False
-        if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
+        if (
+            signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+            and signal.get("trailing_active")
+        ):
             try:
-                raw = manager.fetch_ohlcv(exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT)
-                closed_df = closed_candles(raw)
-                trailing_updated = update_chandelier_stop(signal, closed_df)
+                last_ts = safe_float(signal.get("last_trailing_candle_ts"))
+                interval_ms = safe_float(exchange.parse_timeframe(TIMEFRAME), 14400.0) * 1000.0
+                now_ms = utc_now().timestamp() * 1000.0
+                # CCXT candle timestamps are candle-open times and the current
+                # forming candle is discarded, so the next closed bar is due
+                # roughly two intervals after the last stored open timestamp.
+                candle_due = last_ts is None or now_ms >= last_ts + 2.0 * interval_ms
+                if candle_due:
+                    raw = manager.fetch_ohlcv(exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT)
+                    closed_df = closed_candles(raw)
+                    trailing_updated = update_chandelier_stop(signal, closed_df)
             except Exception as exc:
                 print(f"[TRAILING SKIP] {symbol}: {type(exc).__name__}: {exc}")
 
