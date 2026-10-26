@@ -39,6 +39,9 @@ jobs:
       - name: Validate Python syntax
         run: python -m py_compile bot.py panel.py
 
+      - name: Run strategy and position-management tests
+        run: python -m unittest discover -s tests -v
+
       - name: Run market scanner (every 15 minutes)
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2,17,32,47 * * * *'
         env:
