@@ -1746,9 +1746,14 @@ def refresh_historical_stats(state):
 
 
 def performance_report(state):
-    # Forward-test statistics are isolated from the pre-reset historical sample.
+    # Report only the current V3 setup, never mix legacy 5m signals into the 4h forward test.
     start_at = state.get("forward_test_started_at")
     signals = state.get("signals", [])
+    signals = [
+        s for s in signals
+        if (s.get("components", {}) or {}).get("setup")
+        == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+    ]
     if start_at:
         signals = [
             s for s in signals
@@ -2064,23 +2069,18 @@ def main(manage_only=False):
 
     state = load_state()
 
-    # One-time hard reset for the new forward-test run.
-    # This intentionally clears ALL previous signals (including active ones) and cached
-    # performance counters. The version marker prevents clearing the new test on every run.
-    if state.get("signal_history_reset_version", 0) < 2:
-        previous_count = len(state.get("signals", []))
-        state["signals"] = []
-        state["historical_stats"] = {}
+    # Version 3 starts a clean V3-only forward-test baseline without deleting trade history
+    # or disrupting any active positions. Legacy setups remain available for auditing.
+    if state.get("signal_history_reset_version", 0) < 3:
         state["forward_test_started_at"] = iso_now()
-        state["signal_history_reset_version"] = 2
-        state["last_run"] = None
+        state["signal_history_reset_version"] = 3
         refresh_historical_stats(state)
         save_state(state)
-        print(f"Signal history reset: cleared {previous_count} old signals.")
+        print("V3 forward-test baseline reset; historical and active signals preserved.")
         telegram_send(
-            "♻️ <b>شروع تست جدید</b>\n"
-            "تاریخچه قبلی و سیگنال‌های فعال پاک شدند. شمارنده‌ها از صفر شروع شدند؛ "
-            "از این لحظه همه سیگنال‌های جدید گزارش می‌شوند."
+            "♻️ <b>شروع تست مستقل V3</b>\n"
+            "شمارندهٔ عملکرد از صفر شروع شد. تاریخچه و سیگنال‌های فعال حذف نشدند؛ "
+            "گزارش عملکرد فقط معاملات V3 را حساب می‌کند."
         )
 
     manager = ExchangeManager()
