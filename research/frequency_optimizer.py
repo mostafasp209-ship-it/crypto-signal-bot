@@ -12,13 +12,13 @@ OUT = Path("research_results")
 OUT.mkdir(exist_ok=True)
 MIN_TRAIN, MIN_TEST = 35, 20
 STYLES = ["ema_cross", "pullback", "macd_cross", "breakout", "bollinger_breakout"]
-EMA = ["ema50", "ema100", "ema150", "ema200"]
-ATR = [0.75, 1.0, 1.25, 1.5, 2.0]
-RR = [1.5, 2.0, 2.5, 3.0]
-VOL = [None, 1.2, 1.5]
-ADX = [None, 20, 25]
-RSI = [None, 45, 50, 55]
-FILTERS = [(False, False), (True, False), (False, True), (True, True)]
+EMA = ["ema50", "ema100", "ema200"]
+ATR = [0.75, 1.0, 1.5]
+RR = [1.5, 2.0, 3.0]
+VOL = [None, 1.2]
+ADX = [None, 25]
+RSI = [None, 45, 55]
+FILTERS = [(False, False), (True, True)]
 LOOKBACKS = [10, 20, 30, 40, 55]
 
 def main():
