@@ -199,9 +199,17 @@ def main():
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 70/30 split per symbol. Grid is selected on train only.
+    # 5,184 deterministic combinations: styles, breakout windows, optional filters,
+    # RSI/MACD confirmations, stop distances and long-term trend EMAs.
     grids = itertools.product(
-        ["breakout", "pullback"], [20, 30, 40, 55], [None, 1.2, 1.5],
-        [None, 20, 25], [None, 50, 55], [False, True], [1.5, 2.0], ["ema100", "ema200"]
+        ["breakout", "pullback"],
+        [10, 20, 30, 40, 55, 75],
+        [None, 1.2, 1.5],
+        [None, 20, 25],
+        [None, 45, 50],
+        [False, True],
+        [1.0, 1.25, 1.5, 2.0],
+        ["ema100", "ema200"]
     )
     results = []
     for style, lookback, vol_mult, adx_min, rsi_min, macd_filter, atr_mult, ema_col in grids:
@@ -235,6 +243,7 @@ def main():
         "split": "chronological 70% train / 30% untouched holdout",
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
+        "grid_size_expected": 5184,
         "eligible_holdout_configs": len(eligible),
         "best_holdout_configs": eligible[:10],
         "best_train_configs": results[:5],
