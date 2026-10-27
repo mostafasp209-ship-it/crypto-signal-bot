@@ -94,7 +94,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     x["ema200"] = x.close.ewm(span=200, adjust=False, min_periods=200).mean()
     x["ema100"] = x.close.ewm(span=100, adjust=False, min_periods=100).mean()
     x["vol_avg"] = x.volume.rolling(20, min_periods=20).mean().shift(1)
-    for lb in [10, 20, 30, 40, 55, 75]:
+    for lb in [5, 8, 10, 15, 20, 30, 40, 55, 75]:
         x[f"break_{lb}"] = x.high.shift(1).rolling(lb, min_periods=lb).max()
     x["vol_ratio"] = x.volume / x.vol_avg.replace(0, np.nan)
     delta = x.close.diff()
@@ -240,13 +240,13 @@ def main():
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 60/20/20 train/validation/holdout split per symbol. Rank only on validation; final holdout is reported for shortlisted candidates.
-    # Expanded 103,680-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
+    # Expanded 69,120-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
     # four trend EMAs and four ATR stop distances.
     # Avoid redundant configurations: lookback only changes breakout entries.
     # The old Cartesian product repeated each non-breakout setup six times.
     grid_axes = itertools.product(
         ["breakout", "pullback", "ema_cross", "macd_cross", "bollinger_breakout"],
-        [None, 10, 20, 30, 40, 55, 75],
+        [None, 5, 8, 10, 15, 20, 30, 40, 55, 75],
         [None, 1.2, 1.5],
         [None, 20, 25],
         [None, 40, 45, 50, 55, 60],
@@ -261,7 +261,7 @@ def main():
         if (style == "breakout" and lookback is not None) or (style != "breakout" and lookback is None)
     )
     results = []
-    total_configs = 34560
+    total_configs = 57600 + 3 * 5760
     started = time.time()
     for config_i, (style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col) in enumerate(grids, 1):
         if config_i == 1 or config_i % 250 == 0:
@@ -271,7 +271,7 @@ def main():
             print("PROGRESS {}/{} ({:.1f}%) | {:.2f} configs/s | ETA {:.1f} min".format(config_i, total_configs, 100*config_i/total_configs, rate, eta_min), flush=True)
         rr = 3.0
         cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"stoch_filter":stoch_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
-        tr_all, te_all = [], []
+        tr_all, va_all, te_all = [], [], []
         for symbol, df in datasets.items():
             train_end = int(len(df)*0.60)
             validation_end = int(len(df)*0.80)
@@ -302,7 +302,7 @@ def main():
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
         "grid_size_expected": total_configs,
-        "grid_optimization": "Removed sixfold duplicate non-breakout configurations; lookback is now varied only for breakout setups. Uses existing Numba-compiled OHLC simulator and periodic ETA logs.",
+        "grid_optimization": "Lookback is varied only for breakout setups; added shorter 5/8/15-bar lookbacks to test higher trade frequency. Uses existing Numba-compiled OHLC simulator and periodic ETA logs.",
         "eligible_validation_selected_configs": len(eligible),
         "best_validation_ranked_configs_with_holdout_reported": eligible[:10],
         "best_train_configs": results[:5],
@@ -314,7 +314,7 @@ def main():
         f.write(f"- Data: Binance Spot {INTERVAL}, from {START}\n- Symbols: {', '.join(datasets)}\n- Combinations: {len(results)}\n- Fees: {FEE_PER_SIDE*100:.2f}% each side; slippage: {SLIPPAGE_PER_SIDE*100:.02f}% each side\n- Split: chronological 60% train / 20% validation / 20% untouched holdout\n\n")
         f.write("## Best eligible configs ranked by validation expectancy (holdout shown for audit)\n\n")
         if not eligible:
-            f.write("No configuration met minimum trade counts on train and holdout. Do not claim a validated edge.\n")
+            f.write("No configuration met minimum trade counts on train, validation and holdout. Do not claim a validated edge.\n")
         else:
             f.write("| Style | Lookback | Vol x | ADX | RSI min | MACD | SL ATR x | Target R | EMA | Test trades | Win rate | Expectancy (R) | PF | Max DD (R) |\n|---|---:|---:|---:|---:|---|---:|---:|---|---:|---:|---:|---:|---:|\n")
             for r in eligible[:20]:
