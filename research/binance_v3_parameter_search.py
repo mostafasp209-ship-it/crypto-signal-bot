@@ -240,7 +240,7 @@ def main():
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
     # Chronological 60/20/20 train/validation/holdout split per symbol. Rank only on validation; final holdout is reported for shortlisted candidates.
-    # Expanded 69,120-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
+    # Expanded 74,880-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
     # four trend EMAs and four ATR stop distances.
     # Avoid redundant configurations: lookback only changes breakout entries.
     # The old Cartesian product repeated each non-breakout setup six times.
@@ -261,7 +261,7 @@ def main():
         if (style == "breakout" and lookback is not None) or (style != "breakout" and lookback is None)
     )
     results = []
-    total_configs = 57600 + 3 * 5760
+    total_configs = 74880
     started = time.time()
     for config_i, (style, lookback, vol_mult, adx_min, rsi_min, macd_filter, stoch_filter, atr_mult, ema_col) in enumerate(grids, 1):
         if config_i == 1 or config_i % 250 == 0:
