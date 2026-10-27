@@ -20,7 +20,8 @@ START = "2021-01-01"
 FEE_PER_SIDE = 0.001       # conservative 0.10% spot fee per fill
 SLIPPAGE_PER_SIDE = 0.0002 # 0.02% adverse slippage per fill
 MIN_TRAIN_TRADES = 30
-MIN_TEST_TRADES = 12
+MIN_VALIDATION_TRADES = 20
+MIN_TEST_TRADES = 30
 OUT = Path("research_results")
 OUT.mkdir(exist_ok=True)
 
@@ -238,7 +239,7 @@ def main():
             print(f"DATA_ERROR {symbol}: {exc}")
     if len(datasets) < 3:
         raise RuntimeError(f"Not enough Binance symbols downloaded: {errors}")
-    # Chronological 70/30 split per symbol. Grid is selected on train only.
+    # Chronological 60/20/20 train/validation/holdout split per symbol. Rank only on validation; final holdout is reported for shortlisted candidates.
     # Expanded 103,680-combination grid: five entry styles, volume/ADX/RSI/MACD/Stochastic filters,
     # four trend EMAs and four ATR stop distances.
     # Avoid redundant configurations: lookback only changes breakout entries.
@@ -272,18 +273,20 @@ def main():
         cfg = {"style":style,"lookback":lookback,"vol_mult":vol_mult,"adx_min":adx_min,"rsi_min":rsi_min,"macd_filter":macd_filter,"stoch_filter":stoch_filter,"atr_mult":atr_mult,"rr":rr,"ema_col":ema_col}
         tr_all, te_all = [], []
         for symbol, df in datasets.items():
-            split_at = int(len(df)*0.70)
+            train_end = int(len(df)*0.60)
+            validation_end = int(len(df)*0.80)
             local = dict(cfg, symbol=symbol)
-            tr = simulate_segment(df, local, 220, split_at)
-            te = simulate_segment(df, local, split_at, len(df))
-            tr_all.extend(tr); te_all.extend(te)
-        train_stats, test_stats = stats(tr_all), stats(te_all)
-        results.append({**cfg,"train":train_stats,"test":test_stats,
-                        "eligible":train_stats["trades"]>=MIN_TRAIN_TRADES and test_stats["trades"]>=MIN_TEST_TRADES})
-    # Score is net expectancy and PF; do not optimize for win rate alone.
-    eligible = [r for r in results if r["eligible"] and r["test"]["profit_factor"] is not None]
-    eligible.sort(key=lambda r: (r["test"]["net_expectancy_R"], r["test"]["profit_factor"], r["test"]["win_rate_pct"]), reverse=True)
-    results.sort(key=lambda r: (r["train"]["net_expectancy_R"] if r["train"]["net_expectancy_R"] is not None else -1e9, r["train"]["profit_factor"] if r["train"]["profit_factor"] is not None else 0), reverse=True)
+            tr = simulate_segment(df, local, 220, train_end)
+            va = simulate_segment(df, local, train_end, validation_end)
+            te = simulate_segment(df, local, validation_end, len(df))
+            tr_all.extend(tr); va_all.extend(va); te_all.extend(te)
+        train_stats, validation_stats, test_stats = stats(tr_all), stats(va_all), stats(te_all)
+        results.append({**cfg,"train":train_stats,"validation":validation_stats,"test":test_stats,
+                        "eligible":train_stats["trades"]>=MIN_TRAIN_TRADES and validation_stats["trades"]>=MIN_VALIDATION_TRADES and test_stats["trades"]>=MIN_TEST_TRADES})
+    # Select/rank on validation only. Holdout metrics are not used to choose the winner.
+    eligible = [r for r in results if r["eligible"] and r["validation"]["profit_factor"] is not None]
+    eligible.sort(key=lambda r: (r["validation"]["net_expectancy_R"], r["validation"]["profit_factor"], r["validation"]["win_rate_pct"]), reverse=True)
+    results.sort(key=lambda r: (r["validation"]["net_expectancy_R"] if r["validation"]["net_expectancy_R"] is not None else -1e9, r["validation"]["profit_factor"] if r["validation"]["profit_factor"] is not None else 0), reverse=True)
     (OUT/"all_parameter_results.json").write_text(json.dumps(results, indent=2))
     summary = {
         "research_scope": "103,680-combination grid: breakout, EMA20 pullback, EMA20/50 cross, MACD cross and Bollinger breakout; optional volume, ADX, RSI thresholds 40/45/50/55/60, MACD and Stochastic filters; EMA50/100/150/200 trend filters; fixed 3R target. Indicator families reviewed against TradingView built-ins; no private/invite-only scripts or TradingView proprietary feed assumed.",
@@ -295,21 +298,21 @@ def main():
         "start": START,
         "fees_per_side": FEE_PER_SIDE,
         "slippage_per_side": SLIPPAGE_PER_SIDE,
-        "split": "chronological 70% train / 30% untouched holdout",
+        "split": "chronological 60% train / 20% validation / 20% untouched holdout",
         "candles": {s:len(d) for s,d in datasets.items()},
         "parameter_combinations": len(results),
         "grid_size_expected": total_configs,
         "grid_optimization": "Removed sixfold duplicate non-breakout configurations; lookback is now varied only for breakout setups. Uses existing Numba-compiled OHLC simulator and periodic ETA logs.",
-        "eligible_holdout_configs": len(eligible),
-        "best_holdout_configs": eligible[:10],
+        "eligible_validation_selected_configs": len(eligible),
+        "best_validation_ranked_configs_with_holdout_reported": eligible[:10],
         "best_train_configs": results[:5],
-        "warning": "Grid search is exploratory and prone to selection bias. 70% win rate and 3R are targets, not promises; validate via walk-forward and regime stability before deployment."
+        "warning": "Selection is ranked on validation only; holdout is not used to choose a winner. Grid search still has multiple-testing risk; validate via walk-forward and regime stability before deployment."
     }
     (OUT/"summary.json").write_text(json.dumps(summary, indent=2))
     with (OUT/"summary.md").open("w") as f:
         f.write("# Binance V3 parameter research\n\n")
-        f.write(f"- Data: Binance Spot {INTERVAL}, from {START}\n- Symbols: {', '.join(datasets)}\n- Combinations: {len(results)}\n- Fees: {FEE_PER_SIDE*100:.2f}% each side; slippage: {SLIPPAGE_PER_SIDE*100:.02f}% each side\n- Split: chronological 70% train / 30% holdout\n\n")
-        f.write("## Best eligible configs by holdout expectancy\n\n")
+        f.write(f"- Data: Binance Spot {INTERVAL}, from {START}\n- Symbols: {', '.join(datasets)}\n- Combinations: {len(results)}\n- Fees: {FEE_PER_SIDE*100:.2f}% each side; slippage: {SLIPPAGE_PER_SIDE*100:.02f}% each side\n- Split: chronological 60% train / 20% validation / 20% untouched holdout\n\n")
+        f.write("## Best eligible configs ranked by validation expectancy (holdout shown for audit)\n\n")
         if not eligible:
             f.write("No configuration met minimum trade counts on train and holdout. Do not claim a validated edge.\n")
         else:
