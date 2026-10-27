@@ -875,11 +875,11 @@
       "symbol": "RMSI/USDT",
       "exchange": "bitget",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "CLOSED",
       "strength": "آزمایشی V3",
       "score": 4,
       "created_at": "2026-10-26T04:59:28.089810+00:00",
-      "updated_at": "2026-10-26T22:14:33.477326+00:00",
+      "updated_at": "2026-10-27T13:44:11.997040+00:00",
       "expiry_at": "2026-10-28T04:59:28.089825+00:00",
       "entry": 481.83,
       "sl": 481.83,
@@ -956,12 +956,14 @@
       "tp1_hit": true,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 0.6666666666666667,
-      "realized_pnl": 0.6283787460914181,
-      "fees_paid": 0.13409580788731204,
-      "closed_reason": null,
-      "last_exit_price": 487.34074671515356,
-      "last_exit_label": "tp1"
+      "remaining_fraction": 0.0,
+      "realized_pnl": 0.34788977695292206,
+      "fees_paid": 0.40074863841536834,
+      "closed_reason": "BREAKEVEN_SL",
+      "last_exit_price": 481.78,
+      "last_exit_label": "sl",
+      "stop_slippage_usd": 0.013836138610439749,
+      "sl_hit": true
     },
     {
       "id": "PYUSD_USDT_BUY_1793003396",
@@ -1427,23 +1429,23 @@
       "sl_hit": true
     }
   ],
-  "last_run": "2026-10-27T12:56:26.650944+00:00",
+  "last_run": "2026-10-27T13:45:13.834896+00:00",
   "historical_stats": {
-    "closed": 13,
+    "closed": 14,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
     "sl_direct": 8,
     "trailing_stop": 0,
-    "breakeven_stop": 0,
+    "breakeven_stop": 1,
     "expired": 0,
     "no_risk": 0,
     "other": 5,
-    "net_pnl": -88.11190910062531,
-    "fees": 4.997336688927671,
+    "net_pnl": -87.76401932367239,
+    "fees": 5.39808532734304,
     "sl_methods": {
       "1x_ATR14": 11,
-      "2x_ATR14": 2
+      "2x_ATR14": 3
     }
   },
   "forward_test_started_at": "2026-10-26T05:20:01.763792+00:00",
