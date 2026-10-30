@@ -1296,7 +1296,8 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     if not (0.0035 < risk_pct < 0.038):
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    cost_unit = (entry+stop)*(FEE_RATE+SLIPPAGE_RATE)
+    # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
+    cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
     raw_qty = RISK_USD/(risk+cost_unit)
     cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
     qty = min(raw_qty, cap_qty)
