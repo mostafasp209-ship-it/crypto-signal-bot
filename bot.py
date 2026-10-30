@@ -1515,7 +1515,7 @@ def update_chandelier_stop(signal, df):
     return False
 
 
-def manage_signal(signal, current_price, candle_high=None, candle_low=None):
+def manage_signal(signal, current_price, candle_high=None, candle_low=None, candle_open=None):
     """Manage a signal using an observed price and, when available, a closed candle range."""
     if signal.get("status") != "ACTIVE":
         return False
@@ -1524,6 +1524,18 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None):
 
     high = safe_float(candle_high)
     low = safe_float(candle_low)
+    open_price = safe_float(candle_open)
+
+    def stop_exit_price():
+        sl = safe_float(signal.get("sl"))
+        if high is None or low is None or sl is None:
+            return current_price
+        if open_price is not None:
+            if signal.get("side") == "BUY" and open_price <= sl:
+                return open_price
+            if signal.get("side") != "BUY" and open_price >= sl:
+                return open_price
+        return sl
 
     def stop_touched():
         sl = safe_float(signal.get("sl"))
@@ -1564,7 +1576,7 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None):
         # Stop takes priority over an unbooked partial target.
         if stop_touched():
             remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
-            if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+            if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
                 print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
                 return False
             signal["status"] = "CLOSED"
@@ -1671,7 +1683,7 @@ def update_open_signals(state, manager):
 
         # Inspect the most recently CLOSED 5m candle, not only the instantaneous ticker.
         # If both SL and TP lie inside one candle, manage_signal gives the stop priority.
-        candle_high = candle_low = candle_close = None
+        candle_high = candle_low = candle_close = candle_open = None
         try:
             raw_5m = manager.fetch_ohlcv(exchange, symbol, timeframe="5m", limit=2)
             if raw_5m and len(raw_5m) >= 2:
@@ -1687,6 +1699,7 @@ def update_open_signals(state, manager):
                         created_ms = None
                 if (candle_ts is not None and candle_ts > last_managed_ts
                         and (created_ms is None or candle_ts >= created_ms)):
+                    candle_open = safe_float(candle[1])
                     candle_high = safe_float(candle[2])
                     candle_low = safe_float(candle[3])
                     candle_close = safe_float(candle[4])
@@ -1729,7 +1742,7 @@ def update_open_signals(state, manager):
             except Exception as exc:
                 print(f"[TRAILING SKIP] {symbol}: {type(exc).__name__}: {exc}")
 
-        changed = manage_signal(signal, price, candle_high=candle_high, candle_low=candle_low) or trailing_updated
+        changed = manage_signal(signal, price, candle_high=candle_high, candle_low=candle_low, candle_open=candle_open) or trailing_updated
         if not changed:
             continue
 
