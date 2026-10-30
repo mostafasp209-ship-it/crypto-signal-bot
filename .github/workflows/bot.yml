@@ -4,11 +4,14 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   schedule:
-    # Telegram panel polling.
+    # Telegram panel polling and active-position management.
     - cron: "*/5 * * * *"
-    # Scan the market every 15 minutes; manage active signals and poll panel every 5 minutes.
-    - cron: "2,17,32,47 * * * *"
+    # Scan just after each UTC 4H candle opens.
+    - cron: "2 */4 * * *"
   workflow_dispatch:
 
 permissions:
@@ -45,8 +48,8 @@ jobs:
       - name: Run strategy and position-management tests
         run: python -m unittest discover -s tests -v
 
-      - name: Run market scanner (every 15 minutes)
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2,17,32,47 * * * *'
+      - name: Run market scanner (just after each 4H candle opens)
+        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2 */4 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
