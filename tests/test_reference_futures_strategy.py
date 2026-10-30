@@ -114,5 +114,35 @@ class FuturesStrategyTests(unittest.TestCase):
         self.assertTrue(bot.manage_signal(sig,102.5))
         self.assertEqual(sig["status"],"CLOSED"); self.assertEqual(sig["closed_reason"],"SL")
 
+
+    def test_closed_candle_range_detects_target_even_if_ticker_reversed(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"BUY","status":"ACTIVE","entry":100.0,"sl":98.0,
+            "tp1":103.0,"tp2":103.0,"tp3":103.0,"components":{"setup":SETUP,"slippage_rate":0.0002,"fee_rate":0.0005},
+            "initial_sl":98.0,"initial_risk_per_unit":2.0,"position_quantity":1.0,"remaining_fraction":1.0,
+            "realized_pnl":0.0,"fees_paid":0.0,"tp1_hit":False,"tp2_hit":False,"tp3_hit":False}
+        self.assertTrue(bot.manage_signal(sig,100.0,candle_high=103.5,candle_low=99.5))
+        self.assertEqual(sig["status"],"CLOSED")
+        self.assertEqual(sig["closed_reason"],"TP1")
+
+    def test_stop_wins_when_stop_and_target_touch_same_candle(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"BUY","status":"ACTIVE","entry":100.0,"sl":98.0,
+            "tp1":103.0,"tp2":103.0,"tp3":103.0,"components":{"setup":SETUP,"slippage_rate":0.0002,"fee_rate":0.0005},
+            "initial_sl":98.0,"initial_risk_per_unit":2.0,"position_quantity":1.0,"remaining_fraction":1.0,
+            "realized_pnl":0.0,"fees_paid":0.0,"tp1_hit":False,"tp2_hit":False,"tp3_hit":False}
+        self.assertTrue(bot.manage_signal(sig,100.0,candle_high=104.0,candle_low=97.0))
+        self.assertEqual(sig["status"],"CLOSED")
+        self.assertEqual(sig["closed_reason"],"SL")
+
+    def test_signal_formatter_is_persian_and_strategy_specific(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"BUY","exchange":"binanceusdm","entry":100.0,"sl":98.0,
+            "tp1":103.0,"rr":1.5,"risk_pct":2.0,"actual_risk_usd":10.0,"risk_target_usd":10.0,
+            "position_quantity":1.0,"components":{"setup":SETUP,"rsi":31.0,"stoch_k":25.0,"stoch_d":24.0,
+            "volume_ratio":1.4,"atr14":1.0},"fundamentals":{},"news":{"headlines":[]}}
+        msg=bot.format_signal(sig)
+        self.assertIn("سیگنال جدید خرید",msg)
+        self.assertIn("بازگشت RSI + کراس استوکاستیک",msg)
+        self.assertIn("۱٫۵R",msg)
+        self.assertIn("سفارش واقعی ثبت نمی‌کند",msg)
+
 if __name__=="__main__":
     unittest.main(verbosity=2)
