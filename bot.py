@@ -273,8 +273,12 @@ class ExchangeManager:
         self.exchanges = {}
         self.market_counts = {}
 
-    def build(self):
-        for name in EXCHANGE_NAMES:
+    def build(self, required_names=None):
+        # Initialize only venues needed for this run: futures scanner plus venues
+        # that actually own active legacy signals. Avoid loading every exchange
+        # (and hitting rate limits) on each 5-minute management cycle.
+        names = list(dict.fromkeys(required_names if required_names is not None else EXCHANGE_NAMES))
+        for name in names:
             try:
                 cls = getattr(ccxt, name)
                 ex = cls({
@@ -1515,11 +1519,39 @@ def update_chandelier_stop(signal, df):
     return False
 
 
-def manage_signal(signal, current_price):
+def manage_signal(signal, current_price, candle_high=None, candle_low=None, candle_open=None):
+    """Manage a signal using an observed price and, when available, a closed candle range."""
     if signal.get("status") != "ACTIVE":
         return False
 
     changed = False
+
+    high = safe_float(candle_high)
+    low = safe_float(candle_low)
+    open_price = safe_float(candle_open)
+
+    def stop_exit_price():
+        sl = safe_float(signal.get("sl"))
+        if high is None or low is None or sl is None:
+            return current_price
+        if open_price is not None:
+            if signal.get("side") == "BUY" and open_price <= sl:
+                return open_price
+            if signal.get("side") != "BUY" and open_price >= sl:
+                return open_price
+        return sl
+
+    def stop_touched():
+        sl = safe_float(signal.get("sl"))
+        if high is None or low is None or sl is None:
+            return stop_hit(signal, current_price)
+        return low <= sl if signal.get("side") == "BUY" else high >= sl
+
+    def target_touched(level_name):
+        level = safe_float(signal.get(level_name))
+        if high is None or low is None or level is None:
+            return price_hit(signal, current_price, level_name)
+        return high >= level if signal.get("side") == "BUY" else low <= level
 
     created = signal.get("created_at")
     if created:
@@ -1546,9 +1578,9 @@ def manage_signal(signal, current_price):
     )
     if is_v3:
         # Stop takes priority over an unbooked partial target.
-        if stop_hit(signal, current_price):
+        if stop_touched():
             remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
-            if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+            if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
                 print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
                 return False
             signal["status"] = "CLOSED"
@@ -1563,7 +1595,7 @@ def manage_signal(signal, current_price):
             signal["updated_at"] = iso_now()
             return True
 
-        if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+        if not signal.get("tp1_hit") and target_touched("tp1"):
             partial_pct = safe_float(signal.get("components", {}).get("partial_pct"), 1.0 / 3.0)
             partial_target = safe_float(signal.get("tp1"))
             if partial_target is None or not close_piece(signal, partial_target, partial_pct, "tp1"):
@@ -1578,10 +1610,10 @@ def manage_signal(signal, current_price):
             return True
         return False
 
-    # Stop is checked before new TP levels.
-    if stop_hit(signal, current_price):
+    # Stop is checked before new TP levels. Use the full closed-candle range when available.
+    if stop_touched():
         remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+        if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: stop exit not booked; keeping signal active")
             return False
         signal["status"] = "CLOSED"
@@ -1593,7 +1625,7 @@ def manage_signal(signal, current_price):
     is_single_target = signal.get("components", {}).get("setup") in {
         "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
     }
-    if is_single_target and price_hit(signal, current_price, "tp1"):
+    if is_single_target and target_touched("tp1"):
         remaining = safe_float(signal.get("remaining_fraction"), 1.0)
         if remaining > 0 and not close_piece(signal, signal["tp1"], remaining, "tp1"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: final target exit not booked; keeping signal active")
@@ -1603,21 +1635,32 @@ def manage_signal(signal, current_price):
         signal["updated_at"] = iso_now()
         return True
 
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+    if not signal.get("tp1_hit") and target_touched("tp1"):
         if not close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP1 exit not booked; leaving trade state unchanged")
             return changed
         # Move the remaining position's stop to breakeven only after TP1 is booked.
         signal["sl"] = signal["entry"]
         changed = True
+        # If the same closed candle also crossed the newly raised breakeven stop,
+        # stop-first is the conservative assumption because OHLC has no intrabar path.
+        if stop_touched():
+            remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+            if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
+                print(f"[MANAGE ERROR] {signal.get('symbol')}: breakeven exit not booked; keeping signal active")
+                return changed
+            signal["status"] = "CLOSED"
+            signal["closed_reason"] = "SL"
+            signal["updated_at"] = iso_now()
+            return True
 
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
+    if not signal.get("tp2_hit") and target_touched("tp2"):
         if not close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP2 exit not booked; leaving remaining state unchanged")
             return changed
         changed = True
 
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
+    if not signal.get("tp3_hit") and target_touched("tp3"):
         if not close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP3 exit not booked; leaving remaining state unchanged")
             return changed
@@ -1652,8 +1695,38 @@ def update_open_signals(state, manager):
             continue
 
         price = manager.ticker_price(exchange, symbol)
+
+        # Inspect the most recently CLOSED 5m candle, not only the instantaneous ticker.
+        # If both SL and TP lie inside one candle, manage_signal gives the stop priority.
+        candle_high = candle_low = candle_close = candle_open = None
+        try:
+            raw_5m = manager.fetch_ohlcv(exchange, symbol, timeframe="5m", limit=2)
+            if raw_5m and len(raw_5m) >= 2:
+                candle = raw_5m[-2]  # final row is the still-forming candle
+                candle_ts = safe_float(candle[0])
+                last_managed_ts = safe_float(signal.get("last_managed_candle_ts"), -1)
+                created = signal.get("created_at")
+                created_ms = None
+                if created:
+                    try:
+                        created_ms = datetime.fromisoformat(created).timestamp() * 1000.0
+                    except (TypeError, ValueError, OverflowError):
+                        created_ms = None
+                if (candle_ts is not None and candle_ts > last_managed_ts
+                        and (created_ms is None or candle_ts >= created_ms)):
+                    candle_open = safe_float(candle[1])
+                    candle_high = safe_float(candle[2])
+                    candle_low = safe_float(candle[3])
+                    candle_close = safe_float(candle[4])
+                    if candle_high is not None and candle_low is not None:
+                        signal["last_managed_candle_ts"] = candle_ts
+        except Exception as exc:
+            print(f"[CANDLE CHECK SKIP] {symbol}: {type(exc).__name__}: {exc}")
+
         if price is None:
-            print(f"[MANAGE SKIP] {symbol}: ticker price unavailable")
+            price = candle_close
+        if price is None:
+            print(f"[MANAGE SKIP] {symbol}: ticker and closed-candle prices unavailable")
             continue
 
         before = {
@@ -1684,7 +1757,7 @@ def update_open_signals(state, manager):
             except Exception as exc:
                 print(f"[TRAILING SKIP] {symbol}: {type(exc).__name__}: {exc}")
 
-        changed = manage_signal(signal, price) or trailing_updated
+        changed = manage_signal(signal, price, candle_high=candle_high, candle_low=candle_low, candle_open=candle_open) or trailing_updated
         if not changed:
             continue
 
@@ -1849,143 +1922,71 @@ def performance_report(state):
     )
 
 
-def format_signal(signal):
-    """Render a compact, professional Telegram alert with only actionable levels."""
-    side = str(signal.get("side", "BUY")).upper()
-    is_long = side == "BUY"
-    emoji = "🟢" if is_long else "🔴"
-    components = signal.get("components", {}) or {}
-    setup = components.get("setup", "")
-    is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-    is_reference_futures = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
-    is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION" or is_reference_futures
+def strategy_presentation(setup):
+    """Persian strategy labels and trade-management rules for Telegram alerts."""
+    labels = {
+        "REFERENCE_RSI_STOCH_ATR_RR15": ("بازگشت RSI + کراس استوکاستیک", "فیوچرز خطی USDT-M", "بازگشت RSI از اشباع، کراس واقعی Stochastic و تأیید حجم", "خروج کامل در هدف ۱٫۵R", "در مرحله اعتبارسنجی؛ سودآوری هنوز اثبات نشده است"),
+        "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3": ("شکست روند + قدرت ADX", "طبق بازار ثبت‌شده", "شکست سقف/کف، فیلتر EMA200 و قدرت روند ADX", "برداشت یک‌سوم در ۰٫۷۵R؛ مدیریت باقی‌مانده با Chandelier و ATR", "عملکرد زنده باید جداگانه ارزیابی شود"),
+        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION": ("ترکیب EMA + RSI + Stochastic", "طبق بازار ثبت‌شده", "هم‌جهتی روند و مومنتوم", "خروج کامل در هدف نهایی", "استراتژی قدیمی؛ آمار آن با نسخه جدید ترکیب نمی‌شود"),
+    }
+    return labels.get(setup, ("استراتژی تکنیکال ترکیبی", "بازار ثبت‌شده در سیگنال", "سطوح تکنیکال و مدیریت معامله", "TP1: پنجاه درصد، TP2: سی درصد، TP3: بیست درصد", "عملکرد بر اساس تاریخچه همین نسخه بررسی شود"))
 
-    entry = safe_float(signal.get("entry"))
-    sl = safe_float(signal.get("sl"))
-    tp1 = safe_float(signal.get("tp1"))
-    support = safe_float(signal.get("support"))
-    resistance = safe_float(signal.get("resistance"))
-    ema200 = safe_float(components.get("ema200"))
-    adx = safe_float(components.get("adx14"))
-    risk_pct = safe_float(signal.get("risk_pct"))
-    rr = safe_float(signal.get("rr"))
+
+def format_signal(signal):
+    """Render a polished Persian Telegram alert with strategy-specific rules."""
+    side = str(signal.get("side", "BUY")).upper()
+    is_long = side in {"BUY", "LONG"}
+    side_fa = "خرید (LONG)" if is_long else "فروش (SHORT)"
+    emoji = "🟢" if is_long else "🔴"
+    c = signal.get("components", {}) or {}
+    setup = str(c.get("setup", ""))
+    strategy, market_type, method, management, validation = strategy_presentation(setup)
+    is_reference = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+    symbol = html.escape(str(signal.get("symbol", "نامشخص")))
+    exchange = html.escape(str(signal.get("exchange", "نامشخص")))
+    entry, sl, tp1 = (safe_float(signal.get(k)) for k in ("entry", "sl", "tp1"))
+    rr, risk_pct = safe_float(signal.get("rr")), safe_float(signal.get("risk_pct"))
     actual_risk = safe_float(signal.get("actual_risk_usd"))
     risk_target = safe_float(signal.get("risk_target_usd"))
-
-    # Never publish a level on the wrong side of price as "nearby support/resistance".
-    if entry is not None:
-        if support is not None and support >= entry:
-            support = None
-        if resistance is not None and resistance <= entry:
-            resistance = None
-
-    fundamentals = signal.get("fundamentals", {}) or {}
-    funding = safe_float(fundamentals.get("funding"))
-    oi = safe_float(fundamentals.get("open_interest"))
-    funding_text = f"{funding * 100:.4f}%" if funding is not None else "Unavailable"
-    oi_text = f"{oi:,.2f}" if oi is not None else "Unavailable"
-
-    news = signal.get("news", {}) or {}
-    news_label = html.escape(str(news.get("label", "Unavailable")))
-    news_adjustment = safe_float(news.get("score_adjustment"), 0) or 0
-    news_items = news.get("headlines", []) or []
-    headline_lines = "".join(
-        f"  • {html.escape(str(item.get('title', ''))[:140])}\\n"
-        for item in news_items[:3]
-    ).rstrip("\\n")
-    trend = html.escape(str(signal.get("trend", "N/A")))
-    exchange = html.escape(str(signal.get("exchange", "N/A")))
-    symbol = html.escape(str(signal.get("symbol", "N/A")))
-    strength = html.escape(str(signal.get("strength", "N/A")))
-    sl_method = html.escape(str(signal.get("sl_method", "Market structure")))
-
+    qty = safe_float(signal.get("position_quantity"))
     lines = [
-        f"{emoji} <b>{symbol}  |  {side}</b>",
-        f"<i>{exchange} {'USDT-M Futures' if is_reference_futures else 'Spot'} · 4H strategy</i>",
-        f"━━━━━━━━━━━━━━━━━━",
-        f"<b>ENTRY</b>  <code>{fmt_price(entry)}</code>",
-        f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
-        + (f"  <i>(-{risk_pct:.2f}%)</i>" if risk_pct is not None else ""),
+        f"{emoji} <b>سیگنال جدید {side_fa}</b>",
+        f"💎 <b>{symbol}</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        f"🧭 <b>استراتژی:</b> {html.escape(strategy)}",
+        f"⏱ <b>تایم‌فریم:</b> ۴ ساعته  |  <b>بازار:</b> {html.escape(market_type)}",
+        f"🏦 <b>صرافی:</b> {exchange}",
+        "", "📍 <b>نقاط ورود و خروج</b>",
+        f"ورود: <code>{fmt_price(entry)}</code>",
+        f"حد ضرر (SL): <code>{fmt_price(sl)}</code>" + (f" · ریسک قیمتی {risk_pct:.2f}٪" if risk_pct is not None else ""),
     ]
-
-    lines.extend([
-        "",
-        "<b>NEWS CHECK</b>",
-        f"Status  · {news_label}  |  Score adjustment  · {news_adjustment:+g}",
-    ])
-    if headline_lines:
-        lines.extend(["Recent relevant headlines:", headline_lines])
+    if is_reference or setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION":
+        lines.append(f"🎯 حد سود نهایی: <code>{fmt_price(tp1)}</code> · خروج کامل")
+    elif is_v3:
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code> · برداشت یک‌سوم در ۰٫۷۵R", "📈 باقی موقعیت: تریلینگ Chandelier با ضریب ۳ برابر ATR", "🔒 پس از هدف اول، حد ضرر به نقطه ورود منتقل می‌شود"])
     else:
-        lines.append("No relevant headline found in the feeds checked; this does not mean the market has no news.")
-
-    if is_v3:
-        lines.extend([
-            "",
-            "<b>TRADE MANAGEMENT</b>",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · Close ⅓ at +0.75R",
-            "📈 <b>Runner</b>  · Remaining ⅔ managed by Chandelier (3×ATR)",
-            "🔒 After TP1  · Stop moves to breakeven; trail updates on closed 4H candles",
-        ])
-    elif is_reference_futures:
-        lines.extend(["", f"🎯 <b>TAKE PROFIT</b>  <code>{fmt_price(tp1)}</code>  · Close 100% at +1.5R",
-                      f"📉 <b>Direction</b>  · {'LONG' if is_long else 'SHORT'}",
-                      f"Execution estimate · fee {FEE_RATE*100:.3f}% + slippage {SLIPPAGE_RATE*100:.3f}% each side"])
-    elif is_legacy_single_tp:
-        lines.extend(["", f"🎯 <b>FINAL TARGET</b>  <code>{fmt_price(tp1)}</code>  · Close 100%"])
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code> · ۵۰٪ حجم", f"🎯 هدف دوم: <code>{fmt_price(signal.get('tp2'))}</code> · ۳۰٪ حجم", f"🎯 هدف سوم: <code>{fmt_price(signal.get('tp3'))}</code> · ۲۰٪ حجم"])
+    lines.extend(["", "🧠 <b>منطق صدور سیگنال</b>", html.escape(method)])
+    if is_reference:
+        rsi_value, k_value, d_value, volume_ratio = (safe_float(c.get(k)) for k in ("rsi", "stoch_k", "stoch_d", "volume_ratio"))
+        lines.extend([f"• RSI(14): {rsi_value:.1f}" if rsi_value is not None else "• RSI(14): نامشخص", f"• Stochastic K/D: {k_value:.1f} / {d_value:.1f}" if k_value is not None and d_value is not None else "• Stochastic: نامشخص", f"• حجم نسبت به میانگین ۲۰ کندل: {volume_ratio:.2f} برابر" if volume_ratio is not None else "• نسبت حجم: نامشخص", f"• ATR(14): <code>{fmt_price(c.get('atr14'))}</code>"])
     else:
-        lines.extend([
-            "",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · 50%",
-            f"🎯 <b>TP2</b>  <code>{fmt_price(signal.get('tp2'))}</code>  · 30%",
-            f"🎯 <b>TP3</b>  <code>{fmt_price(signal.get('tp3'))}</code>  · 20%",
-        ])
-
-    levels = []
-    if support is not None:
-        levels.append(f"🟩 Support  <code>{fmt_price(support)}</code>")
-    if resistance is not None:
-        levels.append(f"🟥 Resistance  <code>{fmt_price(resistance)}</code>")
-    if levels:
-        lines.extend(["", "<b>MARKET LEVELS</b>", *levels])
-
-    lines.extend([
-        "",
-        "<b>SETUP & RISK</b>",
-        f"Trend  · {trend}",
-        f"ADX(14)  · {f'{adx:.1f}' if adx is not None else 'N/A'}"
-        + (f"  |  EMA200  <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
-        f"Stop model  · {sl_method}",
-    ])
-
-    if is_v3:
-        lines.extend([
-            "RR نهایی: متغیر  · تریلینگ استاپ؛ depends on trailing stop",
-            "Validation  · Live-market performance not yet established",
-        ])
-    else:
-        lines.append(f"Estimated RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
-    if is_reference_futures:
-        lines.append("Research status · forward validation required; signal-only, no orders are placed")
-
-    lines.extend([
-        "",
-        "<b>CONTEXT</b>",
-        f"Funding  · {funding_text}  |  OI  · {oi_text}",
-        f"Signal expiry  · 48h",
-    ])
-    if risk_target is not None or actual_risk is not None:
-        lines.append(
-            f"Risk budget  · Target ${risk_target:.2f}" if risk_target is not None
-            else "Risk budget  · Target N/A"
-        )
-        if actual_risk is not None:
-            lines.append(f"Estimated risk incl. fees/slippage  · ${actual_risk:.2f}")
-
-    if headline_lines:
-        lines.extend(["", "<b>NEWS HEADLINES</b>", headline_lines.rstrip()])
-
+        lines.append(f"• وضعیت روند: {html.escape(str(signal.get('trend', 'نامشخص')))}")
+        adx, ema200 = safe_float(c.get("adx14")), safe_float(c.get("ema200"))
+        if adx is not None: lines.append(f"• قدرت روند ADX(14): {adx:.1f}")
+        if ema200 is not None: lines.append(f"• EMA200: <code>{fmt_price(ema200)}</code>")
+    lines.extend(["", "🛡 <b>مدیریت ریسک</b>", f"• نسبت سود به زیان هدف: {rr:.2f}R" if rr is not None else "• نسبت سود به زیان: ثبت نشده", f"• بودجه ریسک هدف: ${risk_target:.2f}" if risk_target is not None else "• بودجه ریسک هدف: نامشخص", f"• ریسک برآوردی با هزینه‌ها: ${actual_risk:.2f}" if actual_risk is not None else "• ریسک نهایی: نامشخص", f"• حجم موقعیت: {qty:.6g}" if qty is not None else "• حجم موقعیت: نامشخص", "• اعتبار سیگنال: ۴۸ ساعت", f"• روش مدیریت: {html.escape(management)}"])
+    if is_reference:
+        funding = safe_float((signal.get("fundamentals") or {}).get("funding"))
+        lines.extend([f"• کارمزد برآوردی: {FEE_RATE*100:.3f}٪ هر سمت", f"• لغزش قیمت برآوردی: {SLIPPAGE_RATE*100:.3f}٪ هر سمت", f"• Funding فعلی: {funding*100:.4f}٪" if funding is not None else "• Funding فعلی: در دسترس نیست"])
+    news = signal.get("news", {}) or {}
+    headlines = news.get("headlines", []) or []
+    lines.extend(["", "📰 <b>وضعیت اخبار</b>", "• اخبار در تصمیم ورود دخالت داده نشده‌اند؛ صرفاً اطلاعات تکمیلی هستند."])
+    for item in headlines[:2]:
+        if isinstance(item, dict) and item.get("title"): lines.append("• " + html.escape(str(item["title"])[:130]))
+    lines.extend(["", "━━━━━━━━━━━━━━━━━━", f"ℹ️ <b>اعتبارسنجی:</b> {html.escape(validation)}", "⚠️ این پیام تحلیلی است؛ ربات سفارش واقعی ثبت نمی‌کند."])
     return "\n".join(lines)
-
 
 # ============================================================
 # SCANNER
@@ -2019,6 +2020,14 @@ def has_potential_long_setup(df):
                       int((work["close"].iloc[-9:-1] > work["open"].iloc[-9:-1]).sum()) >= 3)
     return bool(breakout or pullback or rejection or failed_breakdown or spike_pullback)
 
+def candidate_exchange_names(manager, preferred_exchange_name, symbol):
+    """Return only the selected futures venue; never route new entries to legacy spot venues."""
+    exchange = manager.get_exchange(preferred_exchange_name)
+    if exchange is None or symbol not in exchange.markets:
+        return []
+    return [preferred_exchange_name]
+
+
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
     headlines = fetch_news_context()
@@ -2041,12 +2050,9 @@ def scan_market(manager, state):
     rate_limited_exchanges = set()
 
     for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
-        exchange_names = [preferred_exchange_name]
-        for fallback_name in EXCHANGE_NAMES:
-            if fallback_name not in exchange_names:
-                fallback_exchange = manager.get_exchange(fallback_name)
-                if fallback_exchange and symbol in fallback_exchange.markets:
-                    exchange_names.append(fallback_name)
+        # New entries must never fall back to legacy spot venues.
+        # Legacy exchanges remain loaded separately for managing old open signals.
+        exchange_names = candidate_exchange_names(manager, preferred_exchange_name, symbol)
 
         for exchange_name in exchange_names:
             # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
@@ -2113,7 +2119,7 @@ def scan_market(manager, state):
                     stats["rate_limited_exchanges"].add(exchange_name)
                     print(
                         f"[RATE LIMIT] {exchange_name}: pausing this venue for the rest of this scan; "
-                        f"will try fallback exchanges."
+                        f"no fallback venue will be used for new entries."
                     )
                 else:
                     stats["errors"] += 1
@@ -2169,13 +2175,37 @@ def main(manage_only=False):
         )
 
     manager = ExchangeManager()
+    active_exchange_names = sorted({
+        str(signal.get("exchange"))
+        for signal in state.get("signals", [])
+        if signal.get("status") == "ACTIVE" and signal.get("exchange")
+    })
+    required_exchange_names = list(active_exchange_names)
+    if not manage_only:
+        required_exchange_names.extend(
+            name for name in SCAN_EXCHANGE_NAMES if name not in required_exchange_names
+        )
+    if manage_only and not required_exchange_names:
+        print("No active signals to manage; skipping exchange initialization.")
+        return
 
-    if not manager.build():
+    if not manager.build(required_names=required_exchange_names):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
-            "هیچ صرافی قابل دسترسی نبود."
+            "صرافی موردنیاز این اجرا در دسترس نبود؛ اسکن یا مدیریت بدون قیمت معتبر انجام نشد."
         )
         return
+    if not manage_only:
+        missing_scan_venues = [name for name in SCAN_EXCHANGE_NAMES if name not in manager.exchanges]
+        if missing_scan_venues:
+            message = ", ".join(missing_scan_venues)
+            print(f"[FATAL] Required scanner venue unavailable: {message}")
+            telegram_send(
+                "❌ <b>اسکن متوقف شد</b>\n"
+                f"صرافی ضروری فیوچرز در دسترس نیست: <code>{html.escape(message)}</code>\n"
+                "برای جلوگیری از سیگنال‌سازی با بازار اشتباه، اسکن انجام نشد."
+            )
+            return
 
     # Manage existing signals first and notify Telegram about every new TP/SL/expiry event.
     management_events = update_open_signals(state, manager)
@@ -2238,7 +2268,7 @@ def main(manage_only=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser = argparse.ArgumentParser(description="Crypto USDT-M futures signal bot")
     parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
     args = parser.parse_args()
     try:
