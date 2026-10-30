@@ -30,8 +30,8 @@ QUOTE = "USDT"
 TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
-MAX_COINS = 250  # Cap scan time after ranking markets by quote volume
-MAX_SYMBOLS_PER_EXCHANGE = 100  # Keep scan coverage balanced across exchanges
+MAX_COINS = None  # Scan every eligible active USDT-M perpetual contract
+MAX_SYMBOLS_PER_EXCHANGE = None  # No per-exchange symbol cap
 MIN_SCORE = 12
 # Reject BUY entries with too little upside room before the nearest resistance.
 # Initial threshold; validate against out-of-sample backtests before tuning.
@@ -356,7 +356,7 @@ class ExchangeManager:
 
                 if MAX_COINS is not None and len(ordered) >= MAX_COINS:
                     return ordered
-                if added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
+                if MAX_SYMBOLS_PER_EXCHANGE is not None and added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
                     break
 
         return ordered
