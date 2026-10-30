@@ -8,11 +8,12 @@ class ReferenceFuturesBacktestTests(unittest.TestCase):
         funding = pd.DataFrame({
             "funding_time": pd.to_datetime(["2024-01-01T08:00:00Z", "2024-01-01T16:00:00Z"], utc=True),
             "funding_rate": [0.001, 0.0005],
+            "mark_price": [1000.0, 1000.0],
         })
         start = pd.Timestamp("2024-01-01T00:00:00Z")
         end = pd.Timestamp("2024-01-01T20:00:00Z")
-        long_cash, n = funding_cashflow(funding, start, end, "LONG", 1000.0)
-        short_cash, _ = funding_cashflow(funding, start, end, "SHORT", 1000.0)
+        long_cash, n = funding_cashflow(funding, start, end, "LONG", 1.0)
+        short_cash, _ = funding_cashflow(funding, start, end, "SHORT", 1.0)
         self.assertEqual(n, 2)
         self.assertAlmostEqual(long_cash, -1.5)
         self.assertAlmostEqual(short_cash, 1.5)
@@ -23,10 +24,11 @@ class ReferenceFuturesBacktestTests(unittest.TestCase):
                 "2024-01-01T00:00:00Z", "2024-01-01T08:00:00Z", "2024-01-01T16:00:00Z"
             ], utc=True),
             "funding_rate": [0.01, 0.001, 0.01],
+            "mark_price": [100.0, 100.0, 100.0],
         })
         cash, n = funding_cashflow(
             funding, pd.Timestamp("2024-01-01T00:00:00Z"),
-            pd.Timestamp("2024-01-01T12:00:00Z"), "LONG", 100.0)
+            pd.Timestamp("2024-01-01T12:00:00Z"), "LONG", 1.0)
         self.assertEqual(n, 1)
         self.assertAlmostEqual(cash, -0.1)
 
