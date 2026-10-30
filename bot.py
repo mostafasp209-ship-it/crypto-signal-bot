@@ -1394,11 +1394,14 @@ def close_piece(signal, exit_price, fraction, label):
         return False
 
     piece_qty = quantity * fraction
-    if signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15":
+    is_reference_futures = signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
+    if is_reference_futures:
         slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
         exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
     gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
-    fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), FEE_RATE) or 0.0
+    # Preserve the 0.10% legacy fee model for already-open spot signals.
+    fee_default = FEE_RATE if is_reference_futures else 0.001
+    fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), fee_default)
     fees = (entry + exit_price) * piece_qty * fee_rate
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
     signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
@@ -2061,7 +2064,12 @@ def scan_market(manager, state):
                     closed_ts = safe_float(df.iloc[-1].get("timestamp"))
                     current_ts = safe_float(raw[-1][0])
                     interval_ms = safe_float(exchange.parse_timeframe(TIMEFRAME), 14400.0) * 1000.0
-                    if closed_ts is not None and current_ts is not None and abs(current_ts-closed_ts-interval_ms) < 1:
+                    now_ms = utc_now().timestamp() * 1000.0
+                    # The scheduled scan runs shortly after the UTC 4H boundary.
+                    # If Actions starts late, do not pretend the old candle open is executable.
+                    if (closed_ts is not None and current_ts is not None
+                            and abs(current_ts-closed_ts-interval_ms) < 1
+                            and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
 
