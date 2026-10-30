@@ -1606,10 +1606,10 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None, cand
             return True
         return False
 
-    # Stop is checked before new TP levels.
-    if stop_hit(signal, current_price):
+    # Stop is checked before new TP levels. Use the full closed-candle range when available.
+    if stop_touched():
         remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
+        if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: stop exit not booked; keeping signal active")
             return False
         signal["status"] = "CLOSED"
@@ -1621,7 +1621,7 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None, cand
     is_single_target = signal.get("components", {}).get("setup") in {
         "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
     }
-    if is_single_target and price_hit(signal, current_price, "tp1"):
+    if is_single_target and target_touched("tp1"):
         remaining = safe_float(signal.get("remaining_fraction"), 1.0)
         if remaining > 0 and not close_piece(signal, signal["tp1"], remaining, "tp1"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: final target exit not booked; keeping signal active")
@@ -1631,7 +1631,7 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None, cand
         signal["updated_at"] = iso_now()
         return True
 
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+    if not signal.get("tp1_hit") and target_touched("tp1"):
         if not close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP1 exit not booked; leaving trade state unchanged")
             return changed
