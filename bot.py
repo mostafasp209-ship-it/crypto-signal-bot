@@ -2195,6 +2195,17 @@ def main(manage_only=False):
             "صرافی موردنیاز این اجرا در دسترس نبود؛ اسکن یا مدیریت بدون قیمت معتبر انجام نشد."
         )
         return
+    if not manage_only:
+        missing_scan_venues = [name for name in SCAN_EXCHANGE_NAMES if name not in manager.exchanges]
+        if missing_scan_venues:
+            message = ", ".join(missing_scan_venues)
+            print(f"[FATAL] Required scanner venue unavailable: {message}")
+            telegram_send(
+                "❌ <b>اسکن متوقف شد</b>\n"
+                f"صرافی ضروری فیوچرز در دسترس نیست: <code>{html.escape(message)}</code>\n"
+                "برای جلوگیری از سیگنال‌سازی با بازار اشتباه، اسکن انجام نشد."
+            )
+            return
 
     # Manage existing signals first and notify Telegram about every new TP/SL/expiry event.
     management_events = update_open_signals(state, manager)
