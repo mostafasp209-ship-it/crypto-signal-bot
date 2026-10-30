@@ -162,6 +162,18 @@ class FuturesStrategyTests(unittest.TestCase):
         self.assertEqual(sig["status"],"CLOSED")
         self.assertEqual(sig["closed_reason"],"TP1")
 
+
+    def test_breakeven_stop_wins_after_tp1_in_same_candle(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"BUY","status":"ACTIVE","entry":100.0,"sl":98.0,
+            "tp1":103.0,"tp2":106.0,"tp3":109.0,"components":{"setup":"LEGACY_MULTI_TARGET","slippage_rate":0.0002,"fee_rate":0.0005},
+            "initial_sl":98.0,"initial_risk_per_unit":2.0,"position_quantity":1.0,"remaining_fraction":1.0,
+            "realized_pnl":0.0,"fees_paid":0.0,"tp1_hit":False,"tp2_hit":False,"tp3_hit":False}
+        self.assertTrue(bot.manage_signal(sig,100.0,candle_open=100.0,candle_high=104.0,candle_low=99.5))
+        self.assertEqual(sig["status"],"CLOSED")
+        self.assertEqual(sig["closed_reason"],"SL")
+        self.assertEqual(sig["remaining_fraction"],0.0)
+        self.assertTrue(sig["tp1_hit"])
+
     def test_signal_formatter_is_persian_and_strategy_specific(self):
         sig={"symbol":"BTC/USDT:USDT","side":"BUY","exchange":"binanceusdm","entry":100.0,"sl":98.0,
             "tp1":103.0,"rr":1.5,"risk_pct":2.0,"actual_risk_usd":10.0,"risk_target_usd":10.0,
