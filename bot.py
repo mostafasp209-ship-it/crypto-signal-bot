@@ -344,7 +344,7 @@ class ExchangeManager:
                 symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
             except Exception as exc:
                 print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} spot symbols")
+            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
 
             added_from_exchange = 0
             for symbol in symbols:
@@ -1348,7 +1348,7 @@ def duplicate_exists(state, symbol, side):
     return False
 
 def duplicate_on_candle_exists(state, candidate):
-    """Prevent repeated entries from the same closed 4h breakout candle."""
+    """Prevent repeated entries from the same closed 4h signal candle."""
     candle_ts = candidate.get("signal_candle_timestamp")
     if candle_ts is None:
         return False
@@ -1978,7 +1978,7 @@ def format_signal(signal):
             else "Risk budget  · Target N/A"
         )
         if actual_risk is not None:
-            lines.append(f"Estimated risk incl. fees  · ${actual_risk:.2f}")
+            lines.append(f"Estimated risk incl. fees/slippage  · ${actual_risk:.2f}")
 
     if headline_lines:
         lines.extend(["", "<b>NEWS HEADLINES</b>", headline_lines.rstrip()])
@@ -2063,8 +2063,7 @@ def scan_market(manager, state):
                     stats["no_setup_or_score"] += 1
                     break
 
-                # V3 is the sole entry admission rule; news/fundamental context
-                # shown in the alert is informational and does not gate entry.
+                # RSI/Stochastic is the sole entry admission rule; news context is informational.
                 next_open = None
                 if raw and len(raw) >= 2:
                     closed_ts = safe_float(df.iloc[-1].get("timestamp"))
