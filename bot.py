@@ -1672,6 +1672,31 @@ def update_open_signals(state, manager):
             print(f"[MANAGE SKIP] {symbol}: ticker price unavailable")
             continue
 
+        # Inspect the most recently CLOSED 5m candle, not only the instantaneous ticker.
+        # If both SL and TP lie inside one candle, manage_signal gives the stop priority.
+        candle_high = candle_low = None
+        try:
+            raw_5m = manager.fetch_ohlcv(exchange, symbol, timeframe="5m", limit=2)
+            if raw_5m and len(raw_5m) >= 2:
+                candle = raw_5m[-2]  # final row is the still-forming candle
+                candle_ts = safe_float(candle[0])
+                last_managed_ts = safe_float(signal.get("last_managed_candle_ts"), -1)
+                created = signal.get("created_at")
+                created_ms = None
+                if created:
+                    try:
+                        created_ms = datetime.fromisoformat(created).timestamp() * 1000.0
+                    except (TypeError, ValueError, OverflowError):
+                        created_ms = None
+                if (candle_ts is not None and candle_ts > last_managed_ts
+                        and (created_ms is None or candle_ts >= created_ms)):
+                    candle_high = safe_float(candle[2])
+                    candle_low = safe_float(candle[3])
+                    if candle_high is not None and candle_low is not None:
+                        signal["last_managed_candle_ts"] = candle_ts
+        except Exception as exc:
+            print(f"[CANDLE CHECK SKIP] {symbol}: {type(exc).__name__}: {exc}")
+
         before = {
             "status": signal.get("status"),
             "tp1_hit": bool(signal.get("tp1_hit")),
@@ -1700,7 +1725,7 @@ def update_open_signals(state, manager):
             except Exception as exc:
                 print(f"[TRAILING SKIP] {symbol}: {type(exc).__name__}: {exc}")
 
-        changed = manage_signal(signal, price) or trailing_updated
+        changed = manage_signal(signal, price, candle_high=candle_high, candle_low=candle_low) or trailing_updated
         if not changed:
             continue
 
