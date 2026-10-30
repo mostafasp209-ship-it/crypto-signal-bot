@@ -2041,12 +2041,9 @@ def scan_market(manager, state):
     rate_limited_exchanges = set()
 
     for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
+        # New entries must never fall back to legacy spot venues.
+        # Legacy exchanges remain loaded separately for managing old open signals.
         exchange_names = [preferred_exchange_name]
-        for fallback_name in EXCHANGE_NAMES:
-            if fallback_name not in exchange_names:
-                fallback_exchange = manager.get_exchange(fallback_name)
-                if fallback_exchange and symbol in fallback_exchange.markets:
-                    exchange_names.append(fallback_name)
 
         for exchange_name in exchange_names:
             # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
