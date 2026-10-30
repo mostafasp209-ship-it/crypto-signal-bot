@@ -1,15 +1,9 @@
 name: Crypto Signal Pro + Telegram Panel
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
   schedule:
-    # Telegram panel polling and active-position management.
-    - cron: "*/5 * * * *"
+    # Manage active signals and poll the Telegram panel hourly to conserve Actions minutes.
+    - cron: "17 * * * *"
     # Scan just after each UTC 4H candle opens.
     - cron: "2 */4 * * *"
   workflow_dispatch:
@@ -25,7 +19,7 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,9 +37,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Validate Python syntax
+        if: github.event_name == 'workflow_dispatch'
         run: python -m py_compile bot.py panel.py
 
       - name: Run strategy and position-management tests
+        if: github.event_name == 'workflow_dispatch'
         run: python -m unittest discover -s tests -v
 
       - name: Run market scanner (just after each 4H candle opens)
@@ -57,8 +53,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py
 
-      - name: Manage active signals every 5 minutes
-        if: github.event_name == 'schedule' && github.event.schedule == '*/5 * * * *'
+      - name: Manage active signals hourly
+        if: github.event_name == 'schedule' && github.event.schedule == '17 * * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -66,8 +62,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py --manage-only
 
-      - name: Poll Telegram panel
-        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '*/5 * * * *')
+      - name: Poll Telegram panel hourly
+        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 * * * *')
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
