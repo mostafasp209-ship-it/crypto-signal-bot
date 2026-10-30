@@ -20,17 +20,11 @@ import requests
 # ============================================================
 
 EXCHANGE_NAMES = [
-    "binanceus",
-    "bitstamp",
-    "bitfinex",
-    "cryptocom",
-    "bitget",
+    # Keep legacy spot venues available only for managing already-open signals.
+    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm",
 ]
-
-FUNDING_SOURCES = [
-    "binanceus",
-    "bitstamp",
-]
+SCAN_EXCHANGE_NAMES = ["binanceusdm"]
+FUNDING_SOURCES = ["binanceusdm"]
 
 QUOTE = "USDT"
 TIMEFRAME = "4h"
@@ -48,7 +42,8 @@ MIN_RR = 1.35
 SIGNAL_EXPIRY_HOURS = 48
 RISK_USD = 10.0
 MAX_POSITION_USD = float(os.getenv("MAX_POSITION_USD", "200"))
-FEE_RATE = 0.001
+FEE_RATE = 0.0005
+SLIPPAGE_RATE = 0.0002
 
 TP_WEIGHTS = {
     "tp1": 0.50,
@@ -312,17 +307,32 @@ class ExchangeManager:
             result.append(symbol)
         return sorted(set(result))
 
+    def futures_symbols(self, exchange):
+        """Active linear USDT-margined perpetual contracts."""
+        result = []
+        for symbol, market in exchange.markets.items():
+            if not market.get("active", True) or not market.get("swap", False):
+                continue
+            if not market.get("linear", False):
+                continue
+            if market.get("quote") != QUOTE or market.get("settle") != QUOTE:
+                continue
+            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
+                continue
+            result.append(symbol)
+        return sorted(set(result))
+
     def scan_symbols(self):
-        # Prefer Binance.US, then fill with fallback exchanges.
+        # New entries are exclusively Binance USDⓈ-M perpetual futures.
         ordered = []
         seen = set()
 
-        for name in EXCHANGE_NAMES:
+        for name in SCAN_EXCHANGE_NAMES:
             ex = self.exchanges.get(name)
             if not ex:
                 continue
 
-            symbols = self.market_symbols(ex)
+            symbols = self.futures_symbols(ex)
             # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
             try:
                 tickers = ex.fetch_tickers(symbols)
@@ -1195,93 +1205,136 @@ def calculate_crypto_strategy_gates(df):
     )
     return result
 
-def build_signal(symbol, exchange_name, df, trend=None, fundamentals=None, news_context=None):
-    """Create a V3 spot BUY signal from a confirmed 4h breakout."""
-    strategy = calculate_crypto_strategy_gates(df)
-    if not strategy["signal_long"]:
-        return None
+def rsi(series, period=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
+    rs = avg_gain / (avg_loss + 1e-12)
+    return 100 - (100 / (1 + rs))
 
-    candle = df.iloc[-1]
-    entry = safe_float(candle.get("close"))
-    atr = strategy["atr"]
-    if entry is None or entry <= 0 or atr is None or atr <= 0:
-        return None
 
-    risk_per_unit = atr * strategy["atr_multiplier"]
-    sl = entry - risk_per_unit
-    partial_target = entry + strategy["partial_r"] * risk_per_unit
-    if sl <= 0 or partial_target <= entry:
-        return None
+def atr(high, low, close, period=14):
+    previous_close = close.shift(1)
+    tr = pd.concat([high-low, (high-previous_close).abs(), (low-previous_close).abs()], axis=1).max(axis=1)
+    return tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
 
-    risk_pct = risk_per_unit / entry * 100.0
-    # Size to stop loss plus estimated entry/stop fees, not price risk alone.
-    fee_adjusted_risk_per_unit = risk_per_unit + (entry + sl) * FEE_RATE
-    risk_sized_quantity = RISK_USD / fee_adjusted_risk_per_unit
-    cap_quantity = MAX_POSITION_USD / entry if MAX_POSITION_USD > 0 else risk_sized_quantity
-    quantity = min(risk_sized_quantity, cap_quantity)
-    position_value = quantity * entry
-    actual_risk_usd = quantity * fee_adjusted_risk_per_unit
-    candle_timestamp = safe_float(candle.get("timestamp"))
-    fundamentals = fundamentals or {}
-    news_context = news_context or {"score_adjustment": 0, "label": "unavailable", "headlines": []}
-    setup = "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+
+def stochastic(high, low, close, k_period=14, d_period=3):
+    lowest, highest = low.rolling(k_period).min(), high.rolling(k_period).max()
+    k = 100 * (close-lowest) / (highest-lowest+1e-12)
+    return k, k.rolling(d_period).mean()
+
+
+def calculate_reference_strategy_gates(df):
+    """Evaluate the confirmed 4H RSI/Stochastic reversal on the latest closed bar."""
+    result = {"signal_long": False, "signal_short": False, "atr": None, "rsi": None,
+              "stoch_k": None, "stoch_d": None, "volume_ratio": None, "signal_timestamp": None}
+    required = {"timestamp", "open", "high", "low", "close", "volume"}
+    if df is None or len(df) < 140 or not required.issubset(df.columns):
+        return result
+    work = df.copy()
+    for col in required:
+        work[col] = pd.to_numeric(work[col], errors="coerce")
+    work = work.dropna(subset=list(required)).reset_index(drop=True)
+    if len(work) < 140:
+        return result
+
+    close, high, low = work["close"], work["high"], work["low"]
+    rv, av = rsi(close, 14), atr(high, low, close, 14)
+    sk, sd = stochastic(high, low, close, 14, 3)
+    volma = work["volume"].rolling(20, min_periods=20).mean()
+    i = len(work)-1
+    vals = [safe_float(rv.iloc[i-1]), safe_float(rv.iloc[i]), safe_float(av.iloc[i]),
+            safe_float(sk.iloc[i-1]), safe_float(sd.iloc[i-1]),
+            safe_float(sk.iloc[i]), safe_float(sd.iloc[i]), safe_float(volma.iloc[i])]
+    if any(v is None for v in vals):
+        return result
+    rp, rn, atr_now, kp, dp, kn, dn, vm = vals
+    volume = safe_float(work.iloc[i]["volume"])
+    if volume is None or vm <= 0 or atr_now <= 0:
+        return result
+    vr = volume / vm
+    long_cross = kp <= dp and kn > dn and kn < 38
+    short_cross = kp >= dp and kn < dn and kn > 62
+    long_rsi = rp < 30 and rn >= 30
+    short_rsi = rp > 70 and rn <= 70
+    candle = work.iloc[i]
+    result.update({
+        "atr": atr_now, "rsi": rn, "stoch_k": kn, "stoch_d": dn,
+        "volume_ratio": vr, "signal_timestamp": safe_float(candle["timestamp"]),
+        "signal_long": bool(long_rsi and long_cross and volume > 1.12*vm and candle["close"] > candle["open"]),
+        "signal_short": bool(short_rsi and short_cross and volume > 1.12*vm and candle["close"] < candle["open"]),
+    })
+    return result
+
+
+def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamentals=None, news_context=None):
+    """Create a Binance USDⓈ-M 4H long/short signal using next candle open."""
+    st = calculate_reference_strategy_gates(df)
+    if not st["signal_long"] and not st["signal_short"]:
+        return None
+    raw_entry, atr_now = safe_float(next_open), safe_float(st["atr"])
+    if raw_entry is None or raw_entry <= 0 or atr_now is None or atr_now <= 0:
+        print(f"[SIGNAL SKIP] {symbol}: next 4H open unavailable; no close-price fallback")
+        return None
+    side = "BUY" if st["signal_long"] else "SELL"
+    entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
+    recent = df.tail(5)
+    if side == "BUY":
+        swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
+        if swing is None: return None
+        stop = min(swing, entry-1.32*atr_now)
+        risk = entry-stop
+    else:
+        swing = safe_float(pd.to_numeric(recent["high"], errors="coerce").max())
+        if swing is None: return None
+        stop = max(swing, entry+1.32*atr_now)
+        risk = stop-entry
+    risk_pct = risk/entry
+    if not (0.0035 < risk_pct < 0.038):
+        return None
+    target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
+    cost_unit = (entry+stop)*(FEE_RATE+SLIPPAGE_RATE)
+    raw_qty = RISK_USD/(risk+cost_unit)
+    cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
+    qty = min(raw_qty, cap_qty)
+    now = iso_now()
+    setup = "REFERENCE_RSI_STOCH_ATR_RR15"
     components = {
-        "setup": setup,
-        "strategy_mode": "breakout_adx_ema200_partial_chandelier",
-        "timeframe": TIMEFRAME,
-        "lookback": 30,
-        "lookbacks_checked": [10, 20, 30],
-        "breakout_level": strategy["breakout_level"],
-        "volume": safe_float(candle.get("volume")),
-        "volume_avg_20_prev": strategy["volume_avg"],
-        "volume_ratio": strategy["volume_ratio"],
-        "volume_multiplier": strategy["volume_multiplier"],
-        "atr14": atr,
-        "atr_multiplier": strategy["atr_multiplier"],
-        "ema200": strategy["ema200"],
-        "adx14": strategy["adx"],
-        "adx_threshold": 32.0,
-        "partial_r": strategy["partial_r"],
-        "partial_pct": strategy["partial_pct"],
-        "chandelier_atr_multiplier": strategy["chandelier_atr_multiplier"],
-        "out_of_sample_status": "NOT_VALIDATED_ON_REAL_MARKET_DATA",
+        "setup": setup, "strategy_mode": "rsi_recovery_stochastic_cross", "timeframe": "4h",
+        "rr": 1.5, "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
+        "stoch_k_period": 14, "stoch_d_period": 3, "stoch_long_zone_max": 38,
+        "stoch_short_zone_min": 62, "volume_multiplier": 1.12, "volume_ma_period": 20,
+        "atr_period": 14, "atr_multiplier": 1.32, "swing_lookback": 5,
+        "atr14": atr_now, "rsi": st["rsi"], "stoch_k": st["stoch_k"],
+        "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
+        "fee_rate": FEE_RATE, "slippage_rate": SLIPPAGE_RATE,
+        "entry_model": "next_4h_open", "out_of_sample_status": "NOT_VALIDATED_ON_REAL_MARKET_DATA",
     }
-    created_at = iso_now()
     return {
-        "id": f"{symbol.replace('/', '_')}_BUY_{int(time.time())}",
-        "symbol": symbol, "exchange": exchange_name, "side": "BUY", "status": "ACTIVE",
-        "strength": "آزمایشی V3", "score": 4, "created_at": created_at, "updated_at": created_at,
-        "expiry_at": (utc_now() + timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
-        "entry": entry, "sl": sl, "tp1": partial_target, "tp2": None, "tp3": None,
-        "support": None, "resistance": strategy["breakout_level"], "sl_method": "2x_ATR14",
-        "tp_methods": ["partial_1_3_at_0.75R_then_3xATR_chandelier"],
-        # Final RR is path-dependent because the remaining position uses a trailing stop.
-        "rr": None, "risk_pct": risk_pct,
-        "initial_risk_per_unit": risk_per_unit, "initial_sl": sl,
-        "risk_usd": RISK_USD, "risk_target_usd": RISK_USD, "actual_risk_usd": actual_risk_usd,
-        "position_quantity": quantity, "quantity": quantity, "position_value": position_value,
-        "position_capped": quantity + 1e-12 < risk_sized_quantity,
-        "signal_candle_timestamp": candle_timestamp,
-        "last_trailing_candle_ts": candle_timestamp,
-        "highest_close_since_entry": entry,
-        "trailing_active": False,
+        "id": f"{symbol.replace('/', '_').replace(':', '_')}_{side}_{int(time.time())}",
+        "symbol": symbol, "exchange": exchange_name, "side": side, "status": "ACTIVE",
+        "strength": "Research candidate RR1.5", "score": 0, "created_at": now, "updated_at": now,
+        "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
+        "entry": entry, "sl": stop, "tp1": target, "tp2": target, "tp3": target,
+        "support": None, "resistance": None, "sl_method": "5-bar_swing_vs_1.32_ATR14",
+        "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
+        "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
+        "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
+        "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
+        "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
         "components": components,
-        "entry_snapshot": {
-            "timeframe": TIMEFRAME, "setup": setup, "score": 4,
-            "breakout_level": strategy["breakout_level"],
-            "volume_ratio": strategy["volume_ratio"], "atr": atr,
-            "ema200": strategy["ema200"], "adx14": strategy["adx"],
-            "sl_method": "2x_ATR14",
-            "tp_method": "partial_1_3_at_0.75R_then_3xATR_chandelier",
-            "candle_timestamp": candle_timestamp, "captured_at": created_at,
-        },
-        "trend": "BULL — EMA200 4h",
-        "fundamentals": fundamentals, "news": news_context,
-        "tp1_hit": False, "tp2_hit": False, "tp3_hit": False,
-        "remaining_fraction": 1.0, "realized_pnl": 0.0, "fees_paid": 0.0,
-        "closed_reason": None,
+        "entry_snapshot": {"timeframe": "4h", "setup": setup, "rr": 1.5, "rsi": st["rsi"],
+            "stoch_k": st["stoch_k"], "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
+            "atr": atr_now, "swing_level": swing, "candle_timestamp": st["signal_timestamp"],
+            "next_open": raw_entry, "captured_at": now},
+        "trend": "4H RSI/Stochastic reversal", "fundamentals": fundamentals or {},
+        "news": news_context or {"score_adjustment": 0, "label": "not_used_for_entry", "headlines": []},
+        "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
+        "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
     }
-
 
 # ============================================================
 # TRADE MANAGEMENT
@@ -1341,8 +1394,12 @@ def close_piece(signal, exit_price, fraction, label):
         return False
 
     piece_qty = quantity * fraction
+    if signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15":
+        slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
+        exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
     gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
-    fees = (entry + exit_price) * piece_qty * FEE_RATE
+    fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), FEE_RATE) or 0.0
+    fees = (entry + exit_price) * piece_qty * fee_rate
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
     signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
     signal["remaining_fraction"] = max(0.0, remaining - fraction)
@@ -1523,10 +1580,9 @@ def manage_signal(signal, current_price):
         return True
 
     # This reference setup has one final target; the repeated TP fields are legacy compatibility.
-    is_single_target = (
-        signal.get("components", {}).get("setup")
-        == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
-    )
+    is_single_target = signal.get("components", {}).get("setup") in {
+        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
+    }
     if is_single_target and price_hit(signal, current_price, "tp1"):
         remaining = safe_float(signal.get("remaining_fraction"), 1.0)
         if remaining > 0 and not close_piece(signal, signal["tp1"], remaining, "tp1"):
@@ -1746,13 +1802,11 @@ def refresh_historical_stats(state):
 
 
 def performance_report(state):
-    # Report only the current V3 setup, never mix legacy 5m signals into the 4h forward test.
+    # Only the new RSI/Stochastic futures setup is included in the current forward test.
     start_at = state.get("forward_test_started_at")
-    signals = state.get("signals", [])
     signals = [
-        s for s in signals
-        if (s.get("components", {}) or {}).get("setup")
-        == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+        s for s in state.get("signals", [])
+        if (s.get("components", {}) or {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
     ]
     if start_at:
         signals = [
@@ -1793,7 +1847,8 @@ def format_signal(signal):
     components = signal.get("components", {}) or {}
     setup = components.get("setup", "")
     is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-    is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
+    is_reference_futures = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION" or is_reference_futures
 
     entry = safe_float(signal.get("entry"))
     sl = safe_float(signal.get("sl"))
@@ -1836,7 +1891,7 @@ def format_signal(signal):
 
     lines = [
         f"{emoji} <b>{symbol}  |  {side}</b>",
-        f"<i>{exchange} Spot · 4H strategy</i>",
+        f"<i>{exchange} {'USDT-M Futures' if is_reference_futures else 'Spot'} · 4H strategy</i>",
         f"━━━━━━━━━━━━━━━━━━",
         f"<b>ENTRY</b>  <code>{fmt_price(entry)}</code>",
         f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
@@ -1861,6 +1916,10 @@ def format_signal(signal):
             "📈 <b>Runner</b>  · Remaining ⅔ managed by Chandelier (3×ATR)",
             "🔒 After TP1  · Stop moves to breakeven; trail updates on closed 4H candles",
         ])
+    elif is_reference_futures:
+        lines.extend(["", f"🎯 <b>TAKE PROFIT</b>  <code>{fmt_price(tp1)}</code>  · Close 100% at +1.5R",
+                      f"📉 <b>Direction</b>  · {'LONG' if is_long else 'SHORT'}",
+                      f"Execution estimate · fee {FEE_RATE*100:.3f}% + slippage {SLIPPAGE_RATE*100:.3f}% each side"])
     elif is_legacy_single_tp:
         lines.extend(["", f"🎯 <b>FINAL TARGET</b>  <code>{fmt_price(tp1)}</code>  · Close 100%"])
     else:
@@ -1894,7 +1953,9 @@ def format_signal(signal):
             "Validation  · Live-market performance not yet established",
         ])
     else:
-        lines.append(f"Estimated net RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
+        lines.append(f"Estimated RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
+    if is_reference_futures:
+        lines.append("Research status · forward validation required; signal-only, no orders are placed")
 
     lines.extend([
         "",
@@ -1995,7 +2056,14 @@ def scan_market(manager, state):
 
                 # V3 is the sole entry admission rule; news/fundamental context
                 # shown in the alert is informational and does not gate entry.
-                signal = build_signal(symbol, exchange_name, df)
+                next_open = None
+                if raw and len(raw) >= 2:
+                    closed_ts = safe_float(df.iloc[-1].get("timestamp"))
+                    current_ts = safe_float(raw[-1][0])
+                    interval_ms = safe_float(exchange.parse_timeframe(TIMEFRAME), 14400.0) * 1000.0
+                    if closed_ts is not None and current_ts is not None and abs(current_ts-closed_ts-interval_ms) < 1:
+                        next_open = safe_float(raw[-1][1])
+                signal = build_signal(symbol, exchange_name, df, next_open=next_open)
 
                 if not signal:
                     stats["no_setup_or_score"] += 1
@@ -2063,24 +2131,23 @@ def scan_market(manager, state):
 
 def main(manage_only=False):
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT" + (" — MANAGEMENT ONLY" if manage_only else ""))
+    print("CRYPTO SIGNAL BOT — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
     print("Started:", iso_now())
     print("=" * 70)
 
     state = load_state()
 
-    # Version 3 starts a clean V3-only forward-test baseline without deleting trade history
-    # or disrupting any active positions. Legacy setups remain available for auditing.
-    if state.get("signal_history_reset_version", 0) < 3:
+    # V4 starts the RSI/Stochastic USDT-M forward-test baseline without deleting history.
+    if state.get("signal_history_reset_version", 0) < 4:
         state["forward_test_started_at"] = iso_now()
-        state["signal_history_reset_version"] = 3
+        state["signal_history_reset_version"] = 4
         refresh_historical_stats(state)
         save_state(state)
-        print("V3 forward-test baseline reset; historical and active signals preserved.")
+        print("RSI/Stochastic Futures forward-test baseline reset; historical and active signals preserved.")
         telegram_send(
-            "♻️ <b>شروع تست مستقل V3</b>\n"
+            "♻️ <b>شروع تست مستقل RSI/Stochastic Futures</b>\n"
             "شمارندهٔ عملکرد از صفر شروع شد. تاریخچه و سیگنال‌های فعال حذف نشدند؛ "
-            "گزارش عملکرد فقط معاملات V3 را حساب می‌کند."
+            "گزارش عملکرد فقط معاملات استراتژی جدید را حساب می‌کند."
         )
 
     manager = ExchangeManager()
