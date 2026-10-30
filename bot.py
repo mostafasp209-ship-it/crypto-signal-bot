@@ -1515,11 +1515,27 @@ def update_chandelier_stop(signal, df):
     return False
 
 
-def manage_signal(signal, current_price):
+def manage_signal(signal, current_price, candle_high=None, candle_low=None):
+    """Manage a signal using an observed price and, when available, a closed candle range."""
     if signal.get("status") != "ACTIVE":
         return False
 
     changed = False
+
+    high = safe_float(candle_high)
+    low = safe_float(candle_low)
+
+    def stop_touched():
+        sl = safe_float(signal.get("sl"))
+        if high is None or low is None or sl is None:
+            return stop_hit(signal, current_price)
+        return low <= sl if signal.get("side") == "BUY" else high >= sl
+
+    def target_touched(level_name):
+        level = safe_float(signal.get(level_name))
+        if high is None or low is None or level is None:
+            return price_hit(signal, current_price, level_name)
+        return high >= level if signal.get("side") == "BUY" else low <= level
 
     created = signal.get("created_at")
     if created:
@@ -1546,7 +1562,7 @@ def manage_signal(signal, current_price):
     )
     if is_v3:
         # Stop takes priority over an unbooked partial target.
-        if stop_hit(signal, current_price):
+        if stop_touched():
             remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
             if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
                 print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
@@ -1563,7 +1579,7 @@ def manage_signal(signal, current_price):
             signal["updated_at"] = iso_now()
             return True
 
-        if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
+        if not signal.get("tp1_hit") and target_touched("tp1"):
             partial_pct = safe_float(signal.get("components", {}).get("partial_pct"), 1.0 / 3.0)
             partial_target = safe_float(signal.get("tp1"))
             if partial_target is None or not close_piece(signal, partial_target, partial_pct, "tp1"):
@@ -1611,13 +1627,13 @@ def manage_signal(signal, current_price):
         signal["sl"] = signal["entry"]
         changed = True
 
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
+    if not signal.get("tp2_hit") and target_touched("tp2"):
         if not close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP2 exit not booked; leaving remaining state unchanged")
             return changed
         changed = True
 
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
+    if not signal.get("tp3_hit") and target_touched("tp3"):
         if not close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
             print(f"[MANAGE ERROR] {signal.get('symbol')}: TP3 exit not booked; leaving remaining state unchanged")
             return changed
