@@ -40,7 +40,7 @@ jobs:
       - name: Compile and unit test
         run: |
           python -m py_compile research/reference_futures_backtest.py
-          python -m unittest tests.test_reference_futures_backtest -v
+          python -m unittest discover -s tests -p 'test_reference_futures_backtest.py' -v
       - name: Run historical Binance USD-M backtest
         timeout-minutes: 50
         env:
