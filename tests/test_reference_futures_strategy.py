@@ -61,6 +61,36 @@ class FuturesStrategyTests(unittest.TestCase):
                 self.assertLess(sig["entry"],100)
                 self.assertAlmostEqual(sig["tp1"],sig["entry"]-1.5*(sig["sl"]-sig["entry"]))
 
+    def test_rsi_recovery_requires_a_real_cross(self):
+        data = make_frame("BUY")
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            rv = np.full(len(data), 50.0)
+            rv[-2:] = [31.0, 32.0]
+            with patch("bot.rsi", return_value=pd.Series(rv)):
+                result = bot.calculate_reference_strategy_gates(data)
+        self.assertFalse(result["signal_long"])
+
+    def test_stochastic_requires_a_real_cross(self):
+        data = make_frame("BUY")
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            k = np.full(len(data), 50.0)
+            d = np.full(len(data), 50.0)
+            k[-2:] = [25.0, 24.0]
+            d[-2:] = [22.0, 23.0]
+            with patch("bot.stochastic", return_value=(pd.Series(k), pd.Series(d))):
+                result = bot.calculate_reference_strategy_gates(data)
+        self.assertFalse(result["signal_long"])
+
+    def test_volume_filter_rejects_weak_volume(self):
+        data = make_frame("BUY")
+        data.loc[len(data)-1, "volume"] = 100.0
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            result = bot.calculate_reference_strategy_gates(data)
+        self.assertFalse(result["signal_long"])
+
     def test_no_next_open_means_no_signal(self):
         data=make_frame("BUY"); p=patch_indicators(len(data),"BUY")
         with p[0],p[1],p[2]:
