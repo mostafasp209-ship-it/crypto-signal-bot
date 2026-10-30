@@ -143,6 +143,25 @@ class FuturesStrategyTests(unittest.TestCase):
         self.assertEqual(sig["closed_reason"],"SL")
         self.assertLess(sig["last_exit_price"],95.0)
 
+
+    def test_reference_short_stop_uses_candle_high_not_stale_ticker(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"SELL","status":"ACTIVE","entry":100.0,"sl":102.0,
+            "tp1":97.0,"tp2":97.0,"tp3":97.0,"components":{"setup":SETUP,"slippage_rate":0.0002,"fee_rate":0.0005},
+            "initial_sl":102.0,"initial_risk_per_unit":2.0,"position_quantity":1.0,"remaining_fraction":1.0,
+            "realized_pnl":0.0,"fees_paid":0.0,"tp1_hit":False,"tp2_hit":False,"tp3_hit":False}
+        self.assertTrue(bot.manage_signal(sig,100.0,candle_open=100.0,candle_high=102.5,candle_low=99.0))
+        self.assertEqual(sig["status"],"CLOSED")
+        self.assertEqual(sig["closed_reason"],"SL")
+
+    def test_reference_long_target_uses_candle_high_not_stale_ticker(self):
+        sig={"symbol":"BTC/USDT:USDT","side":"BUY","status":"ACTIVE","entry":100.0,"sl":98.0,
+            "tp1":103.0,"tp2":103.0,"tp3":103.0,"components":{"setup":SETUP,"slippage_rate":0.0002,"fee_rate":0.0005},
+            "initial_sl":98.0,"initial_risk_per_unit":2.0,"position_quantity":1.0,"remaining_fraction":1.0,
+            "realized_pnl":0.0,"fees_paid":0.0,"tp1_hit":False,"tp2_hit":False,"tp3_hit":False}
+        self.assertTrue(bot.manage_signal(sig,100.0,candle_open=100.0,candle_high=103.5,candle_low=99.5))
+        self.assertEqual(sig["status"],"CLOSED")
+        self.assertEqual(sig["closed_reason"],"TP1")
+
     def test_signal_formatter_is_persian_and_strategy_specific(self):
         sig={"symbol":"BTC/USDT:USDT","side":"BUY","exchange":"binanceusdm","entry":100.0,"sl":98.0,
             "tp1":103.0,"rr":1.5,"risk_pct":2.0,"actual_risk_usd":10.0,"risk_target_usd":10.0,
