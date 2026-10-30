@@ -141,7 +141,7 @@ class FuturesStrategyTests(unittest.TestCase):
         msg=bot.format_signal(sig)
         self.assertIn("سیگنال جدید خرید",msg)
         self.assertIn("بازگشت RSI + کراس استوکاستیک",msg)
-        self.assertIn("۱٫۵R",msg)
+        self.assertIn("1.50R",msg)
         self.assertIn("سفارش واقعی ثبت نمی‌کند",msg)
 
 if __name__=="__main__":
