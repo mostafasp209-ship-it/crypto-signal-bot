@@ -1668,13 +1668,10 @@ def update_open_signals(state, manager):
             continue
 
         price = manager.ticker_price(exchange, symbol)
-        if price is None:
-            print(f"[MANAGE SKIP] {symbol}: ticker price unavailable")
-            continue
 
         # Inspect the most recently CLOSED 5m candle, not only the instantaneous ticker.
         # If both SL and TP lie inside one candle, manage_signal gives the stop priority.
-        candle_high = candle_low = None
+        candle_high = candle_low = candle_close = None
         try:
             raw_5m = manager.fetch_ohlcv(exchange, symbol, timeframe="5m", limit=2)
             if raw_5m and len(raw_5m) >= 2:
@@ -1692,10 +1689,17 @@ def update_open_signals(state, manager):
                         and (created_ms is None or candle_ts >= created_ms)):
                     candle_high = safe_float(candle[2])
                     candle_low = safe_float(candle[3])
+                    candle_close = safe_float(candle[4])
                     if candle_high is not None and candle_low is not None:
                         signal["last_managed_candle_ts"] = candle_ts
         except Exception as exc:
             print(f"[CANDLE CHECK SKIP] {symbol}: {type(exc).__name__}: {exc}")
+
+        if price is None:
+            price = candle_close
+        if price is None:
+            print(f"[MANAGE SKIP] {symbol}: ticker and closed-candle prices unavailable")
+            continue
 
         before = {
             "status": signal.get("status"),
