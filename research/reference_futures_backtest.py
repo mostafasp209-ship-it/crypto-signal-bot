@@ -312,11 +312,11 @@ def main():
         "interval":INTERVAL,"start":START,"fees_per_side":FEE,"slippage_per_side":SLIPPAGE,
         "funding":"Historical Binance fundingRate events accrued at each timestamp during open trades; positive rate means longs pay shorts.",
         "entry":"Signal on closed 4h candle; entry next candle open with adverse slippage.",
-        "stops":"5-bar swing vs 1.32*ATR baseline; stop gaps fill at next open; if SL and TP both touch in one candle, SL first.",
+        "stops":"5-bar swing vs 1.32*ATR baseline; stop gaps fill at next open; if SL and TP both touch in one candle, SL first. Live 48h signal expiry is modeled at the next 4h open.",
         "splits":"Chronological 60% train / 20% validation / 20% untouched holdout, per symbol.",
         "selection":"Configs ranked only by pooled validation expectancy. Holdout must not be used for tuning.",
         "survivorship_bias":"Universe is a fixed list of currently liquid symbols, not a delisted-contract universe; results are subject to survivorship and listing-history bias.",
-        "position_model":"One open trade per symbol; equal notional normalization; no portfolio leverage or cross-symbol capital constraint.",
+        "position_model":"One open trade per symbol; equal notional normalization; no portfolio leverage or cross-symbol capital constraint. Trades still open at a train/validation/holdout boundary are marked to the final close in that segment.",
         "ranked_results":ranked,"best_validation_config":best_name,
         "best_validation_holdout_trades":metrics(trades),
         "warning":"This is a research backtest, not a fill-perfect exchange simulation. OHLC cannot reveal intrabar path; stop-first is conservative. Do not deploy from one holdout result."}
