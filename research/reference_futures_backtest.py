@@ -53,7 +53,8 @@ def fetch_paginated(symbol, path, start_ms, end_ms, limit=1000):
         if not data:
             break
         rows.extend(data)
-        nxt = int(data[-1][0]) + 1
+        last_time = data[-1]["fundingTime"] if path.endswith("/fundingRate") else data[-1][0]
+        nxt = int(last_time) + 1
         if nxt <= cursor:
             raise RuntimeError(f"{symbol}: pagination stalled for {path}")
         cursor = nxt
