@@ -135,13 +135,20 @@ def make_signals(x, cfg):
 def funding_cashflow(funding, entry_time, exit_time, side, quantity):
     if funding.empty:
         return 0.0, 0
-    rows = funding[(funding.funding_time > entry_time) & (funding.funding_time <= exit_time)]
+    rows = funding[(funding.funding_time > entry_time) & (funding.funding_time <= exit_time)].copy()
     if rows.empty:
         return 0.0, 0
-    # Binance funding is charged on position notional at the funding timestamp.
-    mark = rows["mark_price"].to_numpy(float) if "mark_price" in rows else np.ones(len(rows))
+    # Never silently assume a $1 mark: missing event-time marks would corrupt funding PnL.
+    if "mark_price" not in rows:
+        raise ValueError("Funding rows are missing event-time mark_price")
+    rows["mark_price"] = pd.to_numeric(rows["mark_price"], errors="coerce")
+    rows["funding_rate"] = pd.to_numeric(rows["funding_rate"], errors="coerce")
+    rows = rows.replace([np.inf, -np.inf], np.nan).dropna(subset=["mark_price", "funding_rate"])
+    rows = rows[rows["mark_price"] > 0]
+    if rows.empty:
+        return 0.0, 0
     sign = 1.0 if side == "LONG" else -1.0
-    cash = -sign * quantity * mark * rows.funding_rate.to_numpy(float)
+    cash = -sign * quantity * rows["mark_price"].to_numpy(float) * rows["funding_rate"].to_numpy(float)
     return float(cash.sum()), int(len(rows))
 
 
