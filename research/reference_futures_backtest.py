@@ -132,13 +132,16 @@ def make_signals(x, cfg):
     return long.fillna(False).to_numpy(), short.fillna(False).to_numpy()
 
 
-def funding_cashflow(funding, entry_time, exit_time, side, notional):
+def funding_cashflow(funding, entry_time, exit_time, side, quantity):
     if funding.empty:
         return 0.0, 0
     rows = funding[(funding.funding_time > entry_time) & (funding.funding_time <= exit_time)]
-    # Positive funding means longs pay and shorts receive.
+    if rows.empty:
+        return 0.0, 0
+    # Binance funding is charged on position notional at the funding timestamp.
+    mark = rows["mark_price"].to_numpy(float) if "mark_price" in rows else np.ones(len(rows))
     sign = 1.0 if side == "LONG" else -1.0
-    cash = -sign * notional * rows.funding_rate.to_numpy(float)
+    cash = -sign * quantity * mark * rows.funding_rate.to_numpy(float)
     return float(cash.sum()), int(len(rows))
 
 
@@ -147,6 +150,15 @@ def simulate(x, funding, cfg, start_i, end_i, symbol):
     ts = pd.to_datetime(x.timestamp, utc=True).reset_index(drop=True)
     long_sig, short_sig = make_signals(x, cfg)
     trades, i = [], max(start_i, 220)
+    # Funding notional is marked using the candle open at the funding timestamp (or
+    # the most recent prior open if an exchange timestamp is unexpectedly missing).
+    if not funding.empty:
+        marks = pd.merge_asof(
+            funding.sort_values("funding_time"),
+            x[["timestamp", "open"]].sort_values("timestamp"),
+            left_on="funding_time", right_on="timestamp", direction="backward")
+        funding = funding.copy()
+        funding["mark_price"] = marks["open"].to_numpy(float)
     while i < end_i - 1:
         side = "LONG" if long_sig[i] else ("SHORT" if short_sig[i] else None)
         if side is None or not np.isfinite(atr[i]) or atr[i] <= 0:
@@ -190,7 +202,7 @@ def simulate(x, funding, cfg, start_i, end_i, symbol):
         direction = 1.0 if side == "LONG" else -1.0
         gross = direction*(exit_fill-entry)*qty
         fees = FEE*(entry+exit_fill)*qty
-        funding_pnl, funding_events = funding_cashflow(funding, ts.iloc[ei], ts.iloc[exit_i], side, entry*qty)
+        funding_pnl, funding_events = funding_cashflow(funding, ts.iloc[ei], ts.iloc[exit_i], side, qty)
         net = gross-fees+funding_pnl
         # R denominator includes price risk plus estimated round-trip fees; funding is realized cashflow.
         initial_risk_quote = risk*qty + FEE*(entry+stop)*qty + SLIPPAGE*stop*qty
