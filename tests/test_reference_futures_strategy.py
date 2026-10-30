@@ -29,6 +29,16 @@ def patch_indicators(n,side):
             patch("bot.stochastic",return_value=(pd.Series(k),pd.Series(d))))
 
 class FuturesStrategyTests(unittest.TestCase):
+    def test_new_entries_never_fall_back_to_legacy_spot_venues(self):
+        class Manager:
+            def get_exchange(self, name):
+                if name == "binanceusdm":
+                    return type("Exchange", (), {"markets": {"BTC/USDT:USDT": {}}})()
+                return type("Exchange", (), {"markets": {"BTC/USDT": {}}})()
+
+        self.assertEqual(bot.candidate_exchange_names(Manager(), "binanceusdm", "BTC/USDT:USDT"),
+                         ["binanceusdm"])
+        self.assertEqual(bot.candidate_exchange_names(Manager(), "binanceus", "BTC/USDT:USDT"), [])
     def test_long_and_short_gates(self):
         for side,key in (("BUY","signal_long"),("SELL","signal_short")):
             data=make_frame(side); p=patch_indicators(len(data),side)
