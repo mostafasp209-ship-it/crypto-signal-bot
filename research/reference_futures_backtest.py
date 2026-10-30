@@ -176,8 +176,16 @@ def simulate(x, funding, cfg, start_i, end_i, symbol):
             i += 1
             continue
         target = entry + 1.5*risk if side == "LONG" else entry - 1.5*risk
-        exit_i, raw_exit, reason = end_i-1, cl[end_i-1], "TIME_END"
-        for j in range(ei, end_i):
+        # Live signals expire 48h after creation. Approximate the expiry-time
+        # ticker with the next 4h candle open; do not inspect that candle's later high/low.
+        expiry_i = ei + 12
+        if expiry_i < end_i:
+            exit_i, raw_exit, reason = expiry_i, op[expiry_i], "EXPIRY_48H"
+            scan_end = expiry_i
+        else:
+            exit_i, raw_exit, reason = end_i-1, cl[end_i-1], "TIME_END"
+            scan_end = end_i
+        for j in range(ei, scan_end):
             # Conservative gap handling: stop gaps fill at open, not the stale stop.
             if side == "LONG":
                 if op[j] <= stop:
