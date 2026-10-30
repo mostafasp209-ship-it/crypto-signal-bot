@@ -273,8 +273,13 @@ class ExchangeManager:
         self.exchanges = {}
         self.market_counts = {}
 
-    def build(self):
-        for name in EXCHANGE_NAMES:
+    def build(self, required_exchanges=None):
+        # Load only Binance for scanning plus venues that actually hold active legacy signals.
+        # Loading every configured exchange on every run adds several avoidable network round-trips.
+        names = list(dict.fromkeys(
+            SCAN_EXCHANGE_NAMES + list(required_exchanges or [])
+        ))
+        for name in names:
             try:
                 cls = getattr(ccxt, name)
                 ex = cls({
@@ -2170,7 +2175,12 @@ def main(manage_only=False):
 
     manager = ExchangeManager()
 
-    if not manager.build():
+    required_exchanges = {
+        str(signal.get("exchange"))
+        for signal in state.get("signals", [])
+        if signal.get("status") == "ACTIVE" and signal.get("exchange")
+    }
+    if not manager.build(required_exchanges=required_exchanges):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
             "هیچ صرافی قابل دسترسی نبود."
