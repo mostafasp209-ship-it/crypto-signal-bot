@@ -1399,8 +1399,14 @@ def close_piece(signal, exit_price, fraction, label):
         slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
         exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
     gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
-    # Preserve the 0.10% legacy fee model for already-open spot signals.
-    fee_default = FEE_RATE if is_reference_futures else 0.001
+    # Preserve the 0.10% fee model for known legacy setups; generic/new records
+    # continue to use the configured current fee unless they carry their own rate.
+    setup_name = signal.get("components", {}).get("setup")
+    legacy_setup = setup_name in {
+        "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3",
+        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
+    }
+    fee_default = 0.001 if legacy_setup else FEE_RATE
     fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), fee_default)
     fees = (entry + exit_price) * piece_qty * fee_rate
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
