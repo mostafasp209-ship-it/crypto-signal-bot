@@ -1849,143 +1849,71 @@ def performance_report(state):
     )
 
 
-def format_signal(signal):
-    """Render a compact, professional Telegram alert with only actionable levels."""
-    side = str(signal.get("side", "BUY")).upper()
-    is_long = side == "BUY"
-    emoji = "🟢" if is_long else "🔴"
-    components = signal.get("components", {}) or {}
-    setup = components.get("setup", "")
-    is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-    is_reference_futures = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
-    is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION" or is_reference_futures
+def strategy_presentation(setup):
+    """Persian strategy labels and trade-management rules for Telegram alerts."""
+    labels = {
+        "REFERENCE_RSI_STOCH_ATR_RR15": ("بازگشت RSI + کراس استوکاستیک", "فیوچرز خطی USDT-M", "بازگشت RSI از اشباع، کراس واقعی Stochastic و تأیید حجم", "خروج کامل در هدف ۱٫۵R", "در مرحله اعتبارسنجی؛ سودآوری هنوز اثبات نشده است"),
+        "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3": ("شکست روند + قدرت ADX", "طبق بازار ثبت‌شده", "شکست سقف/کف، فیلتر EMA200 و قدرت روند ADX", "برداشت یک‌سوم در ۰٫۷۵R؛ مدیریت باقی‌مانده با Chandelier و ATR", "عملکرد زنده باید جداگانه ارزیابی شود"),
+        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION": ("ترکیب EMA + RSI + Stochastic", "طبق بازار ثبت‌شده", "هم‌جهتی روند و مومنتوم", "خروج کامل در هدف نهایی", "استراتژی قدیمی؛ آمار آن با نسخه جدید ترکیب نمی‌شود"),
+    }
+    return labels.get(setup, ("استراتژی تکنیکال ترکیبی", "بازار ثبت‌شده در سیگنال", "سطوح تکنیکال و مدیریت معامله", "TP1: پنجاه درصد، TP2: سی درصد، TP3: بیست درصد", "عملکرد بر اساس تاریخچه همین نسخه بررسی شود"))
 
-    entry = safe_float(signal.get("entry"))
-    sl = safe_float(signal.get("sl"))
-    tp1 = safe_float(signal.get("tp1"))
-    support = safe_float(signal.get("support"))
-    resistance = safe_float(signal.get("resistance"))
-    ema200 = safe_float(components.get("ema200"))
-    adx = safe_float(components.get("adx14"))
-    risk_pct = safe_float(signal.get("risk_pct"))
-    rr = safe_float(signal.get("rr"))
+
+def format_signal(signal):
+    """Render a polished Persian Telegram alert with strategy-specific rules."""
+    side = str(signal.get("side", "BUY")).upper()
+    is_long = side in {"BUY", "LONG"}
+    side_fa = "خرید (LONG)" if is_long else "فروش (SHORT)"
+    emoji = "🟢" if is_long else "🔴"
+    c = signal.get("components", {}) or {}
+    setup = str(c.get("setup", ""))
+    strategy, market_type, method, management, validation = strategy_presentation(setup)
+    is_reference = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
+    symbol = html.escape(str(signal.get("symbol", "نامشخص")))
+    exchange = html.escape(str(signal.get("exchange", "نامشخص")))
+    entry, sl, tp1 = (safe_float(signal.get(k)) for k in ("entry", "sl", "tp1"))
+    rr, risk_pct = safe_float(signal.get("rr")), safe_float(signal.get("risk_pct"))
     actual_risk = safe_float(signal.get("actual_risk_usd"))
     risk_target = safe_float(signal.get("risk_target_usd"))
-
-    # Never publish a level on the wrong side of price as "nearby support/resistance".
-    if entry is not None:
-        if support is not None and support >= entry:
-            support = None
-        if resistance is not None and resistance <= entry:
-            resistance = None
-
-    fundamentals = signal.get("fundamentals", {}) or {}
-    funding = safe_float(fundamentals.get("funding"))
-    oi = safe_float(fundamentals.get("open_interest"))
-    funding_text = f"{funding * 100:.4f}%" if funding is not None else "Unavailable"
-    oi_text = f"{oi:,.2f}" if oi is not None else "Unavailable"
-
-    news = signal.get("news", {}) or {}
-    news_label = html.escape(str(news.get("label", "Unavailable")))
-    news_adjustment = safe_float(news.get("score_adjustment"), 0) or 0
-    news_items = news.get("headlines", []) or []
-    headline_lines = "".join(
-        f"  • {html.escape(str(item.get('title', ''))[:140])}\\n"
-        for item in news_items[:3]
-    ).rstrip("\\n")
-    trend = html.escape(str(signal.get("trend", "N/A")))
-    exchange = html.escape(str(signal.get("exchange", "N/A")))
-    symbol = html.escape(str(signal.get("symbol", "N/A")))
-    strength = html.escape(str(signal.get("strength", "N/A")))
-    sl_method = html.escape(str(signal.get("sl_method", "Market structure")))
-
+    qty = safe_float(signal.get("position_quantity"))
     lines = [
-        f"{emoji} <b>{symbol}  |  {side}</b>",
-        f"<i>{exchange} {'USDT-M Futures' if is_reference_futures else 'Spot'} · 4H strategy</i>",
-        f"━━━━━━━━━━━━━━━━━━",
-        f"<b>ENTRY</b>  <code>{fmt_price(entry)}</code>",
-        f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
-        + (f"  <i>(-{risk_pct:.2f}%)</i>" if risk_pct is not None else ""),
+        f"{emoji} <b>سیگنال جدید {side_fa}</b>",
+        f"💎 <b>{symbol}</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        f"🧭 <b>استراتژی:</b> {html.escape(strategy)}",
+        f"⏱ <b>تایم‌فریم:</b> ۴ ساعته  |  <b>بازار:</b> {html.escape(market_type)}",
+        f"🏦 <b>صرافی:</b> {exchange}",
+        "", "📍 <b>نقاط ورود و خروج</b>",
+        f"ورود: <code>{fmt_price(entry)}</code>",
+        f"حد ضرر (SL): <code>{fmt_price(sl)}</code>" + (f" · ریسک قیمتی {risk_pct:.2f}٪" if risk_pct is not None else ""),
     ]
-
-    lines.extend([
-        "",
-        "<b>NEWS CHECK</b>",
-        f"Status  · {news_label}  |  Score adjustment  · {news_adjustment:+g}",
-    ])
-    if headline_lines:
-        lines.extend(["Recent relevant headlines:", headline_lines])
+    if is_reference or setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION":
+        lines.append(f"🎯 حد سود نهایی: <code>{fmt_price(tp1)}</code> · خروج کامل")
+    elif is_v3:
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code> · برداشت یک‌سوم در ۰٫۷۵R", "📈 باقی موقعیت: تریلینگ Chandelier با ضریب ۳ برابر ATR", "🔒 پس از هدف اول، حد ضرر به نقطه ورود منتقل می‌شود"])
     else:
-        lines.append("No relevant headline found in the feeds checked; this does not mean the market has no news.")
-
-    if is_v3:
-        lines.extend([
-            "",
-            "<b>TRADE MANAGEMENT</b>",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · Close ⅓ at +0.75R",
-            "📈 <b>Runner</b>  · Remaining ⅔ managed by Chandelier (3×ATR)",
-            "🔒 After TP1  · Stop moves to breakeven; trail updates on closed 4H candles",
-        ])
-    elif is_reference_futures:
-        lines.extend(["", f"🎯 <b>TAKE PROFIT</b>  <code>{fmt_price(tp1)}</code>  · Close 100% at +1.5R",
-                      f"📉 <b>Direction</b>  · {'LONG' if is_long else 'SHORT'}",
-                      f"Execution estimate · fee {FEE_RATE*100:.3f}% + slippage {SLIPPAGE_RATE*100:.3f}% each side"])
-    elif is_legacy_single_tp:
-        lines.extend(["", f"🎯 <b>FINAL TARGET</b>  <code>{fmt_price(tp1)}</code>  · Close 100%"])
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code> · ۵۰٪ حجم", f"🎯 هدف دوم: <code>{fmt_price(signal.get('tp2'))}</code> · ۳۰٪ حجم", f"🎯 هدف سوم: <code>{fmt_price(signal.get('tp3'))}</code> · ۲۰٪ حجم"])
+    lines.extend(["", "🧠 <b>منطق صدور سیگنال</b>", html.escape(method)])
+    if is_reference:
+        rsi_value, k_value, d_value, volume_ratio = (safe_float(c.get(k)) for k in ("rsi", "stoch_k", "stoch_d", "volume_ratio"))
+        lines.extend([f"• RSI(14): {rsi_value:.1f}" if rsi_value is not None else "• RSI(14): نامشخص", f"• Stochastic K/D: {k_value:.1f} / {d_value:.1f}" if k_value is not None and d_value is not None else "• Stochastic: نامشخص", f"• حجم نسبت به میانگین ۲۰ کندل: {volume_ratio:.2f} برابر" if volume_ratio is not None else "• نسبت حجم: نامشخص", f"• ATR(14): <code>{fmt_price(c.get('atr14'))}</code>"])
     else:
-        lines.extend([
-            "",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · 50%",
-            f"🎯 <b>TP2</b>  <code>{fmt_price(signal.get('tp2'))}</code>  · 30%",
-            f"🎯 <b>TP3</b>  <code>{fmt_price(signal.get('tp3'))}</code>  · 20%",
-        ])
-
-    levels = []
-    if support is not None:
-        levels.append(f"🟩 Support  <code>{fmt_price(support)}</code>")
-    if resistance is not None:
-        levels.append(f"🟥 Resistance  <code>{fmt_price(resistance)}</code>")
-    if levels:
-        lines.extend(["", "<b>MARKET LEVELS</b>", *levels])
-
-    lines.extend([
-        "",
-        "<b>SETUP & RISK</b>",
-        f"Trend  · {trend}",
-        f"ADX(14)  · {f'{adx:.1f}' if adx is not None else 'N/A'}"
-        + (f"  |  EMA200  <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
-        f"Stop model  · {sl_method}",
-    ])
-
-    if is_v3:
-        lines.extend([
-            "RR نهایی: متغیر  · تریلینگ استاپ؛ depends on trailing stop",
-            "Validation  · Live-market performance not yet established",
-        ])
-    else:
-        lines.append(f"Estimated RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
-    if is_reference_futures:
-        lines.append("Research status · forward validation required; signal-only, no orders are placed")
-
-    lines.extend([
-        "",
-        "<b>CONTEXT</b>",
-        f"Funding  · {funding_text}  |  OI  · {oi_text}",
-        f"Signal expiry  · 48h",
-    ])
-    if risk_target is not None or actual_risk is not None:
-        lines.append(
-            f"Risk budget  · Target ${risk_target:.2f}" if risk_target is not None
-            else "Risk budget  · Target N/A"
-        )
-        if actual_risk is not None:
-            lines.append(f"Estimated risk incl. fees/slippage  · ${actual_risk:.2f}")
-
-    if headline_lines:
-        lines.extend(["", "<b>NEWS HEADLINES</b>", headline_lines.rstrip()])
-
+        lines.append(f"• وضعیت روند: {html.escape(str(signal.get('trend', 'نامشخص')))}")
+        adx, ema200 = safe_float(c.get("adx14")), safe_float(c.get("ema200"))
+        if adx is not None: lines.append(f"• قدرت روند ADX(14): {adx:.1f}")
+        if ema200 is not None: lines.append(f"• EMA200: <code>{fmt_price(ema200)}</code>")
+    lines.extend(["", "🛡 <b>مدیریت ریسک</b>", f"• نسبت سود به زیان هدف: {rr:.2f}R" if rr is not None else "• نسبت سود به زیان: ثبت نشده", f"• بودجه ریسک هدف: ${risk_target:.2f}" if risk_target is not None else "• بودجه ریسک هدف: نامشخص", f"• ریسک برآوردی با هزینه‌ها: ${actual_risk:.2f}" if actual_risk is not None else "• ریسک نهایی: نامشخص", f"• حجم موقعیت: {qty:.6g}" if qty is not None else "• حجم موقعیت: نامشخص", "• اعتبار سیگنال: ۴۸ ساعت", f"• روش مدیریت: {html.escape(management)}"])
+    if is_reference:
+        funding = safe_float((signal.get("fundamentals") or {}).get("funding"))
+        lines.extend([f"• کارمزد برآوردی: {FEE_RATE*100:.3f}٪ هر سمت", f"• لغزش قیمت برآوردی: {SLIPPAGE_RATE*100:.3f}٪ هر سمت", f"• Funding فعلی: {funding*100:.4f}٪" if funding is not None else "• Funding فعلی: در دسترس نیست"])
+    news = signal.get("news", {}) or {}
+    headlines = news.get("headlines", []) or []
+    lines.extend(["", "📰 <b>وضعیت اخبار</b>", "• اخبار در تصمیم ورود دخالت داده نشده‌اند؛ صرفاً اطلاعات تکمیلی هستند."])
+    for item in headlines[:2]:
+        if isinstance(item, dict) and item.get("title"): lines.append("• " + html.escape(str(item["title"])[:130]))
+    lines.extend(["", "━━━━━━━━━━━━━━━━━━", f"ℹ️ <b>اعتبارسنجی:</b> {html.escape(validation)}", "⚠️ این پیام تحلیلی است؛ ربات سفارش واقعی ثبت نمی‌کند."])
     return "\n".join(lines)
-
 
 # ============================================================
 # SCANNER
@@ -2118,7 +2046,7 @@ def scan_market(manager, state):
                     stats["rate_limited_exchanges"].add(exchange_name)
                     print(
                         f"[RATE LIMIT] {exchange_name}: pausing this venue for the rest of this scan; "
-                        f"will try fallback exchanges."
+                        f"no fallback venue will be used for new entries."
                     )
                 else:
                     stats["errors"] += 1
@@ -2243,7 +2171,7 @@ def main(manage_only=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser = argparse.ArgumentParser(description="Crypto USDT-M futures signal bot")
     parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
     args = parser.parse_args()
     try:
