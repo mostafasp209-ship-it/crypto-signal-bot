@@ -1638,6 +1638,17 @@ def manage_signal(signal, current_price, candle_high=None, candle_low=None, cand
         # Move the remaining position's stop to breakeven only after TP1 is booked.
         signal["sl"] = signal["entry"]
         changed = True
+        # If the same closed candle also crossed the newly raised breakeven stop,
+        # stop-first is the conservative assumption because OHLC has no intrabar path.
+        if stop_touched():
+            remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
+            if remaining > 0 and not close_piece(signal, stop_exit_price(), remaining, "sl"):
+                print(f"[MANAGE ERROR] {signal.get('symbol')}: breakeven exit not booked; keeping signal active")
+                return changed
+            signal["status"] = "CLOSED"
+            signal["closed_reason"] = "SL"
+            signal["updated_at"] = iso_now()
+            return True
 
     if not signal.get("tp2_hit") and target_touched("tp2"):
         if not close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
