@@ -223,12 +223,18 @@ def metrics(trades):
         return {"trades":0,"win_rate_pct":None,"expectancy_R":None,"profit_factor":None,
                 "net_R":0.0,"max_drawdown_R":None,"funding_quote":0.0}
     t = sorted(trades, key=lambda z:z["exit_time"])
-    r = np.array([z["net_r"] for z in t], float)
-    wins, losses = r[r>0], r[r<0]
+    # Aggregate simultaneous exits before drawdown calculation to avoid arbitrary
+    # ordering of symbols that close on the same 4h timestamp.
+    grouped = {}
+    for trade in t:
+        grouped[trade["exit_time"]] = grouped.get(trade["exit_time"], 0.0) + float(trade["net_r"])
+    r = np.array([grouped[k] for k in sorted(grouped)], float)
+    trade_r = np.array([z["net_r"] for z in t], float)
+    wins, losses = trade_r[trade_r>0], trade_r[trade_r<0]
     eq = np.cumsum(r)
     dd = np.maximum.accumulate(np.r_[0.0,eq]) - eq
-    return {"trades":len(t),"win_rate_pct":round(float((r>0).mean()*100),2),
-        "expectancy_R":round(float(r.mean()),4),
+    return {"trades":len(t),"win_rate_pct":round(float((trade_r>0).mean()*100),2),
+        "expectancy_R":round(float(trade_r.mean()),4),
         "profit_factor":round(float(wins.sum()/abs(losses.sum())),4) if len(losses) and losses.sum()!=0 else None,
         "net_R":round(float(r.sum()),3),"max_drawdown_R":round(float(dd.max()),3),
         "funding_quote":round(float(sum(z["funding_quote_per_1_quote"] for z in t)),6),
