@@ -2078,6 +2078,10 @@ def scan_market(manager, state):
                             and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
+                if signal:
+                    # Snapshot the current Binance funding rate for alert context.
+                    # Historical funding cashflows are not yet accrued into PnL.
+                    signal["fundamentals"] = fundamental_data(manager, symbol)
 
                 if not signal:
                     stats["no_setup_or_score"] += 1
