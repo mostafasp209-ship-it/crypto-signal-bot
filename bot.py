@@ -273,8 +273,12 @@ class ExchangeManager:
         self.exchanges = {}
         self.market_counts = {}
 
-    def build(self):
-        for name in EXCHANGE_NAMES:
+    def build(self, required_names=None):
+        # Initialize only venues needed for this run: futures scanner plus venues
+        # that actually own active legacy signals. Avoid loading every exchange
+        # (and hitting rate limits) on each 5-minute management cycle.
+        names = list(dict.fromkeys(required_names if required_names is not None else EXCHANGE_NAMES))
+        for name in names:
             try:
                 cls = getattr(ccxt, name)
                 ex = cls({
@@ -2171,11 +2175,24 @@ def main(manage_only=False):
         )
 
     manager = ExchangeManager()
+    active_exchange_names = sorted({
+        str(signal.get("exchange"))
+        for signal in state.get("signals", [])
+        if signal.get("status") == "ACTIVE" and signal.get("exchange")
+    })
+    required_exchange_names = list(active_exchange_names)
+    if not manage_only:
+        required_exchange_names.extend(
+            name for name in SCAN_EXCHANGE_NAMES if name not in required_exchange_names
+        )
+    if manage_only and not required_exchange_names:
+        print("No active signals to manage; skipping exchange initialization.")
+        return
 
-    if not manager.build():
+    if not manager.build(required_names=required_exchange_names):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
-            "هیچ صرافی قابل دسترسی نبود."
+            "صرافی موردنیاز این اجرا در دسترس نبود؛ اسکن یا مدیریت بدون قیمت معتبر انجام نشد."
         )
         return
 
