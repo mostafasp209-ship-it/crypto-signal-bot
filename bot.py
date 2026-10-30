@@ -2019,6 +2019,14 @@ def has_potential_long_setup(df):
                       int((work["close"].iloc[-9:-1] > work["open"].iloc[-9:-1]).sum()) >= 3)
     return bool(breakout or pullback or rejection or failed_breakdown or spike_pullback)
 
+def candidate_exchange_names(manager, preferred_exchange_name, symbol):
+    """Return only the selected futures venue; never route new entries to legacy spot venues."""
+    exchange = manager.get_exchange(preferred_exchange_name)
+    if exchange is None or symbol not in exchange.markets:
+        return []
+    return [preferred_exchange_name]
+
+
 def scan_market(manager, state):
     candidates = manager.scan_symbols()
     headlines = fetch_news_context()
@@ -2043,7 +2051,7 @@ def scan_market(manager, state):
     for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
         # New entries must never fall back to legacy spot venues.
         # Legacy exchanges remain loaded separately for managing old open signals.
-        exchange_names = [preferred_exchange_name]
+        exchange_names = candidate_exchange_names(manager, preferred_exchange_name, symbol)
 
         for exchange_name in exchange_names:
             # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
