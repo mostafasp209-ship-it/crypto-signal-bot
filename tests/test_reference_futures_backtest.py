@@ -32,6 +32,19 @@ class ReferenceFuturesBacktestTests(unittest.TestCase):
         self.assertEqual(n, 1)
         self.assertAlmostEqual(cash, -0.1)
 
+
+    def test_funding_ignores_rows_without_valid_event_mark(self):
+        funding = pd.DataFrame({
+            "funding_time": pd.to_datetime(["2024-01-01T08:00:00Z", "2024-01-01T16:00:00Z"], utc=True),
+            "funding_rate": [0.001, 0.001],
+            "mark_price": [None, 100.0],
+        })
+        cash, n = funding_cashflow(
+            funding, pd.Timestamp("2024-01-01T00:00:00Z"),
+            pd.Timestamp("2024-01-01T20:00:00Z"), "LONG", 1.0)
+        self.assertEqual(n, 1)
+        self.assertAlmostEqual(cash, -0.1)
+
     def test_metrics_reports_net_expectancy_and_drawdown(self):
         result = metrics([
             {"exit_time":"2024-01-01T04:00:00Z","net_r":1.0,"funding_quote_per_1_quote":0.001,"fees_quote_per_1_quote":0.002},
