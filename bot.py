@@ -20,11 +20,13 @@ import requests
 # ============================================================
 
 EXCHANGE_NAMES = [
-    # Keep legacy spot venues available only for managing already-open signals.
-    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm",
+    # Legacy venues may still be needed to manage already-open signals.
+    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm", "bybit",
 ]
-SCAN_EXCHANGE_NAMES = ["binanceusdm"]
-FUNDING_SOURCES = ["binanceusdm"]
+# Binance USD-M returned HTTP 451 from GitHub Actions (restricted-location response).
+# Use liquid USDT linear perpetual venues as scanner sources instead.
+SCAN_EXCHANGE_NAMES = ["bybit", "bitget"]
+FUNDING_SOURCES = ["bybit", "bitget"]
 
 QUOTE = "USDT"
 TIMEFRAME = "4h"
@@ -293,7 +295,14 @@ class ExchangeManager:
             except Exception as exc:
                 print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
 
-        return bool(self.exchanges)
+        available_scanners = [name for name in SCAN_EXCHANGE_NAMES if name in self.exchanges]
+        if not available_scanners:
+            raise RuntimeError(
+                "No configured futures data source initialized successfully: "
+                + ", ".join(SCAN_EXCHANGE_NAMES)
+            )
+        print(f"[DATA SOURCES] active futures scanners: {", ".join(available_scanners)}")
+        return True
 
     def get_exchange(self, name):
         return self.exchanges.get(name)
@@ -364,6 +373,12 @@ class ExchangeManager:
                 if MAX_SYMBOLS_PER_EXCHANGE is not None and added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
                     break
 
+        if not ordered:
+            raise RuntimeError(
+                "No active linear USDT-margined perpetual markets found on: "
+                + ", ".join(SCAN_EXCHANGE_NAMES)
+            )
+        print(f"[SCAN UNIVERSE] {len(ordered)} active USDT perpetual markets")
         return ordered
 
     def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
@@ -2029,8 +2044,7 @@ def scan_market(manager, state):
     headlines = fetch_news_context()
 
     if not candidates:
-        print("No markets found.")
-        return []
+        raise RuntimeError("Market scan aborted: no futures candidates were discovered.")
 
     signals = []
     stats = {
@@ -2136,6 +2150,10 @@ def scan_market(manager, state):
             )
         # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
+    if stats["checked"] == 0:
+        raise RuntimeError(
+            "Market scan failed: candidates were found but no OHLCV request succeeded."
+        )
     signals.sort(key=lambda x: safe_float(x.get("rr"), 0.0) or 0.0, reverse=True)
     print(
         "[SCAN SUMMARY] "
