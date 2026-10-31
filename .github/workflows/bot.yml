@@ -99,6 +99,6 @@ jobs:
           done
           if [ "$changed" = "1" ]; then
             git commit -m "Persist bot and Telegram panel state [skip ci]" || true
-            git pull --rebase origin main
+            git pull --rebase -X theirs origin main
             git push origin HEAD:main
           fi
