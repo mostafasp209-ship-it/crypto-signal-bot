@@ -1,6 +1,13 @@
 name: Crypto Signal Pro + Telegram Panel
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "bot.py"
+      - ".github/workflows/bot.yml"
+      - "requirements.txt"
+      - "tests/**"
   schedule:
     # Manage active signals and poll the Telegram panel hourly to conserve Actions minutes.
     - cron: "17 * * * *"
@@ -39,7 +46,7 @@ jobs:
         run: uv pip install --system -r requirements.txt
 
       - name: Validate Python syntax
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         run: python -m py_compile bot.py panel.py
 
       - name: Run strategy and position-management tests
@@ -47,7 +54,7 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Run market scanner (just after each 4H candle opens)
-        if: github.event_name == 'workflow_dispatch' || github.event.schedule == '2 */4 * * *'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.schedule == '2 */4 * * *'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
