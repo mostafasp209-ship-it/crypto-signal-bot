@@ -1,48 +1,81 @@
-# Crypto Signal Bot
+# Crypto Signal Bot (Binance USDⓈ-M Futures)
 
-ربات سیگنال‌گیری اسپات؛ اجرای اسکن بازار در GitHub Actions و پنل تلگرام نیازمند اجرای جداگانه است.
+ربات **سیگنال‌گیری** برای بازار **Binance USDⓈ-M Perpetual Futures**.
+سفارش واقعی روی صرافی ثبت نمی‌شود؛ فقط سیگنال و مدیریت سطوح را در تلگرام و `signals.json` نگه می‌دارد.
 
-## فایل‌ها
-- `bot.py`: اسکن بازار، ساخت سیگنال، مدیریت TP/SL و ارسال پیام.
-- `panel.py`: پنل تعاملی تلگرام.
-- `signals.json`: تاریخچه و وضعیت سیگنال‌ها.
-- `users.json`: کاربران پنل و شناسهٔ آخرین آپدیت تلگرام.
+> این ربات توصیه مالی نیست. قبل از هر استفاده واقعی، بک‌تست تاریخی و حساب آزمایشی الزامی است.
 
-## تنظیمات GitHub Actions
-در **Settings → Secrets and variables → Actions** این Secrets را تنظیم کن:
+## استراتژی مرجع فعلی
+
+| مورد | مقدار |
+|------|--------|
+| بازار | فقط Binance `binanceusdm` (USDT-M linear perpetual) |
+| تایم‌فریم سیگنال | 4H |
+| جهت | Long و Short |
+| منطق | RSI recovery 30/70 + کراس واقعی Stochastic + حجم ≥ 1.12× میانگین 20 |
+| ورود | Open کندل 4H بعدی (بدون fallback به کلوز) |
+| RR | 1.5 |
+| استاپ | سوینگ 5 کندل در برابر 1.32×ATR(14) |
+| هزینه مدل‌شده | Fee 0.05% + Slippage 0.02% |
+| وضعیت اعتبارسنجی | `NOT_VALIDATED_ON_REAL_MARKET_DATA` |
+
+ورود سیگنال **جدید** فقط از Futures است. صرافی‌های Spot قدیمی فقط برای مدیریت سیگنال‌های فعال قدیمی در صورت وجود بارگذاری می‌شوند.
+
+## فایل‌های اصلی
+
+- `bot.py` — اسکن Futures، ساخت سیگنال، مدیریت TP/SL، ارسال تلگرام
+- `panel.py` — پنل تعاملی تلگرام
+- `signals.json` — تاریخچه و وضعیت سیگنال‌ها
+- `users.json` — کاربران پنل
+- `research/reference_futures_backtest.py` — بک‌تست تحقیقاتی آفلاین (خواندنی)
+- `tests/` — تست‌های واحد استراتژی و ایمنی
+
+## Secrets مورد نیاز (GitHub Actions)
+
+در **Settings → Secrets and variables → Actions**:
+
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
-- `ADMIN_CHAT_ID` (اختیاری؛ اگر تنظیم نشود از `TELEGRAM_CHAT_ID` استفاده می‌شود)
+- `ADMIN_CHAT_ID` (اختیاری؛ در غیر این صورت از `TELEGRAM_CHAT_ID` استفاده می‌شود)
 
-Workflow موجود `bot.yml` اسکن بازار را هر ۱۵ دقیقه اجرا می‌کند و مدیریت سیگنال‌های فعال و polling پنل را هر ۵ دقیقه انجام می‌دهد. برای جلوگیری از تداخل نوشتن در `signals.json`، هر دو زمان‌بندی در یک گروه concurrency سریالی اجرا می‌شوند؛ اگر اسکن از ۵ دقیقه طولانی‌تر شود، polling پنل ممکن است با تأخیر انجام شود.
+## زمان‌بندی Workflow (`bot.yml`)
 
-## اجرای پنل تعاملی
-برای پاسخ فوری به دکمه‌ها، `panel.py` باید روی یک سرویس همیشه‌روشن اجرا شود؛ مثلاً VPS یا یک سرویس Python worker. چون پنل معمولاً روی میزبان جدا از GitHub Actions است، برای نمایش آخرین سیگنال‌ها `GH_REPO` و `GH_BRANCH` را هم تنظیم کن؛ پنل در این حالت `signals.json` را از شاخهٔ GitHub می‌خواند و در صورت قطع دسترسی از فایل محلی استفاده می‌کند. متغیرهای محیطی زیر را تنظیم کن:
-- `TELEGRAM_BOT_TOKEN`
-- `ADMIN_CHAT_ID`
-- `GH_PAT` (اختیاری، فقط اگر دکمهٔ «اجرای اسکن» باید GitHub Actions را راه‌اندازی کند)
-- `GH_REPO=mostafasp209-ship-it/crypto-signal-bot`
-- `GH_WORKFLOW=bot.yml`
-- `GH_BRANCH=main`
+- اسکن بازار: حدود ۲ دقیقه بعد از هر باز شدن کندل 4H (UTC)
+- مدیریت سیگنال‌های فعال + polling پنل: ساعتی
+- concurrency سریالی برای جلوگیری از تداخل نوشتن در `signals.json`
 
-دستور اجرا:
+## اجرای پنل تعاملی (همیشه‌روشن)
+
 ```bash
 python -u panel.py --loop
 ```
 
-در این حالت worker باید دائماً روشن بماند. **پنل را به‌عنوان job زمان‌بندی‌شدهٔ کوتاه اجرا نکن**؛ اجرای یک‌باره فقط آپدیت‌های موجود در همان لحظه را می‌خواند و دکمه‌ها تا اجرای بعدی پاسخ نمی‌گیرند. اجرای چند نمونهٔ `panel.py --loop` با یک توکن هم‌زمان نیز باعث تداخل `getUpdates` می‌شود.
+متغیرها: `TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, و در صورت نیاز `GH_REPO`, `GH_BRANCH`, `GH_PAT`.
 
-اگر قبلاً webhook برای همین توکن تنظیم شده، polling با `getUpdates` کار نخواهد کرد؛ فقط وقتی مطمئنی برنامهٔ دیگری از webhook استفاده نمی‌کند، آن را حذف کن.
+پنل را به‌صورت job کوتاه زمان‌بندی‌شده اجرا نکن. چند نمونه هم‌زمان با یک توکن باعث تداخل `getUpdates` می‌شود.
 
-## نکات ایمنی
-- توکن تلگرام یا PAT را در کد یا commit قرار نده.
-- تغییرات معاملاتی را قبل از استفادهٔ واقعی روی داده‌های تاریخی و حساب آزمایشی بررسی کن.
-- این ربات توصیهٔ مالی نیست.
+## تست‌ها
 
+```bash
+pip install -r requirements.txt
+python -m py_compile bot.py panel.py
+python -m unittest discover -s tests -v
+```
 
-## گزارش دستی عملکرد سیگنال‌ها
+Workflow `test-strategy.yml` روی هر Pull Request به `main` و pushهای مرتبط اجرا می‌شود.
 
-برای اینکه فقط Workflow اصلی ربات در GitHub Actions باقی بماند، Workflowهای جداگانهٔ گزارش‌گیری و ممیزی حذف شده‌اند؛ فایل‌های پایتون مربوط به تحلیل هنوز در مخزن هستند و می‌توان آن‌ها را دستی اجرا کرد:
+## بک‌تست تحقیقاتی (آفلاین)
+
+```bash
+python research/reference_futures_backtest.py --symbols BTCUSDT,ETHUSDT --since 2022-01-01 --out research/out
+```
+
+این اسکریپت:
+- از API عمومی Binance Futures کندل 4H می‌گیرد
+- ورود next-open، fee/slippage، برخورد محافظه‌کارانه SL/TP و Funding تقریبی را مدل می‌کند
+- **هیچ عدد سودآوری را به‌عنوان نتیجه زنده ادعا نمی‌کند**
+
+## گزارش دستی سیگنال‌های ثبت‌شده
 
 ```bash
 python analyze_signals.py --input signals.json --out outcome-report.json
@@ -50,4 +83,10 @@ python postmortem_report.py --input signals.json --output postmortem-report.json
 python historical_replay.py --input signals.json --output historical-replay-report.json
 ```
 
-این گزارش‌ها فقط‌خواندنی‌اند و منطق ربات، حد ضرر/هدف یا `signals.json` را به‌عنوان بخشی از تحلیل تغییر نمی‌دهند. بازپخش OHLCV تقریبی است و ترتیب حرکت قیمت داخل کندل یا قیمت اجرای واقعی سفارش را اثبات نمی‌کند. نمونه‌های کم‌تعداد نیز برای نتیجه‌گیری قطعی کافی نیستند.
+این گزارش‌ها فقط‌خواندنی‌اند و منطق ربات را تغییر نمی‌دهند.
+
+## نکات ایمنی
+
+- توکن یا PAT را در کد commit نکن
+- تا وقتی تست واحد و بک‌تست تاریخی پاس نشده، پارامتر استراتژی را برای «بهبود حدسی» عوض نکن
+- ربات signal-only است؛ سفارش واقعی غیرفعال است
