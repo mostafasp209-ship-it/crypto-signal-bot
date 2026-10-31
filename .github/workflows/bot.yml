@@ -50,7 +50,7 @@ jobs:
         run: python -m py_compile bot.py panel.py
 
       - name: Run strategy and position-management tests
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         run: python -m unittest discover -s tests -v
 
       - name: Run market scanner (just after each 4H candle opens)
