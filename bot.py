@@ -301,7 +301,7 @@ class ExchangeManager:
                 "No configured futures data source initialized successfully: "
                 + ", ".join(SCAN_EXCHANGE_NAMES)
             )
-        print(f"[DATA SOURCES] active futures scanners: {", ".join(available_scanners)}")
+        print("[DATA SOURCES] active futures scanners: " + ", ".join(available_scanners))
         return True
 
     def get_exchange(self, name):
