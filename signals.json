@@ -2296,11 +2296,11 @@
       "symbol": "SPX/USDT",
       "exchange": "binanceus",
       "side": "BUY",
-      "status": "ACTIVE",
+      "status": "EXPIRED",
       "strength": "آزمایشی V3",
       "score": 4,
       "created_at": "2026-10-29T00:16:44.484041+00:00",
-      "updated_at": "2026-10-29T00:16:44.484041+00:00",
+      "updated_at": "2026-11-01T02:54:26.415285+00:00",
       "expiry_at": "2026-10-31T00:16:44.484058+00:00",
       "entry": 0.4,
       "sl": 0.39222537938036856,
@@ -2377,10 +2377,13 @@
       "tp1_hit": false,
       "tp2_hit": false,
       "tp3_hit": false,
-      "remaining_fraction": 1.0,
-      "realized_pnl": 0.0,
-      "fees_paid": 0.0,
-      "closed_reason": null
+      "remaining_fraction": 0.0,
+      "realized_pnl": -23.12725000000002,
+      "fees_paid": 0.37725000000000003,
+      "closed_reason": "48h expiry",
+      "last_exit_price": 0.3545,
+      "last_exit_label": "expiry",
+      "expiry_hit": true
     },
     {
       "id": "LEO_USDT_BUY_1793248014",
@@ -2479,21 +2482,21 @@
   ],
   "last_run": "2026-11-01T00:59:46.292559+00:00",
   "historical_stats": {
-    "closed": 27,
+    "closed": 28,
     "tp3": 0,
     "tp2_then_sl": 0,
     "tp1_then_sl": 0,
     "sl_direct": 14,
     "trailing_stop": 0,
     "breakeven_stop": 3,
-    "expired": 5,
+    "expired": 6,
     "no_risk": 0,
     "other": 5,
-    "net_pnl": -252.09545366445445,
-    "fees": 10.398304031272021,
+    "net_pnl": -275.22270366445446,
+    "fees": 10.775554031272021,
     "sl_methods": {
       "1x_ATR14": 11,
-      "2x_ATR14": 16
+      "2x_ATR14": 17
     }
   },
   "forward_test_started_at": "2026-10-30T20:13:23.616524+00:00",
