@@ -1,6 +1,6 @@
 {
   "signals": [],
-  "last_run": null,
+  "last_run": "2026-11-01T12:48:00.884390+00:00",
   "historical_stats": {
     "closed": 0,
     "tp3": 0,
@@ -12,8 +12,8 @@
     "expired": 0,
     "no_risk": 0,
     "other": 0,
-    "net_pnl": 0,
-    "fees": 0,
+    "net_pnl": 0.0,
+    "fees": 0.0,
     "sl_methods": {}
   },
   "forward_test_started_at": "2026-11-01T09:19:53.235Z",
