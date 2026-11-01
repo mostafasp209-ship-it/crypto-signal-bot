@@ -26,31 +26,52 @@ OUT = Path("research_results/raw_patterns")
 CACHE.mkdir(parents=True, exist_ok=True); OUT.mkdir(parents=True, exist_ok=True)
 
 def fetch_klines(symbol):
+    import calendar, io, zipfile
     path = CACHE / f"{symbol}_{INTERVAL}.csv"
     if path.exists():
         df = pd.read_csv(path)
         if len(df) > 1000: return df
-    rows, start = [], START
-    while True:
-        params = urlencode({"symbol": symbol, "interval": INTERVAL, "startTime": start, "limit": 1500})
-        req = Request("https://fapi.binance.com/fapi/v1/klines?" + params, headers={"User-Agent":"research-bot/1.0"})
-        with urlopen(req, timeout=30) as resp: batch = json.loads(resp.read())
-        if not batch: break
-        rows.extend(batch)
-        nxt = int(batch[-1][0]) + 1
-        if nxt <= start or len(batch) < 1500: break
-        start = nxt
-        time.sleep(0.08)
-    cols = ["open_time","open","high","low","close","volume","close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"]
-    df = pd.DataFrame(rows, columns=cols)
-    if df.empty: raise RuntimeError(f"No data for {symbol}")
-    for c in ["open","high","low","close","volume"]: df[c] = pd.to_numeric(df[c], errors="coerce")
+    # Use Binance public data archive instead of the exchange API, which can be geo-blocked.
+    now = pd.Timestamp.now(tz="UTC")
+    last_month = now.to_period("M").to_timestamp().tz_localize("UTC") - pd.Timedelta(days=1)
+    year, month = 2021, 1
+    frames = []
+    while (year, month) <= (last_month.year, last_month.month):
+        filename = f"{symbol}-{INTERVAL}-{year}-{month:02d}.zip"
+        url = f"https://data.binance.vision/data/futures/um/monthly/klines/{symbol}/{INTERVAL}/{filename}"
+        try:
+            req = Request(url, headers={"User-Agent":"Mozilla/5.0 raw-pattern-research"})
+            with urlopen(req, timeout=45) as resp:
+                payload = resp.read()
+            with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                csv_name = next(n for n in archive.namelist() if n.lower().endswith(".csv"))
+                frame = pd.read_csv(io.BytesIO(archive.read(csv_name)), header=None)
+            # Binance archive files can be headerless; discard a header row if present.
+            frame = frame.iloc[:, :12]
+            frame.columns = ["open_time","open","high","low","close","volume","close_time","quote_volume","trades","taker_buy_base","taker_buy_quote","ignore"]
+            frame["open_time"] = pd.to_numeric(frame["open_time"], errors="coerce")
+            frame = frame.dropna(subset=["open_time"])
+            if not frame.empty: frames.append(frame)
+        except Exception as exc:
+            # A 404 is expected before a contract's listing; other failures are logged.
+            code = getattr(exc, "code", None)
+            if code not in (404, None):
+                print(json.dumps({"symbol":symbol,"archive_month":f"{year}-{month:02d}","warning":str(exc)}),flush=True)
+        month += 1
+        if month == 13: year, month = year + 1, 1
+        time.sleep(0.03)
+    if not frames:
+        raise RuntimeError(f"No archived futures klines downloaded for {symbol}; archive host may be blocked")
+    df = pd.concat(frames, ignore_index=True)
+    for col in ["open","high","low","close","volume"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
-    df = df.drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
-    # Exclude the still-forming final candle.
-    if len(df) and df.iloc[-1]["open_time"] + pd.Timedelta(hours=4) > pd.Timestamp.now(tz="UTC"):
-        df = df.iloc[:-1]
+    df = df.dropna(subset=["open","high","low","close","volume"]).drop_duplicates("open_time").sort_values("open_time").reset_index(drop=True)
+    # Exclude any still-forming candle.
+    cutoff = pd.Timestamp.now(tz="UTC").floor("4h")
+    df = df[df["open_time"] < cutoff].reset_index(drop=True)
     df.to_csv(path, index=False)
+    print(json.dumps({"symbol":symbol,"downloaded_candles":len(df),"first":str(df.open_time.iloc[0]),"last":str(df.open_time.iloc[-1])}),flush=True)
     return df
 
 def make_features(d):
