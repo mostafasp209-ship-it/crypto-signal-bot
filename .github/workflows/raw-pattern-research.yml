@@ -1,0 +1,39 @@
+name: Raw Market Pattern Research
+on:
+  pull_request:
+    paths:
+      - "research/raw_pattern_discovery.py"
+      - ".github/workflows/raw-pattern-research.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: raw-pattern-research-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install research dependencies
+        run: python -m pip install --upgrade pip pandas numpy scikit-learn
+      - name: Run historical pattern discovery and out-of-sample test
+        env:
+          START_DATE: "2021-01-01"
+        run: python -u research/raw_pattern_discovery.py
+      - name: Upload research outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-market-pattern-research
+          path: |
+            research_results/raw_patterns/
+            research_cache/raw_patterns/
+          if-no-files-found: warn
+          retention-days: 30
