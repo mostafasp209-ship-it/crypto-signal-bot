@@ -1,9 +1,21 @@
-# bot.py — decompress safety-patched source (2026-11-01 post-mortem fixes)
-import zlib
-import base64
-from pathlib import Path
+"""
+CRITICAL: bot.py was corrupted during an automated safety-patch attempt.
 
-_dir = Path(__file__).resolve().parent
-_b64 = "".join((_dir / f"bot_z_{i}.b64").read_text(encoding="ascii") for i in range(3))
-_code = zlib.decompress(base64.b64decode(_b64)).decode("utf-8")
-exec(compile(_code, str(_dir / "bot.py"), "exec"), globals())
+RESTORE NOW (local machine):
+
+  git clone https://github.com/mostafasp209-ship-it/crypto-signal-bot.git
+  cd crypto-signal-bot
+  git checkout bd39ca3565a0bd54c7955bf8a5e5910a1203adb6 -- bot.py
+  # Then apply SAFETY_PATCHES.md (or ask Grok to re-apply after restore)
+  git add bot.py
+  git commit -m "Restore bot.py from bd39ca3"
+  git push origin main
+
+Good commit SHA: bd39ca3565a0bd54c7955bf8a5e5910a1203adb6
+safety_filters.py is already on main and is correct.
+"""
+
+raise SystemExit(
+    "bot.py is in emergency restore mode. "
+    "Checkout commit bd39ca3565a0bd54c7955bf8a5e5910a1203adb6 -- bot.py and push."
+)
