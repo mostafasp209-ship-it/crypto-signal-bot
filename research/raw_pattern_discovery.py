@@ -183,7 +183,7 @@ def main():
                     raise RuntimeError(f"Insufficient labeled samples {symbol}/{side}")
                 model=Pipeline([("imputer",SimpleImputer(strategy="median")),("rf",RandomForestClassifier(n_estimators=350,min_samples_leaf=20,max_features="sqrt",class_weight="balanced_subsample",n_jobs=-1,random_state=42))])
                 model.fit(train[FEATURES],train[label].astype(int))
-                val_probs=model.predict_proba(val[FEATURES])[:,1]
+                val_probs=model.predict_proba(d.iloc[a:b][FEATURES])[:,1]
                 # Threshold chosen on validation only; minimum trade count avoids tiny-sample winners.
                 candidates=[]
                 for th in np.arange(.50,.901,.025):
@@ -194,7 +194,7 @@ def main():
                         candidates.append((score,float(th)))
                 threshold=max(candidates)[1] if candidates else .60
                 probs_test=np.full(n,np.nan)
-                probs_test[test.index]=model.predict_proba(test[FEATURES])[:,1]
+                probs_test[b:n-HORIZON]=model.predict_proba(d.iloc[b:n-HORIZON][FEATURES])[:,1]
                 met,trades=trade_sim(d.iloc[b:].reset_index(drop=True),probs_test[b:],side,threshold,INITIAL_EQUITY)
                 report={"symbol":symbol,"side":side,"candles":n,"train_rows":len(train),"validation_rows":len(val),"test_rows":len(test),"validation_threshold":threshold,"test":met}
                 all_reports.append(report)
