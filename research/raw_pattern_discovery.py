@@ -187,9 +187,8 @@ def main():
                 # Threshold chosen on validation only; minimum trade count avoids tiny-sample winners.
                 candidates=[]
                 for th in np.arange(.50,.901,.025):
-                    probs=np.full(n,np.nan); probs[val.index]=val_probs
-                    met,_=trade_sim(d,probs,side,float(th),INITIAL_EQUITY)
-                    # restrict sim to validation window by masking after it
+                    # Simulate only inside validation; never let a validation trade inspect test candles.
+                    met,_=trade_sim(d.iloc[a:b].reset_index(drop=True),val_probs,side,float(th),INITIAL_EQUITY)
                     if met["trades"]>=20:
                         score=(met["profit_factor"] or 0)*math.sqrt(met["trades"])
                         candidates.append((score,float(th)))
