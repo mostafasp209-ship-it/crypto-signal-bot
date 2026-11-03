@@ -9,10 +9,9 @@ on:
       - "requirements.txt"
       - "tests/**"
   schedule:
-    # Manage active signals and poll the Telegram panel hourly to conserve Actions minutes.
-    - cron: "17 * * * *"
-    # Scan just after each UTC 4H candle opens.
-    - cron: "2 */4 * * *"
+    # Public repository: run the scanner, signal manager, and Telegram panel every 5 minutes.
+    # GitHub Actions scheduled workflows have a 5-minute minimum interval.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -53,8 +52,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
         run: python -m unittest discover -s tests -v
 
-      - name: Run market scanner (just after each 4H candle opens)
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.schedule == '2 */4 * * *'
+      - name: Run market scanner
+
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -62,8 +61,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py
 
-      - name: Manage active signals hourly
-        if: github.event_name == 'schedule' && github.event.schedule == '17 * * * *'
+      - name: Manage active signals
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -71,8 +69,8 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py --manage-only
 
-      - name: Poll Telegram panel hourly
-        if: always() && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 * * * *')
+      - name: Poll Telegram panel
+        if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
