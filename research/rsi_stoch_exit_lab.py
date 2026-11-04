@@ -102,11 +102,11 @@ def indicators(frame: pd.DataFrame) -> pd.DataFrame:
     return x
 
 
-def net_return(side: int, entry: float, exit_px: float) -> float:
-    entry_fill = entry * (1 + SLIPPAGE if side == 1 else 1 - SLIPPAGE)
-    exit_fill = exit_px * (1 - SLIPPAGE if side == 1 else 1 + SLIPPAGE)
+def net_return(side: int, entry: float, exit_px: float, fee_rate=FEE, slippage=SLIPPAGE) -> float:
+    entry_fill = entry * (1 + slippage if side == 1 else 1 - slippage)
+    exit_fill = exit_px * (1 - slippage if side == 1 else 1 + slippage)
     gross = side * (exit_fill-entry_fill)
-    costs = FEE * (entry_fill+exit_fill)
+    costs = fee_rate * (entry_fill+exit_fill)
     return gross-costs
 
 
@@ -155,7 +155,7 @@ def metrics(rows):
         "max_dd_r":float(np.max(peak-eq))}
 
 
-def simulate(x, start, end, stop_atr, target_r, time_stop, partial, trail_atr):
+def simulate(x, start, end, stop_atr, target_r, time_stop, partial, trail_atr, fee_rate=FEE, slippage=SLIPPAGE):
     rows=[]; i=max(start,220); end=min(end,len(x))
     while i < end-1:
         side=int(x.signal.iloc[i])
@@ -178,12 +178,12 @@ def simulate(x, start, end, stop_atr, target_r, time_stop, partial, trail_atr):
             # Stop-first convention for any bar that can touch both stop and target.
             stop_hit = lo<=stop_px if side==1 else hi>=stop_px
             if stop_hit:
-                pnl += remaining*net_return(side,entry,stop_px); remaining=0.0; reason="TRAIL" if activated else "SL"; exit_i=j; break
+                pnl += remaining*net_return(side,entry,stop_px,fee_rate,slippage); remaining=0.0; reason="TRAIL" if activated else "SL"; exit_i=j; break
             if partial and remaining==1.0 and (hi>=tp1 if side==1 else lo<=tp1):
-                pnl += 0.5*net_return(side,entry,tp1); remaining=0.5
+                pnl += 0.5*net_return(side,entry,tp1,fee_rate,slippage); remaining=0.5
             target_hit = hi>=final if side==1 else lo<=final
             if target_hit:
-                pnl += remaining*net_return(side,entry,final); remaining=0.0; reason="TP"; exit_i=j; break
+                pnl += remaining*net_return(side,entry,final,fee_rate,slippage); remaining=0.0; reason="TP"; exit_i=j; break
             # Trailing stop is calculated from the just-closed bar and is active next bar.
             favorable = (hi-entry)/risk if side==1 else (entry-lo)/risk
             if trail_atr is not None and favorable>=1.0:
@@ -193,7 +193,7 @@ def simulate(x, start, end, stop_atr, target_r, time_stop, partial, trail_atr):
                 stop_px=max(stop_px,candidate) if side==1 else min(stop_px,candidate)
         if remaining>0:
             px=float(x.close.iloc[exit_i])
-            pnl += remaining*net_return(side,entry,px)
+            pnl += remaining*net_return(side,entry,px,fee_rate,slippage)
         rows.append({"symbol":"","time":str(x.timestamp.iloc[i]),"net_r":pnl/risk,"reason":reason})
         i=exit_i+1
     return rows
@@ -286,13 +286,9 @@ def main():
     if best:
         result["best_exit_config"]={k:v for k,v in best.items() if k!="_trades"}
         result["monte_carlo"]=monte_carlo(best["_trades"])
-        global FEE, SLIPPAGE
-        old_fee, old_slippage = FEE, SLIPPAGE
-        FEE, SLIPPAGE = 2*old_fee, 2*old_slippage
         doubled=[]
         for sym,x in data.items():
-            doubled.extend(simulate(x,220,len(x),best["stop_atr"],best["target_r"],best["time_stop_bars"],best["partial_50pct_at_1_5r"],best["trail_atr_after_1r"]))
-        FEE, SLIPPAGE = old_fee, old_slippage
+            doubled.extend(simulate(x,220,len(x),best["stop_atr"],best["target_r"],best["time_stop_bars"],best["partial_50pct_at_1_5r"],best["trail_atr_after_1r"],fee_rate=2*FEE,slippage=2*SLIPPAGE))
         result["best_config_at_2x_costs"]=metrics(doubled)
         vals=np.asarray([t["net_r"] for t in best["_trades"]],dtype=float)
         if len(vals)>1 and vals.std(ddof=1)>0:
