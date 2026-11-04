@@ -25,8 +25,9 @@ EXCHANGE_NAMES = [
 ]
 # Binance USD-M returned HTTP 451 from GitHub Actions (restricted-location response).
 # Use liquid USDT linear perpetual venues as scanner sources instead.
-SCAN_EXCHANGE_NAMES = ["bybit", "bitget"]
-FUNDING_SOURCES = ["bybit", "bitget"]
+# Bybit is geo-blocked on GitHub-hosted runners (HTTP 403). Keep multiple independent USDT-margined venues so one outage cannot stop scanning.
+SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
+FUNDING_SOURCES = ["bitget", "okx", "gateio"]
 
 QUOTE = "USDT"
 TIMEFRAME = "4h"
@@ -284,16 +285,27 @@ class ExchangeManager:
         for name in names:
             try:
                 cls = getattr(ccxt, name)
-                ex = cls({
+                exchange_config = {
                     "enableRateLimit": True,
                     "timeout": REQUEST_TIMEOUT_MS,
-                })
+                }
+                if name == "bitget":
+                    # Only load linear perpetual markets; unrelated spot/options
+                    # metadata endpoints are not required by this scanner.
+                    exchange_config["options"] = {
+                        "defaultType": "swap",
+                        "defaultSubType": "linear",
+                        "fetchMarkets": ["swap"],
+                    }
+                ex = cls(exchange_config)
                 ex.load_markets()
                 self.exchanges[name] = ex
                 self.market_counts[name] = len(ex.markets)
                 print(f"[OK] {name}: {len(ex.markets)} markets")
             except Exception as exc:
                 print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
+                # Keep the root cause visible in GitHub Actions and continue to other venues.
+                traceback.print_exc(limit=5)
 
         available_scanners = [name for name in SCAN_EXCHANGE_NAMES if name in self.exchanges]
         if not available_scanners:
@@ -1953,14 +1965,15 @@ def format_signal(signal):
 
     lines.extend(["", "📊 <b>وضعیت تحلیل</b>",
                   f"جهت روند: {trend}",
-                  f"قدرت روند (ADX): {f'{adx:.1f}' if adx is not None else 'محاسبه نشده'}"
+                  f"قدرت روند ADX(14): {f'{adx:.1f}' if adx is not None else 'محاسبه نشده'}"
                   + (f"  |  میانگین متحرک ۲۰۰: <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
                   f"مبنای تعیین حد ضرر: {sl_method}",
                   f"نسبت سود به زیان برآوردی: {f'{rr:.2f}' if rr is not None else 'نامشخص'}"])
     if is_reference_futures:
         lines.append("وضعیت راهبرد: در مرحله ارزیابی؛ این پیام صرفاً سیگنال است و سفارشی ثبت نمی‌کند")
     if is_v3:
-        lines.append("مدیریت خروج: حد ضرر شناور؛ نتیجه به حرکت قیمت بستگی دارد")
+        lines.append("RR نهایی: متغیر؛ به عملکرد حد ضرر شناور و قیمت خروج بستگی دارد")
+        lines.append("مدیریت خروج: تریلینگ (حد ضرر شناور)؛ نتیجه به حرکت قیمت بستگی دارد")
 
     lines.extend(["", "🛡️ <b>مدیریت ریسک</b>",
                   "بودجه ریسک هدف: " + (f"{risk_target:.2f} دلار" if risk_target is not None else "مشخص نشده")])
