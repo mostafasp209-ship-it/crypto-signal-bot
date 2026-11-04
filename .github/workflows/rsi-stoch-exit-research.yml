@@ -33,6 +33,8 @@ jobs:
           pip install -r requirements.txt
       - name: Compile research code
         run: python -m py_compile research/rsi_stoch_exit_lab.py
+      - name: Test research simulator
+        run: python -m unittest discover -s tests -p "test_rsi_stoch_exit_lab.py" -v
       - name: Run research (public market data only)
         env:
           PYTHONUNBUFFERED: "1"
