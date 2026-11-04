@@ -1,0 +1,51 @@
+name: RSI Stochastic Futures Exit Research
+
+on:
+  push:
+    branches:
+      - research/rsi-stoch-exit-lab
+    paths:
+      - "research/rsi_stoch_exit_lab.py"
+      - ".github/workflows/rsi-stoch-exit-research.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsi-stoch-exit-research
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile research code
+        run: python -m py_compile research/rsi_stoch_exit_lab.py
+      - name: Test research simulator
+        run: python -m unittest discover -s tests -p "test_rsi_stoch_exit_lab.py" -v
+      - name: Run research (public market data only)
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/rsi_stoch_exit_lab.py
+      - name: Upload research artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsi-stoch-futures-exit-research
+          path: |
+            research_results/rsi_stoch_exit_lab/
+            research_cache/usdm/
+          if-no-files-found: warn
+          retention-days: 30
