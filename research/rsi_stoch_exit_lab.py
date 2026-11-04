@@ -143,6 +143,7 @@ def forward_samples(data: dict[str, pd.DataFrame], horizon: int, rng: np.random.
 
 def metrics(rows):
     if not rows: return {"trades":0,"expectancy_r":None,"profit_factor":None,"win_rate_pct":None,"avg_win_r":None,"avg_loss_r":None,"max_dd_r":None}
+    rows = sorted(rows, key=lambda z: z.get("time", ""))
     r = np.asarray([z["net_r"] for z in rows], dtype=float)
     wins, losses = r[r>0], r[r<0]
     eq = np.cumsum(r); peak = np.maximum.accumulate(np.r_[0.0,eq])[1:]
@@ -260,8 +261,8 @@ def main():
     eligible.sort(key=lambda r:(r["expectancy_r"],r["profit_factor"] or 0),reverse=True)
     # Four chronological test windows; choose a configuration on the preceding history only.
     wf=[]
-    for fold in range(1,5):
-        test_start=int(0.4*fold); test_end=min(1.0,0.4*fold+0.15)
+    for fold, test_start in enumerate((0.40, 0.55, 0.70, 0.85), 1):
+        test_end=min(1.0,test_start+0.15)
         fold_rows=[]
         for sym,x in data.items():
             a=int(len(x)*test_start); b=int(len(x)*test_end)
@@ -283,7 +284,24 @@ def main():
         "multiple_testing_note":"Grid is exploratory; report all tested configurations. Do not promote the top rank without independent validation."}
     result["walk_forward"]={"windows":wf,"positive_windows":sum(1 for w in wf if (w["expectancy_r"] or 0)>0)}
     if best:
+        result["best_exit_config"]={k:v for k,v in best.items() if k!="_trades"}
         result["monte_carlo"]=monte_carlo(best["_trades"])
+        global FEE, SLIPPAGE
+        old_fee, old_slippage = FEE, SLIPPAGE
+        FEE, SLIPPAGE = 2*old_fee, 2*old_slippage
+        doubled=[]
+        for sym,x in data.items():
+            doubled.extend(simulate(x,220,len(x),best["stop_atr"],best["target_r"],best["time_stop_bars"],best["partial_50pct_at_1_5r"],best["trail_atr_after_1r"]))
+        FEE, SLIPPAGE = old_fee, old_slippage
+        result["best_config_at_2x_costs"]=metrics(doubled)
+        vals=np.asarray([t["net_r"] for t in best["_trades"]],dtype=float)
+        if len(vals)>1 and vals.std(ddof=1)>0:
+            z=float(vals.mean()/(vals.std(ddof=1)/math.sqrt(len(vals))))
+            raw_p=math.erfc(abs(z)/math.sqrt(2.0))
+            result["best_config_multiple_testing"]={"raw_normal_approx_p":raw_p,
+                "bonferroni_adjusted_p":min(1.0,raw_p*len(configs)),
+                "tests_count":len(configs),
+                "note":"Normal approximation is diagnostic only; serial dependence and strategy selection bias remain. Walk-forward and untouched forward data are still required."}
     result["decision"]="RESEARCH_ONLY; promote nothing automatically. Require positive OOS expectancy, PF>1.2, >=3/4 positive WF windows, and stability under 2x costs."
     save_json(OUT/"research_report.json",result)
     pd.DataFrame([{k:v for k,v in r.items() if k!="_trades"} for r in results]).to_csv(OUT/"exit_grid.csv",index=False)
