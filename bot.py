@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from safety_filters import is_tradable_symbol, MAX_RISK_PCT, MIN_QUOTE_VOLUME_USDT
+
 
 # ============================================================
 # CONFIG
@@ -359,18 +361,34 @@ class ExchangeManager:
                 continue
 
             symbols = self.futures_symbols(ex)
-            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
+            # Fail closed: require verified 24h quote volume above the hard floor.
+            # Ranking alone is not a liquidity safety filter.
             try:
                 tickers = ex.fetch_tickers(symbols)
                 ranked = []
+                rejected = 0
                 for symbol in symbols:
                     ticker = tickers.get(symbol, {})
-                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
+                    quote_volume = safe_float(ticker.get("quoteVolume"))
+                    if quote_volume is None or not is_tradable_symbol(
+                        symbol, quote_volume=quote_volume
+                    ):
+                        rejected += 1
+                        continue
                     ranked.append((quote_volume, symbol))
                 symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
+                print(
+                    f"[LIQUIDITY] {name}: eligible={len(symbols)} rejected={rejected} "
+                    f"minimum_quote_volume={MIN_QUOTE_VOLUME_USDT:.0f} USDT"
+                )
             except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
+                # Unknown liquidity must never silently bypass the hard floor.
+                print(
+                    f"[LIQUIDITY] {name}: ticker data unavailable "
+                    f"({type(exc).__name__}); skipping venue for new entries"
+                )
+                continue
+            print(f"{name}: {len(symbols)} eligible {QUOTE} USDT-M perpetual symbols")
 
             added_from_exchange = 0
             for symbol in symbols:
@@ -1313,6 +1331,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         return None
     side = "BUY" if st["signal_long"] else "SELL"
     entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
+    if not is_tradable_symbol(symbol, entry_price=entry):
+        print(f"[FILTER] {symbol}: failed symbol/entry-price safety gate")
+        return None
     recent = df.tail(5)
     if side == "BUY":
         swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
@@ -1325,7 +1346,11 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         stop = max(swing, entry+1.32*atr_now)
         risk = stop-entry
     risk_pct = risk/entry
-    if not (0.0035 < risk_pct < 0.038):
+    if not (0.0035 < risk_pct <= MAX_RISK_PCT):
+        print(
+            f"[FILTER] {symbol}: risk distance {risk_pct:.3%} outside "
+            f"allowed range (0.35%, {MAX_RISK_PCT:.2%}]"
+        )
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
     # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
