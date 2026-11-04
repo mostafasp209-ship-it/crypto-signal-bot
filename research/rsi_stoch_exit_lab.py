@@ -114,6 +114,11 @@ def fetch(symbol: str) -> pd.DataFrame:
         print(f"[data-fallback] {symbol}: Binance USD-M unavailable ({binance_error}); trying OKX swap", flush=True)
         df = fetch_okx_swap(symbol)
         source = "okx_usdt_swap"
+        df = df[df.timestamp + pd.Timedelta(hours=4) <= pd.Timestamp.now(tz="UTC")]
+        df = df.sort_values("timestamp").reset_index(drop=True)
+        df.to_csv(path, index=False)
+        DATA_SOURCES[symbol] = source
+        return df
     df["timestamp"] = pd.to_datetime(df.ts, unit="ms", utc=True)
     for col in ("open","high","low","close","volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
