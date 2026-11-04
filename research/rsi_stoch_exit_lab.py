@@ -19,6 +19,7 @@ INTERVAL = "4h"
 FEE = 0.0005
 SLIPPAGE = 0.0002
 SEED = 20261104
+DATA_SOURCES = {}
 OUT = Path("research_results/rsi_stoch_exit_lab")
 CACHE = Path("research_cache/usdm")
 OUT.mkdir(parents=True, exist_ok=True)
@@ -31,45 +32,96 @@ def save_json(path: Path, value):
     tmp.replace(path)
 
 
+def fetch_okx_swap(symbol: str) -> pd.DataFrame:
+    """Fallback venue when Binance USD-M public API is geo-blocked on hosted runners."""
+    inst_id = symbol.replace("USDT", "-USDT-SWAP")
+    start_ms = int(pd.Timestamp(START, tz="UTC").timestamp() * 1000)
+    session = requests.Session()
+    rows, cursor, seen = [], None, set()
+    while True:
+        params = {"instId": inst_id, "bar": "4H", "limit": "300"}
+        if cursor is not None:
+            params["after"] = str(cursor)
+        response = session.get("https://www.okx.com/api/v5/market/history-candles", params=params, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("code") != "0":
+            raise RuntimeError(f"OKX {inst_id}: {payload}")
+        batch = payload.get("data", [])
+        if not batch:
+            break
+        fresh = [row for row in batch if int(row[0]) not in seen]
+        if not fresh:
+            break
+        rows.extend(fresh)
+        seen.update(int(row[0]) for row in fresh)
+        oldest = min(int(row[0]) for row in fresh)
+        if oldest <= start_ms or len(batch) < 2:
+            break
+        cursor = oldest
+        time.sleep(0.12)
+    if not rows:
+        raise RuntimeError(f"OKX {inst_id}: no history returned")
+    records = []
+    for row in rows:
+        ts = int(row[0])
+        if ts < start_ms or str(row[8]) != "1":
+            continue
+        # OKX volCcy (index 6) is base-asset volume for swap candles.
+        records.append([ts, row[1], row[2], row[3], row[4], row[6]])
+    df = pd.DataFrame(records, columns=["ts","open","high","low","close","volume"])
+    df["timestamp"] = pd.to_datetime(df.ts, unit="ms", utc=True)
+    for col in ("open","high","low","close","volume"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df[["timestamp","open","high","low","close","volume"]].dropna().drop_duplicates("timestamp").sort_values("timestamp").reset_index(drop=True)
+
+
 def fetch(symbol: str) -> pd.DataFrame:
     path = CACHE / f"{symbol}_{INTERVAL}_{START}.csv"
     if path.exists():
         df = pd.read_csv(path, parse_dates=["timestamp"])
         df["timestamp"] = pd.to_datetime(df.timestamp, utc=True)
         return df
-    start = int(pd.Timestamp(START, tz="UTC").timestamp() * 1000)
-    now = int(datetime.now(timezone.utc).timestamp() * 1000)
-    rows, session = [], requests.Session()
-    while start < now:
-        response = session.get("https://fapi.binance.com/fapi/v1/klines",
-            params={"symbol": symbol, "interval": INTERVAL, "startTime": start, "endTime": now, "limit": 1500},
-            timeout=30)
-        response.raise_for_status()
-        batch = response.json()
-        if isinstance(batch, dict):
-            raise RuntimeError(f"{symbol}: {batch}")
-        if not batch:
-            break
-        rows.extend(batch)
-        nxt = int(batch[-1][0]) + 1
-        if nxt <= start:
-            raise RuntimeError(f"{symbol}: pagination did not advance")
-        start = nxt
-        if len(batch) < 1500:
-            break
-        time.sleep(0.12)
-    if not rows:
-        raise RuntimeError(f"{symbol}: no candles returned")
-    cols = ["ts","open","high","low","close","volume","close_ts","quote_volume","trades","taker_base","taker_quote","ignore"]
-    df = pd.DataFrame(rows, columns=cols)
+    start_ms = int(pd.Timestamp(START, tz="UTC").timestamp() * 1000)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    rows, session, source = [], requests.Session(), "binance_usdm"
+    try:
+        cursor = start_ms
+        while cursor < now_ms:
+            response = session.get("https://fapi.binance.com/fapi/v1/klines",
+                params={"symbol": symbol, "interval": INTERVAL, "startTime": cursor, "endTime": now_ms, "limit": 1500},
+                timeout=30)
+            response.raise_for_status()
+            batch = response.json()
+            if isinstance(batch, dict):
+                raise RuntimeError(f"{symbol}: {batch}")
+            if not batch:
+                break
+            rows.extend(batch)
+            nxt = int(batch[-1][0]) + 1
+            if nxt <= cursor:
+                raise RuntimeError(f"{symbol}: pagination did not advance")
+            cursor = nxt
+            if len(batch) < 1500:
+                break
+            time.sleep(0.12)
+        if not rows:
+            raise RuntimeError(f"{symbol}: no Binance candles")
+        cols = ["ts","open","high","low","close","volume","close_ts","quote_volume","trades","taker_base","taker_quote","ignore"]
+        df = pd.DataFrame(rows, columns=cols)
+        df = df[["ts","open","high","low","close","volume"]]
+    except Exception as binance_error:
+        print(f"[data-fallback] {symbol}: Binance USD-M unavailable ({binance_error}); trying OKX swap", flush=True)
+        df = fetch_okx_swap(symbol)
+        source = "okx_usdt_swap"
     df["timestamp"] = pd.to_datetime(df.ts, unit="ms", utc=True)
     for col in ("open","high","low","close","volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df[["timestamp","open","high","low","close","volume"]].dropna().drop_duplicates("timestamp")
-    # Exclude the still-forming candle.
     df = df[df.timestamp + pd.Timedelta(hours=4) <= pd.Timestamp.now(tz="UTC")]
     df = df.sort_values("timestamp").reset_index(drop=True)
     df.to_csv(path, index=False)
+    DATA_SOURCES[symbol] = source
     return df
 
 
@@ -236,8 +288,8 @@ def main():
     edge_pass=bool(primary["strategy"]["trades"]>=100 and primary["strategy"]["expectancy_r"] is not None
         and primary["strategy"]["expectancy_r"]>0 and primary["expectancy_lift_r"] is not None
         and primary["expectancy_lift_r"]>0)
-    result={"generated_utc":datetime.now(timezone.utc).isoformat(),"market":"Binance USD-M perpetual public klines",
-        "symbols_requested":SYMBOLS,"symbols_downloaded":list(data),"download_failures":failures,
+    result={"generated_utc":datetime.now(timezone.utc).isoformat(),"market":"USDT-margined perpetual public klines (Binance USD-M preferred; OKX swap fallback when Binance is geo-blocked)",
+        "symbols_requested":SYMBOLS,"symbols_downloaded":list(data),"data_sources":DATA_SOURCES,"download_failures":failures,
         "timeframe":INTERVAL,"start":START,"fees_per_side":FEE,"slippage_per_side":SLIPPAGE,
         "entry_definition":"Exact current bot RSI14 recovery + Stoch14/3 cross + 1.12x volume + candle direction; next 4H open; long and short.",
         "entry_edge_gate":{"passed":edge_pass,"rule":">=100 six-bar observations, positive net expectancy, and positive expectancy lift vs side-matched random entries."},
