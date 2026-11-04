@@ -122,7 +122,7 @@ def forward_samples(data: dict[str, pd.DataFrame], horizon: int, rng: np.random.
             side = int(x.signal.iloc[i])
             entry = float(x.open.iloc[i+1])
             exit_px = float(x.close.iloc[i+horizon+1])
-            risk = max(abs(entry-float(x.swing_low.iloc[i])), 1.32*float(x.atr.iloc[i])) if side == 1 else max(abs(float(x.swing_high.iloc[i])-entry), 1.32*float(x.atr.iloc[i]))
+            risk = max(entry-float(x.swing_low.iloc[i]), 1.32*float(x.atr.iloc[i])) if side == 1 else max(float(x.swing_high.iloc[i])-entry, 1.32*float(x.atr.iloc[i]))
             if not np.isfinite(risk) or risk <= 0: continue
             actual.append({"symbol":symbol,"time":str(x.timestamp.iloc[i]),"side":side,"net_r":net_return(side,entry,exit_px)/risk})
         # Side-matched random timestamps from the same instrument, excluding actual signal bars.
@@ -135,7 +135,7 @@ def forward_samples(data: dict[str, pd.DataFrame], horizon: int, rng: np.random.
                 picks = rng.choice(pool, size=min(count,len(pool)), replace=False)
                 for i in picks:
                     entry = float(x.open.iloc[i+1]); exit_px = float(x.close.iloc[i+horizon+1])
-                    risk = max(1.32*float(x.atr.iloc[i]), abs(entry-float(x.swing_low.iloc[i])) if side==1 else abs(float(x.swing_high.iloc[i])-entry))
+                    risk = max(1.32*float(x.atr.iloc[i]), entry-float(x.swing_low.iloc[i]) if side==1 else float(x.swing_high.iloc[i])-entry)
                     if not np.isfinite(risk) or risk <= 0: continue
                     random_rows.append({"symbol":symbol,"time":str(x.timestamp.iloc[i]),"side":side,"net_r":net_return(side,entry,exit_px)/risk})
     return actual, random_rows
