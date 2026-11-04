@@ -1870,29 +1870,24 @@ def performance_report(state):
 
 
 def format_signal(signal):
-    """Render a compact, professional Telegram alert with only actionable levels."""
+    """Create a clean Persian Telegram signal message."""
     side = str(signal.get("side", "BUY")).upper()
     is_long = side == "BUY"
     emoji = "🟢" if is_long else "🔴"
+    side_fa = "خرید (لانگ)" if is_long else "فروش (شورت)"
     components = signal.get("components", {}) or {}
     setup = components.get("setup", "")
     is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
     is_reference_futures = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
     is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION" or is_reference_futures
 
-    entry = safe_float(signal.get("entry"))
-    sl = safe_float(signal.get("sl"))
+    entry, sl = safe_float(signal.get("entry")), safe_float(signal.get("sl"))
     tp1 = safe_float(signal.get("tp1"))
-    support = safe_float(signal.get("support"))
-    resistance = safe_float(signal.get("resistance"))
-    ema200 = safe_float(components.get("ema200"))
-    adx = safe_float(components.get("adx14"))
-    risk_pct = safe_float(signal.get("risk_pct"))
-    rr = safe_float(signal.get("rr"))
-    actual_risk = safe_float(signal.get("actual_risk_usd"))
-    risk_target = safe_float(signal.get("risk_target_usd"))
+    support, resistance = safe_float(signal.get("support")), safe_float(signal.get("resistance"))
+    ema200, adx = safe_float(components.get("ema200")), safe_float(components.get("adx14"))
+    risk_pct, rr = safe_float(signal.get("risk_pct")), safe_float(signal.get("rr"))
+    actual_risk, risk_target = safe_float(signal.get("actual_risk_usd")), safe_float(signal.get("risk_target_usd"))
 
-    # Never publish a level on the wrong side of price as "nearby support/resistance".
     if entry is not None:
         if support is not None and support >= entry:
             support = None
@@ -1900,110 +1895,92 @@ def format_signal(signal):
             resistance = None
 
     fundamentals = signal.get("fundamentals", {}) or {}
-    funding = safe_float(fundamentals.get("funding"))
-    oi = safe_float(fundamentals.get("open_interest"))
-    funding_text = f"{funding * 100:.4f}%" if funding is not None else "Unavailable"
-    oi_text = f"{oi:,.2f}" if oi is not None else "Unavailable"
+    funding, oi = safe_float(fundamentals.get("funding")), safe_float(fundamentals.get("open_interest"))
+    funding_text = f"{funding * 100:.4f}٪" if funding is not None else "نامشخص"
+    oi_text = f"{oi:,.2f}" if oi is not None else "نامشخص"
 
     news = signal.get("news", {}) or {}
-    news_label = html.escape(str(news.get("label", "Unavailable")))
+    news_raw = str(news.get("label", ""))
+    news_map = {"not_used_for_entry": "صرفاً جهت اطلاع؛ در صدور سیگنال نقشی ندارد",
+                "unavailable": "در دسترس نیست", "neutral": "خنثی",
+                "positive": "مثبت", "negative": "منفی"}
+    news_label = html.escape(news_map.get(news_raw.lower(), news_raw or "نامشخص"))
     news_adjustment = safe_float(news.get("score_adjustment"), 0) or 0
     news_items = news.get("headlines", []) or []
-    headline_lines = "".join(
-        f"  • {html.escape(str(item.get('title', ''))[:140])}\\n"
-        for item in news_items[:3]
-    ).rstrip("\\n")
-    trend = html.escape(str(signal.get("trend", "N/A")))
-    exchange = html.escape(str(signal.get("exchange", "N/A")))
-    symbol = html.escape(str(signal.get("symbol", "N/A")))
-    strength = html.escape(str(signal.get("strength", "N/A")))
-    sl_method = html.escape(str(signal.get("sl_method", "Market structure")))
+
+    exchange_raw = str(signal.get("exchange", ""))
+    exchange_map = {"bitget": "بیت‌گت", "bybit": "بای‌بیت", "binanceusdm": "بایننس فیوچرز",
+                    "binance": "بایننس", "binanceus": "بایننس آمریکا",
+                    "bitstamp": "بیت‌استمپ", "bitfinex": "بیت‌فینکس", "cryptocom": "کریپتو دات‌کام"}
+    exchange = html.escape(exchange_map.get(exchange_raw.lower(), exchange_raw or "نامشخص"))
+    symbol = html.escape(str(signal.get("symbol", "نامشخص")))
+    trend_raw = str(signal.get("trend", ""))
+    trend_map = {"BULL": "صعودی", "BEAR": "نزولی", "NEUTRAL": "خنثی", "UNKNOWN": "نامشخص",
+                 "4H RSI/Stochastic reversal": "بازگشت RSI و استوکاستیک در تایم‌فریم ۴ ساعته"}
+    trend = html.escape(trend_map.get(trend_raw, trend_raw or "نامشخص"))
+    sl_raw = str(signal.get("sl_method", ""))
+    sl_method = html.escape(sl_raw.replace("_", " ") if sl_raw else "ساختار بازار")
 
     lines = [
-        f"{emoji} <b>{symbol}  |  {side}</b>",
-        f"<i>{exchange} {'USDT-M Futures' if is_reference_futures else 'Spot'} · 4H strategy</i>",
-        f"━━━━━━━━━━━━━━━━━━",
-        f"<b>ENTRY</b>  <code>{fmt_price(entry)}</code>",
-        f"<b>STOP LOSS</b>  <code>{fmt_price(sl)}</code>"
-        + (f"  <i>(-{risk_pct:.2f}%)</i>" if risk_pct is not None else ""),
+        f"{emoji} <b>{symbol} | {side_fa}</b>",
+        f"صرافی: <b>{exchange}</b>  |  بازار: قرارداد دائمی تتر (USDT-M)",
+        "━━━━━━━━━━━━━━━━━━",
+        "📍 <b>نقاط ورود و خروج</b>",
+        f"قیمت ورود: <code>{fmt_price(entry)}</code>",
+        f"حد ضرر: <code>{fmt_price(sl)}</code>" + (f"  (فاصله {risk_pct:.2f}٪)" if risk_pct is not None else ""),
     ]
 
-    lines.extend([
-        "",
-        "<b>NEWS CHECK</b>",
-        f"Status  · {news_label}  |  Score adjustment  · {news_adjustment:+g}",
-    ])
-    if headline_lines:
-        lines.extend(["Recent relevant headlines:", headline_lines])
-    else:
-        lines.append("No relevant headline found in the feeds checked; this does not mean the market has no news.")
-
     if is_v3:
-        lines.extend([
-            "",
-            "<b>TRADE MANAGEMENT</b>",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · Close ⅓ at +0.75R",
-            "📈 <b>Runner</b>  · Remaining ⅔ managed by Chandelier (3×ATR)",
-            "🔒 After TP1  · Stop moves to breakeven; trail updates on closed 4H candles",
-        ])
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code>  |  بستن یک‌سوم حجم در +۰٫۷۵R",
+                      "📈 ادامه معامله: مدیریت دوسوم باقی‌مانده با حد ضرر شناور",
+                      "🔒 پس از هدف اول: انتقال حد ضرر به نقطه ورود"])
     elif is_reference_futures:
-        lines.extend(["", f"🎯 <b>TAKE PROFIT</b>  <code>{fmt_price(tp1)}</code>  · Close 100% at +1.5R",
-                      f"📉 <b>Direction</b>  · {'LONG' if is_long else 'SHORT'}",
-                      f"Execution estimate · fee {FEE_RATE*100:.3f}% + slippage {SLIPPAGE_RATE*100:.3f}% each side"])
+        lines.append(f"🎯 حد سود: <code>{fmt_price(tp1)}</code>  |  بستن کل موقعیت در +۱٫۵R")
     elif is_legacy_single_tp:
-        lines.extend(["", f"🎯 <b>FINAL TARGET</b>  <code>{fmt_price(tp1)}</code>  · Close 100%"])
+        lines.append(f"🎯 هدف نهایی: <code>{fmt_price(tp1)}</code>  |  بستن کل موقعیت")
     else:
-        lines.extend([
-            "",
-            f"🎯 <b>TP1</b>  <code>{fmt_price(tp1)}</code>  · 50%",
-            f"🎯 <b>TP2</b>  <code>{fmt_price(signal.get('tp2'))}</code>  · 30%",
-            f"🎯 <b>TP3</b>  <code>{fmt_price(signal.get('tp3'))}</code>  · 20%",
-        ])
+        lines.extend([f"🎯 هدف اول: <code>{fmt_price(tp1)}</code>  |  ۵۰٪ حجم",
+                      f"🎯 هدف دوم: <code>{fmt_price(signal.get('tp2'))}</code>  |  ۳۰٪ حجم",
+                      f"🎯 هدف سوم: <code>{fmt_price(signal.get('tp3'))}</code>  |  ۲۰٪ حجم"])
 
     levels = []
     if support is not None:
-        levels.append(f"🟩 Support  <code>{fmt_price(support)}</code>")
+        levels.append(f"حمایت: <code>{fmt_price(support)}</code>")
     if resistance is not None:
-        levels.append(f"🟥 Resistance  <code>{fmt_price(resistance)}</code>")
+        levels.append(f"مقاومت: <code>{fmt_price(resistance)}</code>")
     if levels:
-        lines.extend(["", "<b>MARKET LEVELS</b>", *levels])
+        lines.extend(["", "🧭 <b>سطوح مهم بازار</b>", *levels])
 
-    lines.extend([
-        "",
-        "<b>SETUP & RISK</b>",
-        f"Trend  · {trend}",
-        f"ADX(14)  · {f'{adx:.1f}' if adx is not None else 'N/A'}"
-        + (f"  |  EMA200  <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
-        f"Stop model  · {sl_method}",
-    ])
-
-    if is_v3:
-        lines.extend([
-            "RR نهایی: متغیر  · تریلینگ استاپ؛ depends on trailing stop",
-            "Validation  · Live-market performance not yet established",
-        ])
-    else:
-        lines.append(f"Estimated RR  · {f'{rr:.2f}' if rr is not None else 'N/A'}")
+    lines.extend(["", "📊 <b>وضعیت تحلیل</b>",
+                  f"جهت روند: {trend}",
+                  f"قدرت روند (ADX): {f'{adx:.1f}' if adx is not None else 'محاسبه نشده'}"
+                  + (f"  |  میانگین متحرک ۲۰۰: <code>{fmt_price(ema200)}</code>" if ema200 is not None else ""),
+                  f"مبنای تعیین حد ضرر: {sl_method}",
+                  f"نسبت سود به زیان برآوردی: {f'{rr:.2f}' if rr is not None else 'نامشخص'}"])
     if is_reference_futures:
-        lines.append("Research status · forward validation required; signal-only, no orders are placed")
+        lines.append("وضعیت راهبرد: در مرحله ارزیابی؛ این پیام صرفاً سیگنال است و سفارشی ثبت نمی‌کند")
+    if is_v3:
+        lines.append("مدیریت خروج: حد ضرر شناور؛ نتیجه به حرکت قیمت بستگی دارد")
 
-    lines.extend([
-        "",
-        "<b>CONTEXT</b>",
-        f"Funding  · {funding_text}  |  OI  · {oi_text}",
-        f"Signal expiry  · 48h",
-    ])
-    if risk_target is not None or actual_risk is not None:
-        lines.append(
-            f"Risk budget  · Target ${risk_target:.2f}" if risk_target is not None
-            else "Risk budget  · Target N/A"
-        )
-        if actual_risk is not None:
-            lines.append(f"Estimated risk incl. fees/slippage  · ${actual_risk:.2f}")
+    lines.extend(["", "🛡️ <b>مدیریت ریسک</b>",
+                  "بودجه ریسک هدف: " + (f"{risk_target:.2f} دلار" if risk_target is not None else "مشخص نشده")])
+    if actual_risk is not None:
+        lines.append(f"ریسک برآوردی با کارمزد و لغزش قیمت: <b>{actual_risk:.2f} دلار</b>")
+    if is_reference_futures:
+        lines.append(f"هزینه تخمینی هر سمت معامله: کارمزد {FEE_RATE*100:.3f}٪ + لغزش قیمت {SLIPPAGE_RATE*100:.3f}٪")
 
-    if headline_lines:
-        lines.extend(["", "<b>NEWS HEADLINES</b>", headline_lines.rstrip()])
-
+    lines.extend(["", "🌐 <b>اطلاعات بازار</b>",
+                  f"نرخ فاندینگ: {funding_text}  |  حجم موقعیت‌های باز (OI): {oi_text}",
+                  "اعتبار سیگنال: ۴۸ ساعت", "", "📰 <b>بررسی اخبار</b>",
+                  f"وضعیت: {news_label}  |  تغییر امتیاز: {news_adjustment:+g}"])
+    if news_items:
+        lines.append("خبرهای مرتبط:")
+        for item in news_items[:3]:
+            title = html.escape(str(item.get("title", ""))[:140])
+            if title:
+                lines.append(f"• {title}")
+    else:
+        lines.append("در منابع بررسی‌شده خبر مرتبطی پیدا نشد؛ این به معنی نبود اخبار در کل بازار نیست.")
     return "\n".join(lines)
 
 
