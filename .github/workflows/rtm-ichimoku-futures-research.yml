@@ -1,0 +1,42 @@
+name: RTM Ichimoku Futures Research V1
+on:
+  push:
+    branches:
+      - research/rtm-ichimoku-futures-engine-v1
+    paths:
+      - "research/rtm_ichimoku_futures_v1.py"
+      - "tests/test_rtm_ichimoku_futures_v1.py"
+      - ".github/workflows/rtm-ichimoku-futures-research.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rtm-ichimoku-futures-v1
+  cancel-in-progress: false
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - run: python -m py_compile research/rtm_ichimoku_futures_v1.py
+      - run: python -m unittest discover -s tests -p "test_rtm_ichimoku_futures_v1.py" -v
+      - name: Run public-data research
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u research/rtm_ichimoku_futures_v1.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rtm-ichimoku-futures-v1
+          path: |
+            research_results/rtm_ichimoku_v1/
+            research_cache/rtm_ichimoku_v1/
+          if-no-files-found: warn
+          retention-days: 30
