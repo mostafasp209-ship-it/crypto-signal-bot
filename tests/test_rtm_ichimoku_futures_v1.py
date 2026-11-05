@@ -6,7 +6,7 @@ from research.rtm_ichimoku_futures_v1 import resample_ohlcv, build_features, tra
 
 class MultiTimeframeTests(unittest.TestCase):
     def test_resample_uses_closed_right_edge(self):
-        ts=pd.date_range("2025-01-01 00:00",periods=8,freq="15min",tz="UTC")
+        ts=pd.date_range("2025-01-01 00:15",periods=8,freq="15min",tz="UTC")
         d=pd.DataFrame({"timestamp":ts,"open":range(8),"high":np.arange(8)+1,"low":range(8),"close":range(8),"volume":1})
         h=resample_ohlcv(d,"1h")
         self.assertEqual(h.iloc[0].timestamp, pd.Timestamp("2025-01-01 01:00",tz="UTC"))
