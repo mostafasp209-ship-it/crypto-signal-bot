@@ -6,8 +6,12 @@ on:
       - "bot.py"
       - "config.py"
       - "exchange.py"
+      - "indicators.py"
+      - "market_data.py"
       - "utils.py"
       - "storage.py"
+      - "indicators.py"
+      - "market_data.py"
       - "panel.py"
       - "safety_filters.py"
       - "tests/**"
@@ -33,8 +37,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile bot and tests
-        run: python -m py_compile bot.py config.py exchange.py panel.py safety_filters.py storage.py utils.py
+        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py panel.py safety_filters.py storage.py utils.py
       - name: Smoke-import runtime modules
-        run: python -c "import bot, config, exchange, panel, safety_filters, storage, utils"
+        run: python -c "import bot, config, exchange, indicators, market_data, panel, safety_filters, storage, utils"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
