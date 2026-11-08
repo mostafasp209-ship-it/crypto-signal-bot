@@ -26,9 +26,34 @@ class StrategyV2Tests(unittest.TestCase):
         pd.testing.assert_frame_equal(a.loc[:499,cols],b.loc[:499,cols],check_dtype=False,check_exact=False,rtol=1e-10,atol=1e-10)
     def test_candidate_outputs_are_boolean_and_complete(self):
         x=add_features(bars(),daily()); c=generate_candidates(x)
-        self.assertEqual(set(c),{"trend_breakout_20","trend_pullback_ema20","trend_macd_cross","range_mean_reversion"})
+        self.assertEqual(set(c),{"current_rsi_stoch_baseline","trend_breakout_20","trend_pullback_ema20","trend_macd_cross","range_mean_reversion"})
         for v in c.values():
             for side in ("BUY","SELL"): self.assertEqual((v[side].dtype,len(v[side])),(np.dtype(bool),len(x)))
+    def test_current_baseline_reproduces_long_and_short_rsi_stoch_triggers(self):
+        x=add_features(bars(),daily())
+        i=len(x)-1
+        x.loc[i-1,["rsi","stoch_k","stoch_d"]]=[29.,20.,22.]
+        x.loc[i,["rsi","stoch_k","stoch_d","volume_ma20","volume","open"]]=[
+            31.,25.,24.,1000.,1500.,float(x.loc[i,"close"])-0.1]
+        sig=generate_candidates(x)["current_rsi_stoch_baseline"]
+        self.assertTrue(sig["BUY"][i])
+        self.assertFalse(sig["SELL"][i])
+
+        x.loc[i-1,["rsi","stoch_k","stoch_d"]]=[71.,80.,78.]
+        x.loc[i,["rsi","stoch_k","stoch_d","volume_ma20","volume","open"]]=[
+            69.,75.,76.,1000.,1500.,float(x.loc[i,"close"])+0.1]
+        sig=generate_candidates(x)["current_rsi_stoch_baseline"]
+        self.assertTrue(sig["SELL"][i])
+        self.assertFalse(sig["BUY"][i])
+
+    def test_current_baseline_uses_132_atr_and_15r_exit(self):
+        x=add_features(bars(),daily())
+        i=300
+        trade=simulate_one(x,i,"BUY",len(x),family="current_rsi_stoch_baseline")
+        self.assertIsNotNone(trade)
+        self.assertAlmostEqual(trade["target"]-trade["entry"],
+            1.5*(trade["entry"]-trade["stop"]),places=7)
+
     def test_entry_uses_next_bar_open(self):
         x=add_features(bars(),daily()); i=300; t=simulate_one(x,i,"BUY",len(x))
         self.assertIsNotNone(t); self.assertEqual(t["entry_time"],int(x.iloc[i+1].timestamp))
