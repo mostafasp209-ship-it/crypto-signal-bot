@@ -24,7 +24,7 @@ class ExchangeManager:
         self.market_counts = {}
 
     def build(self, required_exchanges=None, require_scanners=True):
-        # Load only Binance for scanning plus venues that actually hold active legacy signals.
+        # Load configured scanner venues plus venues that hold active legacy signals.
         # Loading every configured exchange on every run adds several avoidable network round-trips.
         scanner_names = SCAN_EXCHANGE_NAMES if require_scanners else []
         names = list(dict.fromkeys(scanner_names + list(required_exchanges or [])))
@@ -98,7 +98,7 @@ class ExchangeManager:
         return sorted(set(result))
 
     def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
+        # New entries use the configured USDT-margined perpetual scanner venues.
         ordered = []
         seen = set()
 
