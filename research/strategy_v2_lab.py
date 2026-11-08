@@ -60,7 +60,7 @@ def rsi(close,n=14):
     delta=close.diff()
     gain=delta.clip(lower=0).ewm(alpha=1/n,adjust=False,min_periods=n).mean()
     loss=(-delta.clip(upper=0)).ewm(alpha=1/n,adjust=False,min_periods=n).mean()
-    rs=gain/loss.replace(0,np.nan)
+    rs=gain/(loss+1e-12)
     return 100-100/(1+rs)
 
 def add_features(four_hour,daily):
@@ -73,7 +73,7 @@ def add_features(four_hour,daily):
     x["rsi"]=rsi(c)
     x["volume_ma20"]=v.rolling(20,min_periods=20).mean()
     lowest=l.rolling(14,min_periods=14).min(); highest=h.rolling(14,min_periods=14).max()
-    x["stoch_k"]=100*(c-lowest)/(highest-lowest).replace(0,np.nan)
+    x["stoch_k"]=100*(c-lowest)/(highest-lowest+1e-12)
     x["stoch_d"]=x.stoch_k.rolling(3,min_periods=3).mean()
     x["macd"]=c.ewm(span=12,adjust=False,min_periods=12).mean()-c.ewm(span=26,adjust=False,min_periods=26).mean()
     x["macd_signal"]=x.macd.ewm(span=9,adjust=False,min_periods=9).mean()
