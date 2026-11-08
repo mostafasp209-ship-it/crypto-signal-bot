@@ -21,7 +21,10 @@ def is_tradable_symbol(symbol, quote_volume=None, entry_price=None):
     if entry_price is not None and entry_price < MIN_ENTRY_PRICE:
         print(f"[FILTER] {symbol}: entry {entry_price} < MIN_ENTRY_PRICE={MIN_ENTRY_PRICE}")
         return False
-    if quote_volume is not None and quote_volume < MIN_QUOTE_VOLUME_USDT:
+    if quote_volume is None:
+        print(f"[FILTER] {symbol}: quoteVolume unavailable; rejecting without liquidity evidence")
+        return False
+    if quote_volume < MIN_QUOTE_VOLUME_USDT:
         print(f"[FILTER] {symbol}: quoteVolume {quote_volume:.0f} < MIN_QUOTE_VOLUME_USDT={MIN_QUOTE_VOLUME_USDT:.0f}")
         return False
     return True
