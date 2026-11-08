@@ -4,9 +4,10 @@ from __future__ import annotations
 import math
 
 
-def _finite_positive(value: float) -> bool:
+def _finite(value: float, *, allow_zero: bool = False) -> bool:
     try:
-        return math.isfinite(float(value)) and float(value) > 0
+        number = float(value)
+        return math.isfinite(number) and (number >= 0 if allow_zero else number > 0)
     except (TypeError, ValueError, OverflowError):
         return False
 
@@ -31,10 +32,11 @@ def calculate_risk_plan(
     side = str(side).upper()
     if side not in {"BUY", "SELL"}:
         return None
-    values = (entry, stop, target, risk_budget_usd, fee_rate, slippage_rate)
-    if not all(_finite_positive(value) for value in values):
+    if not all(_finite(value) for value in (entry, stop, target, risk_budget_usd)):
         return None
-    if not math.isfinite(float(max_position_usd)) or float(max_position_usd) < 0:
+    if not _finite(fee_rate, allow_zero=True) or not _finite(slippage_rate, allow_zero=True):
+        return None
+    if not _finite(max_position_usd, allow_zero=True):
         return None
 
     entry, stop, target = float(entry), float(stop), float(target)
