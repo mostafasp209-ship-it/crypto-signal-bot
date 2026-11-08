@@ -51,6 +51,13 @@ class FuturesStrategyTests(unittest.TestCase):
                 self.assertLess(sig["entry"],100)
                 self.assertAlmostEqual(sig["tp1"],sig["entry"]-1.5*(sig["sl"]-sig["entry"]))
 
+    def test_initial_stop_risk_above_two_point_five_percent_is_rejected(self):
+        data = make_frame("BUY")
+        data.loc[data.index[-5], "low"] = 95.0
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            self.assertIsNone(bot.build_signal("BTC/USDT:USDT", "binanceusdm", data, next_open=100.0))
+
     def test_no_next_open_means_no_signal(self):
         data=make_frame("BUY"); p=patch_indicators(len(data),"BUY")
         with p[0],p[1],p[2]:
