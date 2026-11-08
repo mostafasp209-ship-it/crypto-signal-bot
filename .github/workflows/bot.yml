@@ -49,7 +49,7 @@ jobs:
 
       - name: Validate Python syntax
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-        run: python -m py_compile bot.py config.py panel.py safety_filters.py
+        run: python -m py_compile bot.py config.py exchange.py panel.py safety_filters.py utils.py
 
       - name: Run strategy and position-management tests
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
