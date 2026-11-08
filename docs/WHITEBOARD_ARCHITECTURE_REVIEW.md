@@ -33,7 +33,7 @@ flowchart TD
 | Candle hygiene | `market_data.py` | Closed-candle validation rejects forming, invalid and duplicate rows |
 | Indicators and strategy | `indicators.py` + strategy functions in `bot.py` | Indicator math is extracted; strategy gates and signal construction still need separation |
 | Risk and sizing | `risk.py`, `safety_filters.py` | Pure fee/slippage-aware sizing; keep stop-distance distinct from account/equity risk |
-| Trade lifecycle | `manage_signal`, `close_piece` | Simulated price-based exits; not exchange-native stop orders |
+| Trade lifecycle | `trade_manager.py` | Deterministic simulated TP/SL/expiry transitions; not exchange-native stop orders |
 | Persistence | `storage.py` via compatibility wrappers in `bot.py` | Atomic writes; malformed state fails closed instead of silently resetting history |
 | Telegram | `notifications.py` + `panel.py` | Signal delivery is separated from the interactive control plane |
 | Automation | `.github/workflows/bot.yml` | CI, scheduled operation and state persistence share one workflow |
@@ -74,6 +74,8 @@ Refactor incrementally into small modules while preserving public imports used b
 - `exchange.py`: CCXT lifecycle and market-universe adapters
 - `market_data.py`: OHLCV normalization and closed-candle validation
 - `indicators.py`: pure indicator calculations
+- `risk.py`: fee/slippage-aware sizing and risk-plan calculations
+- `trade_manager.py`: deterministic simulated trade lifecycle
 - `notifications.py`: Telegram signal delivery
 - `utils.py`: dependency-light numeric and formatting helpers
 - `storage.py`: schema-checked state loading and atomic persistence
@@ -103,4 +105,4 @@ Before production deployment:
 
 ## 7. Review verdict
 
-The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access, OHLCV validation, indicators, notifications, numeric parsing and state persistence into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
+The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access, OHLCV validation, indicators, risk planning, trade lifecycle, notifications, numeric parsing and state persistence into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
