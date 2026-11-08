@@ -45,6 +45,14 @@ class RiskPlanTests(unittest.TestCase):
             fee_rate=0, slippage_rate=0,
         ))
 
+    def test_adverse_slippage_cannot_be_misread_as_positive_reward(self):
+        plan = calculate_risk_plan(
+            side="SELL", entry=100, stop=102, target=97,
+            risk_budget_usd=10, max_position_usd=0,
+            fee_rate=0, slippage_rate=0.05,
+        )
+        self.assertIsNone(plan)
+
     def test_zero_fee_and_slippage_are_valid_research_assumptions(self):
         plan = calculate_risk_plan(
             side="BUY", entry=100, stop=95, target=110,
