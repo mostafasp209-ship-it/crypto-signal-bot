@@ -80,18 +80,18 @@ def close_piece(signal, exit_price, fraction, label):
     piece_qty = quantity * fraction
     is_reference_futures = _components(signal).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
     if is_reference_futures:
-        slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
+        slip = safe_float(_components(signal).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
         exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
     gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
     # Preserve the 0.10% fee model for known legacy setups; generic/new records
     # continue to use the configured current fee unless they carry their own rate.
-    setup_name = signal.get("components", {}).get("setup")
+    setup_name = _components(signal).get("setup")
     legacy_setup = setup_name in {
         "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3",
         "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
     }
     fee_default = 0.001 if legacy_setup else FEE_RATE
-    fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), fee_default)
+    fee_rate = safe_float(_components(signal).get("fee_rate"), fee_default)
     fees = (entry + exit_price) * piece_qty * fee_rate
     signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
     signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
@@ -139,7 +139,7 @@ def stop_hit(signal, price):
 
 def update_chandelier_stop(signal, df):
     """Ratchet the V3 stop using closed-candle highest close minus 3*ATR(14)."""
-    if signal.get("components", {}).get("setup") != "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
+    if _components(signal).get("setup") != "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
         return False
     if df is None or len(df) < 20 or not {"high", "low", "close", "timestamp"}.issubset(df.columns):
         return False
@@ -224,7 +224,7 @@ def manage_signal(signal, current_price):
             pass
 
     is_v3 = (
-        signal.get("components", {}).get("setup")
+        _components(signal).get("setup")
         == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
     )
     if is_v3:
@@ -247,7 +247,7 @@ def manage_signal(signal, current_price):
             return True
 
         if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-            partial_pct = safe_float(signal.get("components", {}).get("partial_pct"), 1.0 / 3.0)
+            partial_pct = safe_float(_components(signal).get("partial_pct"), 1.0 / 3.0)
             partial_target = safe_float(signal.get("tp1"))
             if partial_target is None or not close_piece(signal, partial_target, partial_pct, "tp1"):
                 print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 partial exit not booked; leaving trade active")
@@ -273,7 +273,7 @@ def manage_signal(signal, current_price):
         return True
 
     # This reference setup has one final target; the repeated TP fields are legacy compatibility.
-    is_single_target = signal.get("components", {}).get("setup") in {
+    is_single_target = _components(signal).get("setup") in {
         "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
     }
     if is_single_target and price_hit(signal, current_price, "tp1"):
