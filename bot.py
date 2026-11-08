@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 
 from config import (
-    ADMIN_CHAT_ID, DAILY_LIMIT, DATA_FILE, EXCHANGE_NAMES, FEE_RATE,
+    ADMIN_CHAT_ID, APP_VERSION, DAILY_LIMIT, DATA_FILE, EXCHANGE_NAMES, FEE_RATE,
     FUNDING_SOURCES, MAX_POSITION_USD, MIN_RR, NEWS_FEEDS,
     NEWS_LOOKBACK_HOURS, NEWS_TIMEOUT_SECONDS, OHLCV_LIMIT, RISK_USD,
     SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
@@ -889,7 +889,7 @@ def scan_market(manager, state):
 
 def main(manage_only=False):
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
+    print(f"CRYPTO SIGNAL BOT v{APP_VERSION} — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
     print("Started:", iso_now())
     print("=" * 70)
 
