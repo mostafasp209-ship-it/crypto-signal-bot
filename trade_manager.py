@@ -18,6 +18,12 @@ def iso_now():
     return utc_now().isoformat()
 
 
+def _components(signal: dict) -> dict:
+    """Return a safe component mapping for legacy or partially migrated signals."""
+    value = signal.get("components")
+    return value if isinstance(value, dict) else {}
+
+
 def duplicate_exists(state, symbol, side):
     for signal in state.get("signals", []):
         if signal.get("symbol") == symbol and signal.get("side") == side:
@@ -72,7 +78,7 @@ def close_piece(signal, exit_price, fraction, label):
         return False
 
     piece_qty = quantity * fraction
-    is_reference_futures = signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_reference_futures = _components(signal).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
     if is_reference_futures:
         slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
         exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
