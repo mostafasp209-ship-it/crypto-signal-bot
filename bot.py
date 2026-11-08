@@ -1342,7 +1342,7 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
     target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
     target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
-    net_rr = target_net_reward / (risk + cost_unit)
+    net_rr = target_net_reward / risk
     if not math.isfinite(net_rr) or net_rr < MIN_RR:
         print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
         return None
