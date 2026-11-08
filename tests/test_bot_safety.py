@@ -28,6 +28,22 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(storage.load_state(target), {"signals": [], "last_run": None})
 
 
+    def test_corrupt_state_is_not_silently_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "signals.json"
+            target.write_text("{broken", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                storage.load_state(target)
+            self.assertEqual(target.read_text(encoding="utf-8"), "{broken")
+
+    def test_invalid_signal_collection_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "signals.json"
+            target.write_text('{"signals": {}}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                storage.load_state(target)
+
+
 class NumericSafetyTests(unittest.TestCase):
     def test_safe_float_rejects_non_finite_values(self):
         self.assertEqual(safe_float("12.5"), 12.5)
