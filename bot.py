@@ -25,6 +25,7 @@ from exchange import ExchangeManager
 from indicators import add_indicators
 from market_data import closed_candles
 from notifications import telegram_recipients, telegram_send
+from risk import calculate_risk_plan
 from safety_filters import MAX_RISK_PCT, is_tradable_symbol
 from storage import load_state as _load_state, save_state as _save_state
 from trade_manager import (
@@ -922,20 +923,21 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     if not (0.0035 < risk_pct <= MAX_RISK_PCT):
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    # Entry slippage is already embedded in entry. Estimate adverse target-exit
-    # slippage and round-trip fees before admitting the signal.
-    cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
-    target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
-    target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
-    # Net target reward after entry/exit fees and target slippage, normalized
-    # to the planned price-distance risk. Stop-side costs are included in sizing.
-    net_rr = target_net_reward / risk
-    if not math.isfinite(net_rr) or net_rr < MIN_RR:
+    risk_plan = calculate_risk_plan(
+        side=side, entry=entry, stop=stop, target=target,
+        risk_budget_usd=RISK_USD, max_position_usd=MAX_POSITION_USD,
+        fee_rate=FEE_RATE, slippage_rate=SLIPPAGE_RATE,
+    )
+    if risk_plan is None:
+        print(f"[SIGNAL SKIP] {symbol}: invalid risk or execution-cost plan")
+        return None
+    cost_unit = risk_plan["cost_per_unit"]
+    net_rr = risk_plan["net_rr"]
+    if net_rr < MIN_RR:
         print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
         return None
-    raw_qty = RISK_USD/(risk+cost_unit)
-    cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
-    qty = min(raw_qty, cap_qty)
+    raw_qty = risk_plan["raw_quantity"]
+    qty = risk_plan["quantity"]
     now = iso_now()
     setup = "REFERENCE_RSI_STOCH_ATR_RR15"
     components = {
@@ -960,9 +962,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
         "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
         "net_rr": net_rr,
-        "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
-        "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
-        "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
+        "risk_target_usd": RISK_USD, "actual_risk_usd": risk_plan["actual_risk_usd"],
+        "position_quantity": qty, "quantity": qty, "position_value": risk_plan["position_value_usd"],
+        "position_capped": bool(risk_plan["position_capped"]), "signal_candle_timestamp": st["signal_timestamp"],
         "components": components,
         "entry_snapshot": {"timeframe": "4h", "setup": setup, "rr": 1.5, "rsi": st["rsi"],
             "stoch_k": st["stoch_k"], "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
