@@ -9,6 +9,7 @@ on:
       - "exchange.py"
       - "indicators.py"
       - "market_data.py"
+      - "notifications.py"
       - "utils.py"
       - "storage.py"
       - "safety_filters.py"
@@ -54,7 +55,7 @@ jobs:
 
       - name: Validate Python syntax
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py panel.py safety_filters.py storage.py utils.py
+        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py notifications.py panel.py safety_filters.py storage.py utils.py
 
       - name: Run strategy and position-management tests
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
