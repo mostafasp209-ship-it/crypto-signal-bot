@@ -23,6 +23,7 @@ Evolve the V1 signal-and-paper-monitoring bot into a modular, observable and rep
 | `exchange.py` | CCXT clients, market discovery and exchange adapters |
 | `market_data.py` | OHLCV schema, ordering, validation, closed-candle policy and freshness |
 | `indicators.py` | Deterministic indicator calculations |
+| `risk.py` | Fee/slippage-aware stop risk, target RR and position sizing |
 | `strategy.py` | Strategy families and deterministic setup rules |
 | `risk.py` | Stop validation, fee/slippage-aware sizing and exposure limits |
 | `trade_manager.py` | Pure TP/SL/expiry state transitions |
@@ -44,6 +45,7 @@ Modules are extracted one boundary at a time. Existing imports remain as compati
 
 ### Phase 2 — Domain separation
 - Extract indicator calculations, strategy evaluation, risk/sizing and trade lifecycle into pure modules.
+- Current branch now has a pure `risk.py` calculator used by signal construction; expand its property and regression tests before any sizing changes.
 - Keep state transitions deterministic and replayable.
 - Add stable signal IDs, idempotent signal creation and explicit schema-version migration.
 - Serialize all writers or move to a transactional store only after a tested export/import path exists.
@@ -86,4 +88,4 @@ Modules are extracted one boundary at a time. Existing imports remain as compati
 
 ## Current scope delivered
 
-The current hardening branch has extracted configuration, exchange access, shared numeric parsing, OHLCV processing and indicator calculation. The latest changes add deterministic OHLCV validation and regression tests. This is an incremental V2 foundation, not yet a complete V2 release.
+The current hardening branch has extracted configuration, exchange access, shared numeric parsing, OHLCV processing, indicator calculation, and the fee/slippage-aware risk calculator. The latest changes add deterministic OHLCV validation and regression tests. This is an incremental V2 foundation, not yet a complete V2 release.
