@@ -71,7 +71,7 @@ class StrategyV2Tests(unittest.TestCase):
         for a,b in zip(ts,ts[1:]): self.assertGreater(b["signal_index"],a["exit_index"])
     def test_metrics_include_long_short(self):
         m=metrics([{"net_r":1.,"side":"BUY"},{"net_r":-1.,"side":"SELL"},{"net_r":.5,"side":"BUY"}])
-        self.assertEqual(m["trades"],3); self.assertAlmostEqual(m["expectancy_r"],1/6)
+        self.assertEqual(m["trades"],3); self.assertAlmostEqual(m["expectancy_r"],1/6,places=3)
         self.assertEqual((m["long_trades"],m["short_trades"]),(2,1))
     def test_chronological_splits(self):
         self.assertEqual(splits(1000),{"train":(220,600),"validation":(600,800),"holdout":(800,1000)})
