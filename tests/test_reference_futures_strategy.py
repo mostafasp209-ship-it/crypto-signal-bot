@@ -3,6 +3,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 import bot
+import strategy
 
 SETUP = "REFERENCE_RSI_STOCH_ATR_RR15"
 
@@ -24,9 +25,9 @@ def patch_indicators(n,side):
         rv[-2:]=[29.0,31.0]; k[-2:]=[20.0,25.0]; d[-2:]=[22.0,24.0]
     else:
         rv[-2:]=[71.0,69.0]; k[-2:]=[80.0,75.0]; d[-2:]=[78.0,76.0]
-    return (patch("bot.rsi",return_value=pd.Series(rv)),
-            patch("bot.atr",return_value=pd.Series(av)),
-            patch("bot.stochastic",return_value=(pd.Series(k),pd.Series(d))))
+    return (patch("strategy.rsi",return_value=pd.Series(rv)),
+            patch("strategy.atr",return_value=pd.Series(av)),
+            patch("strategy.stochastic",return_value=(pd.Series(k),pd.Series(d))))
 
 class FuturesStrategyTests(unittest.TestCase):
     def test_long_and_short_gates(self):
