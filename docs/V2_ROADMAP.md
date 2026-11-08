@@ -90,4 +90,4 @@ Modules are extracted one boundary at a time. Existing imports remain as compati
 
 ## Current scope delivered
 
-The current hardening branch has extracted configuration, exchange access, shared numeric parsing, OHLCV processing, indicator calculation, the deterministic strategy engine, and the fee/slippage-aware risk calculator. The latest changes add deterministic OHLCV validation and regression tests. This is an incremental V2 foundation, not yet a complete V2 release.
+The current hardening branch has extracted configuration, exchange access, shared numeric parsing, OHLCV processing, indicator calculation, the deterministic strategy engine, the fee/slippage-aware risk calculator, Telegram delivery and signal lifecycle management. It also includes a V2 futures research lab with per-symbol OKX/Gate.io/Bitget fallback, chronological splits and a separate holdout report. The latest changes add deterministic OHLCV validation and regression tests. A development version label (`2.0.0-dev.1`), local environment template and Python artifact ignore rules are included. This is an incremental V2 foundation, not yet a complete V2 release.
