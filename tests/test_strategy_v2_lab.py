@@ -24,6 +24,10 @@ class StrategyV2Tests(unittest.TestCase):
         b=add_features(changed,d)
         cols=["ema20","ema50","ema200","atr","rsi","donchian_high20","donchian_low20"]
         pd.testing.assert_frame_equal(a.loc[:499,cols],b.loc[:499,cols],check_dtype=False,check_exact=False,rtol=1e-10,atol=1e-10)
+    def test_regime_label_is_attached_to_each_bar(self):
+        x=add_features(bars(),daily())
+        self.assertIn("market_regime",x.columns)
+        self.assertTrue(set(x.market_regime.unique()).issubset({"UPTREND","DOWNTREND","RANGE","TRANSITION"}))
     def test_candidate_outputs_are_boolean_and_complete(self):
         x=add_features(bars(),daily()); c=generate_candidates(x)
         self.assertEqual(set(c),{"current_rsi_stoch_baseline","trend_breakout_20","trend_pullback_ema20","trend_macd_cross","range_mean_reversion"})
@@ -73,6 +77,8 @@ class StrategyV2Tests(unittest.TestCase):
         m=metrics([{"net_r":1.,"side":"BUY"},{"net_r":-1.,"side":"SELL"},{"net_r":.5,"side":"BUY"}])
         self.assertEqual(m["trades"],3); self.assertAlmostEqual(m["expectancy_r"],1/6,places=3)
         self.assertEqual((m["long_trades"],m["short_trades"]),(2,1))
+        self.assertEqual(m["by_side"]["BUY"]["trades"],2)
+        self.assertEqual(m["by_side"]["SELL"]["trades"],1)
     def test_chronological_splits(self):
         self.assertEqual(splits(1000),{"train":(220,600),"validation":(600,800),"holdout":(800,1000)})
 

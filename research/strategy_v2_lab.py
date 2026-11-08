@@ -97,6 +97,11 @@ def add_features(four_hour,daily):
     x=x.drop(columns="available_at")
     x["donchian_high20"]=h.shift(1).rolling(20,min_periods=20).max()
     x["donchian_low20"]=l.shift(1).rolling(20,min_periods=20).min()
+    regime=pd.Series("TRANSITION",index=x.index,dtype="object")
+    regime.loc[x.adx<18]="RANGE"
+    regime.loc[(c>x.ema200)&(x.ema50>x.ema200)&(x.daily_close>x.daily_ema50)&(x.adx>=20)]="UPTREND"
+    regime.loc[(c<x.ema200)&(x.ema50<x.ema200)&(x.daily_close<x.daily_ema50)&(x.adx>=20)]="DOWNTREND"
+    x["market_regime"]=regime
     return x
 
 def generate_candidates(x):
@@ -163,7 +168,7 @@ def simulate_one(frame,i,side,end,family=None):
     return {"signal_index":i,"entry_index":ei,"exit_index":last,"signal_time":int(row.timestamp),
       "entry_time":int(nxt.timestamp),"exit_time":int(frame.iloc[last].timestamp),"side":side,
       "entry":entry,"stop":stop,"target":target,"exit":exit_fill,"reason":reason,
-      "net_r":net/denom,"net_rr":net_rr,"net_return_pct":net/entry*100}
+      "net_r":net/denom,"net_rr":net_rr,"net_return_pct":net/entry*100,"market_regime":str(row.market_regime)}
 
 def simulate_candidate(frame,signals,start,end,family=None):
     trades=[]; i=max(start,220); end=min(end,len(frame))
@@ -176,14 +181,26 @@ def simulate_candidate(frame,signals,start,end,family=None):
     return trades
 
 def metrics(trades):
-    if not trades: return {"trades":0,"win_rate_pct":None,"expectancy_r":None,"profit_factor":None,"net_total_r":0.0,"max_drawdown_r":None,"long_trades":0,"short_trades":0}
+    if not trades: return {"trades":0,"win_rate_pct":None,"expectancy_r":None,"profit_factor":None,"net_total_r":0.0,"max_drawdown_r":None,"long_trades":0,"short_trades":0,"by_side":{},"by_regime":{}}
     r=np.asarray([t["net_r"] for t in trades],float); wins,losses=r[r>0],r[r<0]
     eq=np.cumsum(r); peak=np.maximum.accumulate(np.r_[0.0,eq])[1:]
     pf=float(wins.sum()/abs(losses.sum())) if len(losses) and abs(losses.sum()) else None
+    def subset_stats(items):
+        values=np.asarray([t["net_r"] for t in items],float)
+        positive,negative=values[values>0],values[values<0]
+        factor=float(positive.sum()/abs(negative.sum())) if len(negative) and abs(negative.sum()) else None
+        return {"trades":len(items),"win_rate_pct":round(float((values>0).mean()*100),2),
+          "expectancy_r":round(float(values.mean()),4),"profit_factor":round(factor,4) if factor is not None else None}
+    by_side={side:subset_stats([t for t in trades if t["side"]==side]) for side in ("BUY","SELL")
+      if any(t["side"]==side for t in trades)}
+    regimes=sorted({t.get("market_regime","UNKNOWN") for t in trades})
+    by_regime={regime:subset_stats([t for t in trades if t.get("market_regime","UNKNOWN")==regime])
+      for regime in regimes}
     return {"trades":len(r),"win_rate_pct":round(float((r>0).mean()*100),2),
       "expectancy_r":round(float(r.mean()),4),"profit_factor":round(pf,4) if pf is not None else None,
       "net_total_r":round(float(r.sum()),3),"max_drawdown_r":round(float((peak-eq).max()),3),
-      "long_trades":sum(t["side"]=="BUY" for t in trades),"short_trades":sum(t["side"]=="SELL" for t in trades)}
+      "long_trades":sum(t["side"]=="BUY" for t in trades),"short_trades":sum(t["side"]=="SELL" for t in trades),
+      "by_side":by_side,"by_regime":by_regime}
 
 def splits(n):
     a,b=int(n*.6),int(n*.8)
