@@ -2104,7 +2104,7 @@ def scan_market(manager, state):
                             and abs(current_ts-closed_ts-interval_ms) < 1
                             and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
-                if next_open is not None and not is_tradable_symbol(symbol, entry_price=next_open):
+                if next_open is not None and not is_tradable_symbol(symbol, entry_price=next_open, require_quote_volume=False):
                     stats["no_setup_or_score"] += 1
                     break
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
