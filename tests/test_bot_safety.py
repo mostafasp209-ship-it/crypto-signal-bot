@@ -4,13 +4,14 @@ from unittest.mock import patch
 import pandas as pd
 
 import bot
+import exchange
 from analyze_signals import audit_signals
 
 
 class ExchangeInitializationTests(unittest.TestCase):
     def test_management_only_does_not_require_scanner_exchanges(self):
         manager = bot.ExchangeManager()
-        with patch.object(bot, "SCAN_EXCHANGE_NAMES", []):
+        with patch.object(exchange, "SCAN_EXCHANGE_NAMES", []):
             self.assertTrue(manager.build(require_scanners=False))
 
     def test_normal_scan_still_requires_at_least_one_scanner(self):
