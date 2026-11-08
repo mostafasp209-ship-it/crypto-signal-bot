@@ -8,6 +8,7 @@ on:
       - "exchange.py"
       - "indicators.py"
       - "market_data.py"
+      - "notifications.py"
       - "utils.py"
       - "storage.py"
       - "indicators.py"
@@ -37,8 +38,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile bot and tests
-        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py panel.py safety_filters.py storage.py utils.py
+        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py notifications.py panel.py safety_filters.py storage.py utils.py
       - name: Smoke-import runtime modules
-        run: python -c "import bot, config, exchange, indicators, market_data, panel, safety_filters, storage, utils"
+        run: python -c "import bot, config, exchange, indicators, market_data, notifications, panel, safety_filters, storage, utils"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
