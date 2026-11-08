@@ -23,6 +23,7 @@ from config import (
 )
 from exchange import ExchangeManager
 from safety_filters import MAX_RISK_PCT, is_tradable_symbol
+from storage import load_state as _load_state, save_state as _save_state
 from utils import safe_float
 
 
@@ -68,29 +69,13 @@ def clamp(x, lo, hi):
 # ============================================================
 
 def load_state():
-    if not os.path.exists(DATA_FILE):
-        return {"signals": [], "last_run": None}
-
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not isinstance(data, dict):
-            return {"signals": [], "last_run": None}
-
-        data.setdefault("signals", [])
-        data.setdefault("last_run", None)
-        return data
-    except Exception:
-        print("WARNING: signals.json could not be read; starting clean.")
-        return {"signals": [], "last_run": None}
+    """Backward-compatible state loader used by the bot and Telegram panel."""
+    return _load_state(DATA_FILE)
 
 
 def save_state(state):
-    tmp = DATA_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, DATA_FILE)
+    """Backward-compatible state writer used by the bot and Telegram panel."""
+    return _save_state(state, DATA_FILE)
 
 
 # ============================================================
