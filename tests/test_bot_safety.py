@@ -6,6 +6,19 @@ import bot
 from analyze_signals import audit_signals
 
 
+class ExchangeInitializationTests(unittest.TestCase):
+    def test_management_only_does_not_require_scanner_exchanges(self):
+        manager = bot.ExchangeManager()
+        with patch.object(bot, "SCAN_EXCHANGE_NAMES", []):
+            self.assertTrue(manager.build(require_scanners=False))
+
+    def test_normal_scan_still_requires_at_least_one_scanner(self):
+        manager = bot.ExchangeManager()
+        with patch.object(bot, "SCAN_EXCHANGE_NAMES", []):
+            with self.assertRaises(RuntimeError):
+                manager.build(require_scanners=True)
+
+
 class CandleSafetyTests(unittest.TestCase):
     def test_closed_candles_excludes_forming_candle(self):
         raw = []
