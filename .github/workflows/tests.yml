@@ -7,6 +7,7 @@ on:
       - "config.py"
       - "exchange.py"
       - "utils.py"
+      - "storage.py"
       - "panel.py"
       - "safety_filters.py"
       - "tests/**"
@@ -32,8 +33,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       - name: Compile bot and tests
-        run: python -m py_compile bot.py config.py exchange.py panel.py safety_filters.py utils.py
+        run: python -m py_compile bot.py config.py exchange.py panel.py safety_filters.py storage.py utils.py
       - name: Smoke-import runtime modules
-        run: python -c "import bot, config, exchange, panel, safety_filters, utils"
+        run: python -c "import bot, config, exchange, panel, safety_filters, storage, utils"
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
