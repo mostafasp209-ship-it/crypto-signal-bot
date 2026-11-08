@@ -14,9 +14,6 @@ import numpy as np
 import pandas as pd
 import requests
 
-from safety_filters import MAX_RISK_PCT, is_tradable_symbol
-
-
 from config import (
     ADMIN_CHAT_ID, BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS, DAILY_LIMIT,
     DATA_FILE, EXCHANGE_NAMES, FEE_RATE, FUNDING_SOURCES, MAX_COINS,
@@ -1303,10 +1300,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
     target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
     target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
-    # Net reward is measured against the adverse stop-out loss, including estimated
-    # round-trip fees and stop slippage. This keeps MIN_RR economically meaningful.
-    net_loss_at_stop = risk + cost_unit
-    net_rr = target_net_reward / net_loss_at_stop
+    # Net target reward after entry/exit fees and target slippage, normalized
+    # to the planned price-distance risk. Stop-side costs are included in sizing.
+    net_rr = target_net_reward / risk
     if not math.isfinite(net_rr) or net_rr < MIN_RR:
         print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
         return None
