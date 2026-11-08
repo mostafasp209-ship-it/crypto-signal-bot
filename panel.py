@@ -322,6 +322,7 @@ def show_status(chat_id: Any, state: dict, users: dict) -> None:
     total = len(state.get("signals", []))
     active = len(active_signals(state))
     send(chat_id, "🔎 <b>وضعیت ربات</b>\n"
+         f"نسخه: <code>{html.escape(str(bot.APP_VERSION))}</code>\n"
          f"آخرین اجرای ثبت‌شده: <code>{last_run}</code>\n"
          f"سیگنال فعال: <b>{active}</b>\n"
          f"کل سیگنال‌ها: <b>{total}</b>\n"
