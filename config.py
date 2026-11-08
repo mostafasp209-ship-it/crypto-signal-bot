@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 
+APP_VERSION = "2.0.0-dev.1"
+
 # Exchanges used to manage legacy signals plus current scanner venues.
 EXCHANGE_NAMES = [
     "binanceus", "bitstamp", "bitfinex", "cryptocom",
