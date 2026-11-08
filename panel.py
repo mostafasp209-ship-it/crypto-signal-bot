@@ -1,4 +1,4 @@
-"""Telegram control panel for the spot crypto-signal bot.
+"""Telegram control panel for the USDT perpetual crypto-signal bot.
 
 Compatible with the bot.py currently provided in this project.
 
