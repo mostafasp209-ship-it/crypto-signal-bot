@@ -34,7 +34,7 @@ flowchart TD
 | Indicators and strategy | `bot.py` | Large file mixes indicator math, setup rules and signal construction |
 | Risk and sizing | `build_signal`, `safety_filters.py` | Distinguish stop-distance cap from account/equity risk |
 | Trade lifecycle | `manage_signal`, `close_piece` | Simulated price-based exits; not exchange-native stop orders |
-| Persistence | `load_state`, `save_state` | JSON file is a single-writer state store; concurrency matters |
+| Persistence | `storage.py` via compatibility wrappers in `bot.py` | Atomic writes; malformed state now fails closed instead of silently resetting history |
 | Telegram | `telegram_send`, `panel.py` | Delivery and control-plane behavior should be isolated |
 | Automation | `.github/workflows/bot.yml` | CI, scheduled operation and state persistence share one workflow |
 
@@ -73,6 +73,7 @@ Refactor incrementally into small modules while preserving public imports used b
 - `config.py`: immutable runtime settings and environment parsing
 - `exchange.py`: CCXT lifecycle, market universe and market-data adapters
 - `utils.py`: dependency-light numeric and formatting helpers
+- `storage.py`: schema-checked state loading and atomic persistence
 - `market_data.py`: OHLCV validation, closed-candle handling and freshness checks
 - `indicators.py`: pure indicator calculations
 - `strategy.py`: setup gates and signal candidate generation
@@ -98,4 +99,4 @@ Before production deployment:
 
 ## 7. Review verdict
 
-The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access and shared numeric parsing into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
+The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access, numeric parsing and state persistence into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
