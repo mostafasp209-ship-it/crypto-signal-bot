@@ -5,7 +5,16 @@ import pandas as pd
 
 import bot
 import exchange
+from utils import safe_float
 from analyze_signals import audit_signals
+
+
+class NumericSafetyTests(unittest.TestCase):
+    def test_safe_float_rejects_non_finite_values(self):
+        self.assertEqual(safe_float("12.5"), 12.5)
+        self.assertIsNone(safe_float("nan"))
+        self.assertIsNone(safe_float("inf"))
+        self.assertEqual(safe_float("invalid", default=7.0), 7.0)
 
 
 class ExchangeInitializationTests(unittest.TestCase):
