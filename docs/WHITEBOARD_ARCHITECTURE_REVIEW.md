@@ -81,7 +81,7 @@ Refactor incrementally into small modules while preserving public imports used b
 - `storage.py`: schema-checked state loading and atomic persistence
 - `market_data.py`: OHLCV validation, closed-candle handling and freshness checks
 - `indicators.py`: pure indicator calculations
-- `strategy.py`: setup gates and signal candidate generation
+- `strategy.py`: technical features, structural levels and deterministic setup gates
 - `risk.py`: fee/slippage-aware sizing and risk calculations
 - `safety_filters.py`: symbol, liquidity and stop-distance admission filters
 - `trade_manager.py`: deterministic TP/SL/expiry state transitions
