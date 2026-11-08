@@ -12,7 +12,7 @@ permissions:
   contents: read
 concurrency:
   group: strategy-v2-futures-research
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
