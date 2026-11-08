@@ -931,7 +931,6 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     if risk_plan is None:
         print(f"[SIGNAL SKIP] {symbol}: invalid risk or execution-cost plan")
         return None
-    cost_unit = risk_plan["cost_per_unit"]
     net_rr = risk_plan["net_rr"]
     if net_rr < MIN_RR:
         print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
