@@ -72,6 +72,7 @@ Refactor incrementally into small modules while preserving public imports used b
 
 - `config.py`: immutable runtime settings and environment parsing
 - `exchange.py`: CCXT lifecycle, market universe and market-data adapters
+- `utils.py`: dependency-light numeric and formatting helpers
 - `market_data.py`: OHLCV validation, closed-candle handling and freshness checks
 - `indicators.py`: pure indicator calculations
 - `strategy.py`: setup gates and signal candidate generation
@@ -97,4 +98,4 @@ Before production deployment:
 
 ## 7. Review verdict
 
-The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass improves boundaries and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
+The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access and shared numeric parsing into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
