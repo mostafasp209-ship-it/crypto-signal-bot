@@ -1,4 +1,5 @@
 import unittest
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -7,9 +8,26 @@ import pandas as pd
 
 import bot
 import exchange
+import notifications
 import storage
 from utils import safe_float
 from analyze_signals import audit_signals
+
+
+class NotificationTests(unittest.TestCase):
+    def test_recipients_exclude_blocked_and_opted_out_users(self):
+        with tempfile.TemporaryDirectory() as directory:
+            users_file = Path(directory) / "users.json"
+            users_file.write_text(json.dumps({"users": [
+                {"chat_id": "100", "notify": True},
+                {"chat_id": "200", "blocked": True},
+                {"chat_id": "300", "notify": False},
+                {"chat_id": "100", "notify": True},
+            ]}), encoding="utf-8")
+            with patch.object(notifications, "USERS_FILE", str(users_file)), \
+                 patch.object(notifications, "ADMIN_CHAT_ID", "admin"), \
+                 patch.object(notifications, "TELEGRAM_CHAT_ID", ""):
+                self.assertEqual(notifications.telegram_recipients(), ["admin", "100"])
 
 
 class StorageTests(unittest.TestCase):
