@@ -96,6 +96,31 @@ class CandleSafetyTests(unittest.TestCase):
         self.assertTrue(bot.closed_candles([]).empty)
         self.assertTrue(bot.closed_candles([[0, 1, 1, 1, 1, 1]] * 29).empty)
 
+    def test_closed_candles_sort_deduplicate_and_reject_invalid_ohlcv(self):
+        raw = []
+        for i in range(40):
+            close = 100 + i
+            raw.append([i * 14400000, close, close + 2, close - 2, close + 1, 1000])
+        # Duplicate timestamp: keep the last exchange observation.
+        raw.insert(5, [5 * 14400000, 105, 107, 103, 106, 900])
+        # Impossible high/low geometry must not reach indicator calculations.
+        raw[10] = [10 * 14400000, 110, 100, 105, 111, 1000]
+        # Reverse the response to prove ordering is normalized.
+        raw = list(reversed(raw))
+        df = bot.closed_candles(raw)
+        self.assertTrue(df["timestamp"].is_monotonic_increasing)
+        self.assertEqual(df["timestamp"].duplicated().sum(), 0)
+        self.assertNotIn(10 * 14400000, set(df["timestamp"].astype(int)))
+        self.assertEqual(int(df.iloc[-1]["timestamp"]), 38 * 14400000)
+
+    def test_closed_candles_rejects_non_finite_rows(self):
+        raw = []
+        for i in range(40):
+            raw.append([i * 14400000, 100, 102, 99, 101, 1000])
+        raw[8] = [8 * 14400000, 100, float("inf"), 99, 101, 1000]
+        df = bot.closed_candles(raw)
+        self.assertNotIn(8 * 14400000, set(df["timestamp"].astype(int)))
+
     def test_indicators_produce_expected_columns(self):
         raw = []
         for i in range(240):
