@@ -1266,7 +1266,7 @@ def calculate_reference_strategy_gates(df):
 
 
 def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamentals=None, news_context=None):
-    """Create a Binance USDⓈ-M 4H long/short signal using next candle open."""
+    """Create a USDT-linear perpetual 4H signal using the next candle open."""
     st = calculate_reference_strategy_gates(df)
     if not st["signal_long"] and not st["signal_short"]:
         return None
