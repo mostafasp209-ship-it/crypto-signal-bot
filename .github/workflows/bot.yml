@@ -6,6 +6,8 @@ on:
     paths:
       - "bot.py"
       - "config.py"
+      - "exchange.py"
+      - "utils.py"
       - "safety_filters.py"
       - "panel.py"
       - ".github/workflows/bot.yml"
