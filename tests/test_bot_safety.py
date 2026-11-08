@@ -16,7 +16,7 @@ class ExchangeInitializationTests(unittest.TestCase):
 
     def test_normal_scan_still_requires_at_least_one_scanner(self):
         manager = bot.ExchangeManager()
-        with patch.object(bot, "SCAN_EXCHANGE_NAMES", []):
+        with patch.object(exchange, "SCAN_EXCHANGE_NAMES", []):
             with self.assertRaises(RuntimeError):
                 manager.build(require_scanners=True)
 
