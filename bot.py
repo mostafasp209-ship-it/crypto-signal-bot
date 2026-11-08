@@ -17,60 +17,16 @@ import requests
 from safety_filters import MAX_RISK_PCT, is_tradable_symbol
 
 
-# ============================================================
-# CONFIG
-# ============================================================
-
-EXCHANGE_NAMES = [
-    # Legacy venues may still be needed to manage already-open signals.
-    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm", "bybit",
-]
-# Binance USD-M returned HTTP 451 from GitHub Actions (restricted-location response).
-# Use liquid USDT linear perpetual venues as scanner sources instead.
-# Bybit is geo-blocked on GitHub-hosted runners (HTTP 403). Keep multiple independent USDT-margined venues so one outage cannot stop scanning.
-SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
-FUNDING_SOURCES = ["bitget", "okx", "gateio"]
-
-QUOTE = "USDT"
-TIMEFRAME = "4h"
-TREND_TIMEFRAME = "1d"
-
-MAX_COINS = None  # Scan every eligible active USDT-M perpetual contract
-MAX_SYMBOLS_PER_EXCHANGE = None  # No per-exchange symbol cap
-MIN_SCORE = 12
-# Reject BUY entries with too little upside room before the nearest resistance.
-# Initial threshold; validate against out-of-sample backtests before tuning.
-MIN_RESISTANCE_ROOM_R = 0.75
-# RR is weighted across TP1/TP2/TP3 and includes estimated round-trip fees.
-MIN_RR = 1.35
-
-SIGNAL_EXPIRY_HOURS = 48
-RISK_USD = 10.0
-MAX_POSITION_USD = float(os.getenv("MAX_POSITION_USD", "200"))
-FEE_RATE = 0.0005
-SLIPPAGE_RATE = 0.0002
-
-TP_WEIGHTS = {
-    "tp1": 0.50,
-    "tp2": 0.30,
-    "tp3": 0.20,
-}
-
-DATA_FILE = "signals.json"
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", TELEGRAM_CHAT_ID).strip()
-USERS_FILE = os.getenv("USERS_FILE", "users.json")
-
-REQUEST_TIMEOUT_MS = 15000
-OHLCV_LIMIT = 260
-DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.05
-BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
-NEWS_FEEDS = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
-NEWS_LOOKBACK_HOURS = 24
-NEWS_TIMEOUT_SECONDS = 8
+from config import (
+    ADMIN_CHAT_ID, BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS, DAILY_LIMIT,
+    DATA_FILE, EXCHANGE_NAMES, FEE_RATE, FUNDING_SOURCES, MAX_COINS,
+    MAX_POSITION_USD, MAX_SYMBOLS_PER_EXCHANGE, MIN_RESISTANCE_ROOM_R,
+    MIN_RR, MIN_SCORE, NEWS_FEEDS, NEWS_LOOKBACK_HOURS, NEWS_TIMEOUT_SECONDS,
+    OHLCV_LIMIT, QUOTE, REQUEST_TIMEOUT_MS, RISK_USD, SCAN_EXCHANGE_NAMES,
+    SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE, SLEEP_BETWEEN_SYMBOLS, TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID, TIMEFRAME, TP_WEIGHTS, TREND_TIMEFRAME, USERS_FILE,
+)
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
 
 
 # ============================================================
@@ -278,12 +234,11 @@ class ExchangeManager:
         self.exchanges = {}
         self.market_counts = {}
 
-    def build(self, required_exchanges=None):
+    def build(self, required_exchanges=None, require_scanners=True):
         # Load only Binance for scanning plus venues that actually hold active legacy signals.
         # Loading every configured exchange on every run adds several avoidable network round-trips.
-        names = list(dict.fromkeys(
-            SCAN_EXCHANGE_NAMES + list(required_exchanges or [])
-        ))
+        scanner_names = SCAN_EXCHANGE_NAMES if require_scanners else []
+        names = list(dict.fromkeys(scanner_names + list(required_exchanges or [])))
         for name in names:
             try:
                 cls = getattr(ccxt, name)
@@ -309,13 +264,16 @@ class ExchangeManager:
                 # Keep the root cause visible in GitHub Actions and continue to other venues.
                 traceback.print_exc(limit=5)
 
-        available_scanners = [name for name in SCAN_EXCHANGE_NAMES if name in self.exchanges]
-        if not available_scanners:
+        available_scanners = [name for name in scanner_names if name in self.exchanges]
+        if require_scanners and not available_scanners:
             raise RuntimeError(
                 "No configured futures data source initialized successfully: "
-                + ", ".join(SCAN_EXCHANGE_NAMES)
+                + ", ".join(scanner_names)
             )
-        print("[DATA SOURCES] active futures scanners: " + ", ".join(available_scanners))
+        if available_scanners:
+            print("[DATA SOURCES] active futures scanners: " + ", ".join(available_scanners))
+        elif not require_scanners:
+            print("[DATA SOURCES] scanner initialization skipped; managing existing signals only")
         return True
 
     def get_exchange(self, name):
@@ -1321,6 +1279,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         return None
     side = "BUY" if st["signal_long"] else "SELL"
     entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
+    if not is_tradable_symbol(symbol, entry_price=entry, require_quote_volume=False):
+        print(f"[SIGNAL SKIP] {symbol}: entry failed price/symbol safety validation")
+        return None
     recent = df.tail(5)
     if side == "BUY":
         swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
@@ -1342,7 +1303,10 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
     target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
     target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
-    net_rr = target_net_reward / risk
+    # Net reward is measured against the adverse stop-out loss, including estimated
+    # round-trip fees and stop slippage. This keeps MIN_RR economically meaningful.
+    net_loss_at_stop = risk + cost_unit
+    net_rr = target_net_reward / net_loss_at_stop
     if not math.isfinite(net_rr) or net_rr < MIN_RR:
         print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
         return None
@@ -2209,7 +2173,10 @@ def main(manage_only=False):
         for signal in state.get("signals", [])
         if signal.get("status") == "ACTIVE" and signal.get("exchange")
     }
-    if not manager.build(required_exchanges=required_exchanges):
+    if not manager.build(
+        required_exchanges=required_exchanges,
+        require_scanners=not manage_only,
+    ):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
             "هیچ صرافی قابل دسترسی نبود."
@@ -2277,7 +2244,7 @@ def main(manage_only=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser = argparse.ArgumentParser(description="USDT-margined perpetual crypto signal bot")
     parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
     args = parser.parse_args()
     try:
