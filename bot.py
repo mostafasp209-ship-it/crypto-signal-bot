@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
+
 
 # ============================================================
 # CONFIG
@@ -359,17 +361,23 @@ class ExchangeManager:
                 continue
 
             symbols = self.futures_symbols(ex)
-            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
+            # Fail closed: do not scan symbols when quote-volume evidence is unavailable.
             try:
                 tickers = ex.fetch_tickers(symbols)
                 ranked = []
+                rejected = 0
                 for symbol in symbols:
                     ticker = tickers.get(symbol, {})
-                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
+                    quote_volume = safe_float(ticker.get("quoteVolume"))
+                    if not is_tradable_symbol(symbol, quote_volume=quote_volume):
+                        rejected += 1
+                        continue
                     ranked.append((quote_volume, symbol))
                 symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
+                print(f"[LIQUIDITY] {name}: accepted={len(symbols)} rejected={rejected}")
             except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
+                print(f"[LIQUIDITY] {name}: ticker data unavailable; skipping venue for safety ({type(exc).__name__})")
+                continue
             print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
 
             added_from_exchange = 0
@@ -1325,11 +1333,19 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         stop = max(swing, entry+1.32*atr_now)
         risk = stop-entry
     risk_pct = risk/entry
-    if not (0.0035 < risk_pct < 0.038):
+    # Hard cap from the post-mortem safety policy; never silently use the older 3.8% limit.
+    if not (0.0035 < risk_pct <= MAX_RISK_PCT):
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
+    # Entry slippage is already embedded in entry. Estimate adverse target-exit
+    # slippage and round-trip fees before admitting the signal.
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
+    target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
+    target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
+    net_rr = target_net_reward / (risk + cost_unit)
+    if not math.isfinite(net_rr) or net_rr < MIN_RR:
+        print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
+        return None
     raw_qty = RISK_USD/(risk+cost_unit)
     cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
     qty = min(raw_qty, cap_qty)
@@ -1337,7 +1353,8 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     setup = "REFERENCE_RSI_STOCH_ATR_RR15"
     components = {
         "setup": setup, "strategy_mode": "rsi_recovery_stochastic_cross", "timeframe": "4h",
-        "rr": 1.5, "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
+        "rr": 1.5, "net_rr": net_rr, "max_risk_pct": MAX_RISK_PCT,
+        "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
         "stoch_k_period": 14, "stoch_d_period": 3, "stoch_long_zone_max": 38,
         "stoch_short_zone_min": 62, "volume_multiplier": 1.12, "volume_ma_period": 20,
         "atr_period": 14, "atr_multiplier": 1.32, "swing_lookback": 5,
@@ -1355,6 +1372,7 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         "support": None, "resistance": None, "sl_method": "5-bar_swing_vs_1.32_ATR14",
         "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
         "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
+        "net_rr": net_rr,
         "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
         "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
         "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
@@ -2086,6 +2104,9 @@ def scan_market(manager, state):
                             and abs(current_ts-closed_ts-interval_ms) < 1
                             and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
+                if next_open is not None and not is_tradable_symbol(symbol, entry_price=next_open):
+                    stats["no_setup_or_score"] += 1
+                    break
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
                 if signal:
                     # Snapshot the current Binance funding rate for alert context.
