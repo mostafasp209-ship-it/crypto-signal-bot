@@ -141,12 +141,13 @@ def simulate_one(frame,i,side,end,family=None):
         swing_low=float(recent.low.min()); swing_high=float(recent.high.max())
         stop=min(swing_low,entry-1.32*atr) if side=="BUY" else max(swing_high,entry+1.32*atr)
         distance=abs(entry-stop)
-        risk_pct=distance/entry if entry>0 else float("inf")
-        if not (0.0035<risk_pct<=0.025): return None
     else:
         distance=atr*ATR_MULT
         stop=entry-direction*distance
     if not np.isfinite(entry) or not np.isfinite(distance) or entry<=0 or distance<=0: return None
+    # Apply the same hard stop-distance policy to every candidate family.
+    risk_pct=distance/entry
+    if not (0.0035<risk_pct<=0.025): return None
     target=entry+direction*distance*target_r
     if stop<=0 or target<=0: return None
     target_fill=target*(1-SLIP) if side=="BUY" else target*(1+SLIP)
