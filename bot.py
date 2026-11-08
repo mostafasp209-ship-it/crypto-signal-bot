@@ -14,61 +14,16 @@ import numpy as np
 import pandas as pd
 import requests
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-EXCHANGE_NAMES = [
-    # Legacy venues may still be needed to manage already-open signals.
-    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm", "bybit",
-]
-# Binance USD-M returned HTTP 451 from GitHub Actions (restricted-location response).
-# Use liquid USDT linear perpetual venues as scanner sources instead.
-# Bybit is geo-blocked on GitHub-hosted runners (HTTP 403). Keep multiple independent USDT-margined venues so one outage cannot stop scanning.
-SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
-FUNDING_SOURCES = ["bitget", "okx", "gateio"]
-
-QUOTE = "USDT"
-TIMEFRAME = "4h"
-TREND_TIMEFRAME = "1d"
-
-MAX_COINS = None  # Scan every eligible active USDT-M perpetual contract
-MAX_SYMBOLS_PER_EXCHANGE = None  # No per-exchange symbol cap
-MIN_SCORE = 12
-# Reject BUY entries with too little upside room before the nearest resistance.
-# Initial threshold; validate against out-of-sample backtests before tuning.
-MIN_RESISTANCE_ROOM_R = 0.75
-# RR is weighted across TP1/TP2/TP3 and includes estimated round-trip fees.
-MIN_RR = 1.35
-
-SIGNAL_EXPIRY_HOURS = 48
-RISK_USD = 10.0
-MAX_POSITION_USD = float(os.getenv("MAX_POSITION_USD", "200"))
-FEE_RATE = 0.0005
-SLIPPAGE_RATE = 0.0002
-
-TP_WEIGHTS = {
-    "tp1": 0.50,
-    "tp2": 0.30,
-    "tp3": 0.20,
-}
-
-DATA_FILE = "signals.json"
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", TELEGRAM_CHAT_ID).strip()
-USERS_FILE = os.getenv("USERS_FILE", "users.json")
-
-REQUEST_TIMEOUT_MS = 15000
-OHLCV_LIMIT = 260
-DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.05
-BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
-NEWS_FEEDS = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
-NEWS_LOOKBACK_HOURS = 24
-NEWS_TIMEOUT_SECONDS = 8
+from config import (
+    ADMIN_CHAT_ID, DAILY_LIMIT, DATA_FILE, EXCHANGE_NAMES, FEE_RATE,
+    FUNDING_SOURCES, MAX_POSITION_USD, MIN_RR, NEWS_FEEDS,
+    NEWS_LOOKBACK_HOURS, NEWS_TIMEOUT_SECONDS, OHLCV_LIMIT, RISK_USD,
+    SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    TIMEFRAME, TP_WEIGHTS, TREND_TIMEFRAME, USERS_FILE,
+)
+from exchange import ExchangeManager
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
+from utils import safe_float
 
 
 # ============================================================
@@ -81,18 +36,6 @@ def utc_now():
 
 def iso_now():
     return utc_now().isoformat()
-
-
-def safe_float(value, default=None):
-    try:
-        if value is None:
-            return default
-        x = float(value)
-        if not math.isfinite(x):
-            return default
-        return x
-    except Exception:
-        return default
 
 
 def fmt_price(value):
@@ -270,143 +213,6 @@ def telegram_send(text):
 # ============================================================
 # EXCHANGE MANAGER
 # ============================================================
-
-class ExchangeManager:
-    def __init__(self):
-        self.exchanges = {}
-        self.market_counts = {}
-
-    def build(self, required_exchanges=None):
-        # Load only Binance for scanning plus venues that actually hold active legacy signals.
-        # Loading every configured exchange on every run adds several avoidable network round-trips.
-        names = list(dict.fromkeys(
-            SCAN_EXCHANGE_NAMES + list(required_exchanges or [])
-        ))
-        for name in names:
-            try:
-                cls = getattr(ccxt, name)
-                exchange_config = {
-                    "enableRateLimit": True,
-                    "timeout": REQUEST_TIMEOUT_MS,
-                }
-                if name == "bitget":
-                    # Only load linear perpetual markets; unrelated spot/options
-                    # metadata endpoints are not required by this scanner.
-                    exchange_config["options"] = {
-                        "defaultType": "swap",
-                        "defaultSubType": "linear",
-                        "fetchMarkets": ["swap"],
-                    }
-                ex = cls(exchange_config)
-                ex.load_markets()
-                self.exchanges[name] = ex
-                self.market_counts[name] = len(ex.markets)
-                print(f"[OK] {name}: {len(ex.markets)} markets")
-            except Exception as exc:
-                print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
-                # Keep the root cause visible in GitHub Actions and continue to other venues.
-                traceback.print_exc(limit=5)
-
-        available_scanners = [name for name in SCAN_EXCHANGE_NAMES if name in self.exchanges]
-        if not available_scanners:
-            raise RuntimeError(
-                "No configured futures data source initialized successfully: "
-                + ", ".join(SCAN_EXCHANGE_NAMES)
-            )
-        print("[DATA SOURCES] active futures scanners: " + ", ".join(available_scanners))
-        return True
-
-    def get_exchange(self, name):
-        return self.exchanges.get(name)
-
-    def market_symbols(self, exchange):
-        result = []
-        for symbol, market in exchange.markets.items():
-            if not market.get("active", True):
-                continue
-            if not market.get("spot", False):
-                continue
-            if market.get("quote") != QUOTE:
-                continue
-            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
-                continue
-            result.append(symbol)
-        return sorted(set(result))
-
-    def futures_symbols(self, exchange):
-        """Active linear USDT-margined perpetual contracts."""
-        result = []
-        for symbol, market in exchange.markets.items():
-            if not market.get("active", True) or not market.get("swap", False):
-                continue
-            if not market.get("linear", False):
-                continue
-            if market.get("quote") != QUOTE or market.get("settle") != QUOTE:
-                continue
-            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
-                continue
-            result.append(symbol)
-        return sorted(set(result))
-
-    def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
-        ordered = []
-        seen = set()
-
-        for name in SCAN_EXCHANGE_NAMES:
-            ex = self.exchanges.get(name)
-            if not ex:
-                continue
-
-            symbols = self.futures_symbols(ex)
-            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
-            try:
-                tickers = ex.fetch_tickers(symbols)
-                ranked = []
-                for symbol in symbols:
-                    ticker = tickers.get(symbol, {})
-                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
-                    ranked.append((quote_volume, symbol))
-                symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
-            except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
-
-            added_from_exchange = 0
-            for symbol in symbols:
-                if symbol in seen:
-                    continue
-                ordered.append((name, symbol))
-                seen.add(symbol)
-                added_from_exchange += 1
-
-                if MAX_COINS is not None and len(ordered) >= MAX_COINS:
-                    return ordered
-                if MAX_SYMBOLS_PER_EXCHANGE is not None and added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
-                    break
-
-        if not ordered:
-            raise RuntimeError(
-                "No active linear USDT-margined perpetual markets found on: "
-                + ", ".join(SCAN_EXCHANGE_NAMES)
-            )
-        print(f"[SCAN UNIVERSE] {len(ordered)} active USDT perpetual markets")
-        return ordered
-
-    def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
-        return exchange.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            limit=limit,
-        )
-
-    def ticker_price(self, exchange, symbol):
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-            return safe_float(ticker.get("last"))
-        except Exception:
-            return None
-
 
 # ============================================================
 # INDICATORS
@@ -1303,7 +1109,7 @@ def calculate_reference_strategy_gates(df):
 
 
 def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamentals=None, news_context=None):
-    """Create a Binance USDⓈ-M 4H long/short signal using next candle open."""
+    """Create a USDT-linear perpetual 4H signal using the next candle open."""
     st = calculate_reference_strategy_gates(df)
     if not st["signal_long"] and not st["signal_short"]:
         return None
@@ -1313,6 +1119,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         return None
     side = "BUY" if st["signal_long"] else "SELL"
     entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
+    if not is_tradable_symbol(symbol, entry_price=entry, require_quote_volume=False):
+        print(f"[SIGNAL SKIP] {symbol}: entry failed price/symbol safety validation")
+        return None
     recent = df.tail(5)
     if side == "BUY":
         swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
@@ -1325,11 +1134,21 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         stop = max(swing, entry+1.32*atr_now)
         risk = stop-entry
     risk_pct = risk/entry
-    if not (0.0035 < risk_pct < 0.038):
+    # Hard cap from the post-mortem safety policy; never silently use the older 3.8% limit.
+    if not (0.0035 < risk_pct <= MAX_RISK_PCT):
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
+    # Entry slippage is already embedded in entry. Estimate adverse target-exit
+    # slippage and round-trip fees before admitting the signal.
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
+    target_fill = target * (1-SLIPPAGE_RATE) if side == "BUY" else target * (1+SLIPPAGE_RATE)
+    target_net_reward = abs(target_fill-entry) - (entry+target)*FEE_RATE
+    # Net target reward after entry/exit fees and target slippage, normalized
+    # to the planned price-distance risk. Stop-side costs are included in sizing.
+    net_rr = target_net_reward / risk
+    if not math.isfinite(net_rr) or net_rr < MIN_RR:
+        print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
+        return None
     raw_qty = RISK_USD/(risk+cost_unit)
     cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
     qty = min(raw_qty, cap_qty)
@@ -1337,7 +1156,8 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
     setup = "REFERENCE_RSI_STOCH_ATR_RR15"
     components = {
         "setup": setup, "strategy_mode": "rsi_recovery_stochastic_cross", "timeframe": "4h",
-        "rr": 1.5, "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
+        "rr": 1.5, "net_rr": net_rr, "max_risk_pct": MAX_RISK_PCT,
+        "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
         "stoch_k_period": 14, "stoch_d_period": 3, "stoch_long_zone_max": 38,
         "stoch_short_zone_min": 62, "volume_multiplier": 1.12, "volume_ma_period": 20,
         "atr_period": 14, "atr_multiplier": 1.32, "swing_lookback": 5,
@@ -1355,6 +1175,7 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         "support": None, "resistance": None, "sl_method": "5-bar_swing_vs_1.32_ATR14",
         "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
         "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
+        "net_rr": net_rr,
         "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
         "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
         "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
@@ -2086,6 +1907,9 @@ def scan_market(manager, state):
                             and abs(current_ts-closed_ts-interval_ms) < 1
                             and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
+                if next_open is not None and not is_tradable_symbol(symbol, entry_price=next_open, require_quote_volume=False):
+                    stats["no_setup_or_score"] += 1
+                    break
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
                 if signal:
                     # Snapshot the current Binance funding rate for alert context.
@@ -2188,7 +2012,10 @@ def main(manage_only=False):
         for signal in state.get("signals", [])
         if signal.get("status") == "ACTIVE" and signal.get("exchange")
     }
-    if not manager.build(required_exchanges=required_exchanges):
+    if not manager.build(
+        required_exchanges=required_exchanges,
+        require_scanners=not manage_only,
+    ):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
             "هیچ صرافی قابل دسترسی نبود."
@@ -2256,7 +2083,7 @@ def main(manage_only=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser = argparse.ArgumentParser(description="USDT-margined perpetual crypto signal bot")
     parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
     args = parser.parse_args()
     try:

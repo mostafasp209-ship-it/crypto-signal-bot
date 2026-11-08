@@ -44,12 +44,29 @@ class FuturesStrategyTests(unittest.TestCase):
                 sig=bot.build_signal("BTC/USDT:USDT","binanceusdm",data,next_open=100.0)
             self.assertIsNotNone(sig); self.assertEqual(sig["side"],side)
             self.assertAlmostEqual(sig["rr"],1.5)
+            target_fill = sig["tp1"] * (1-bot.SLIPPAGE_RATE) if side == "BUY" else sig["tp1"] * (1+bot.SLIPPAGE_RATE)
+            expected_net_rr = (abs(target_fill-sig["entry"]) - (sig["entry"]+sig["tp1"])*bot.FEE_RATE) / abs(sig["entry"]-sig["sl"])
+            self.assertAlmostEqual(sig["net_rr"], expected_net_rr)
+            self.assertGreaterEqual(sig["net_rr"], bot.MIN_RR)
             if side=="BUY":
                 self.assertGreater(sig["entry"],100)
                 self.assertAlmostEqual(sig["tp1"],sig["entry"]+1.5*(sig["entry"]-sig["sl"]))
             else:
                 self.assertLess(sig["entry"],100)
                 self.assertAlmostEqual(sig["tp1"],sig["entry"]-1.5*(sig["sl"]-sig["entry"]))
+
+    def test_initial_stop_risk_above_two_point_five_percent_is_rejected(self):
+        data = make_frame("BUY")
+        data.loc[data.index[-5], "low"] = 95.0
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            self.assertIsNone(bot.build_signal("BTC/USDT:USDT", "binanceusdm", data, next_open=100.0))
+
+    def test_entry_price_below_safety_floor_is_rejected(self):
+        data = make_frame("BUY")
+        p = patch_indicators(len(data), "BUY")
+        with p[0], p[1], p[2]:
+            self.assertIsNone(bot.build_signal("BTC/USDT:USDT", "bitget", data, next_open=0.005))
 
     def test_no_next_open_means_no_signal(self):
         data=make_frame("BUY"); p=patch_indicators(len(data),"BUY")
