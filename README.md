@@ -21,6 +21,15 @@
 - `signals.json`: تاریخچه و وضعیت سیگنال‌ها.
 - `users.json`: کاربران پنل و شناسهٔ آخرین آپدیت تلگرام.
 
+## اجرای محلی و تست نسخهٔ توسعه
+
+نسخهٔ فعلی شاخهٔ توسعه با برچسب `2.0.0-dev.1` نمایش داده می‌شود؛ این برچسب به معنی انتشار پایدار V2 نیست.
+
+1. متغیرهای موردنیاز را از روی `.env.example` در محیط اجرا تنظیم کن. فایل `.env` به‌صورت خودکار بارگذاری نمی‌شود.
+2. وابستگی‌ها را نصب کن: `python -m pip install -r requirements.txt`
+3. تست‌ها را اجرا کن: `python -m unittest discover -s tests -v`
+4. قبل از هر انتشار، وضعیت GitHub Actions و گزارش Paper Trading را جداگانه بررسی کن.
+
 ## تنظیمات GitHub Actions
 در **Settings → Secrets and variables → Actions** این Secrets را تنظیم کن:
 - `TELEGRAM_BOT_TOKEN`
