@@ -22,7 +22,7 @@ def calculate_risk_plan(
     max_position_usd: float,
     fee_rate: float,
     slippage_rate: float,
-) -> dict[str, float] | None:
+) -> dict[str, float | bool] | None:
     """Return fee/slippage-aware sizing; None means the plan is invalid.
 
     Risk is the entry-to-stop price distance plus estimated round-trip fees and
@@ -54,7 +54,8 @@ def calculate_risk_plan(
         target_fill = target * (1.0 + slippage_rate)
 
     cost_per_unit = (entry + stop) * fee_rate + stop * slippage_rate
-    net_target_reward = abs(target_fill - entry) - (entry + target) * fee_rate
+    directional_target_reward = (target_fill - entry) if side == "BUY" else (entry - target_fill)
+    net_target_reward = directional_target_reward - (entry + target) * fee_rate
     net_rr = net_target_reward / risk
     if not all(math.isfinite(x) for x in (risk, cost_per_unit, net_target_reward, net_rr)):
         return None
@@ -80,5 +81,5 @@ def calculate_risk_plan(
         "quantity": quantity,
         "actual_risk_usd": quantity * (risk + cost_per_unit),
         "position_value_usd": quantity * entry,
-        "position_capped": float(quantity + 1e-12 < raw_quantity),
+        "position_capped": quantity + 1e-12 < raw_quantity,
     }
