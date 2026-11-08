@@ -58,6 +58,11 @@ class StrategyV2Tests(unittest.TestCase):
         self.assertAlmostEqual(trade["target"]-trade["entry"],
             1.5*(trade["entry"]-trade["stop"]),places=7)
 
+    def test_stop_distance_cap_applies_to_non_baseline_families(self):
+        x=add_features(bars(),daily()); i=300
+        x.loc[i,"atr"]=5.0
+        self.assertIsNone(simulate_one(x,i,"BUY",len(x),family="trend_breakout_20"))
+
     def test_entry_uses_next_bar_open(self):
         x=add_features(bars(),daily()); i=300; t=simulate_one(x,i,"BUY",len(x))
         self.assertIsNotNone(t); self.assertEqual(t["entry_time"],int(x.iloc[i+1].timestamp))
