@@ -19,6 +19,10 @@ class SafetyFilterTests(unittest.TestCase):
     def test_missing_volume_is_rejected_closed(self):
         self.assertFalse(is_tradable_symbol("UNKNOWN/USDT:USDT", quote_volume=None))
 
+    def test_price_only_check_does_not_require_volume(self):
+        self.assertTrue(is_tradable_symbol("BTC/USDT:USDT", entry_price=100.0,
+                                           require_quote_volume=False))
+
     def test_blacklisted_leveraged_token_is_rejected(self):
         token = next(item for item in BLACKLIST_SUBSTRINGS if item in "BTC3L")
         self.assertFalse(is_tradable_symbol(f"BTC{token}/USDT:USDT", quote_volume=MIN_QUOTE_VOLUME_USDT))
