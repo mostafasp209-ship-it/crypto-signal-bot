@@ -10,7 +10,7 @@ from config import DATA_FILE
 
 
 def load_state(path: str | os.PathLike[str] = DATA_FILE) -> dict[str, Any]:
-    """Load signal state, preserving the legacy empty-state fallback behavior."""
+    """Load signal state; only a missing file receives an empty initial state."""
     state_path = Path(path)
     if not state_path.exists():
         return {"signals": [], "last_run": None}
