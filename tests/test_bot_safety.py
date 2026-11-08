@@ -1,12 +1,31 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 
 import bot
 import exchange
+import storage
 from utils import safe_float
 from analyze_signals import audit_signals
+
+
+class StorageTests(unittest.TestCase):
+    def test_state_round_trip_is_atomic_and_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "nested" / "signals.json"
+            expected = {"signals": [{"id": "signal-1"}], "last_run": "2026-11-08T00:00:00+00:00"}
+            storage.save_state(expected, target)
+            self.assertEqual(storage.load_state(target), expected)
+            self.assertTrue(target.exists())
+            self.assertFalse(target.with_name(target.name + ".tmp").exists())
+
+    def test_missing_state_returns_empty_legacy_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "missing.json"
+            self.assertEqual(storage.load_state(target), {"signals": [], "last_run": None})
 
 
 class NumericSafetyTests(unittest.TestCase):
