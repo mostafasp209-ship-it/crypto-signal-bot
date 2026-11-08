@@ -13,6 +13,7 @@ FEE=float(os.getenv("V2_FEE_PER_SIDE","0.0005"))
 SLIP=float(os.getenv("V2_SLIPPAGE_PER_SIDE","0.0002"))
 ATR_MULT=1.5
 TARGET_R=2.0
+MIN_NET_RR=1.35
 MAX_HOLD=48
 OUT=Path("research_results/v2_futures"); CACHE=Path("research_cache/v2_futures")
 OUT.mkdir(parents=True,exist_ok=True); CACHE.mkdir(parents=True,exist_ok=True)
@@ -142,6 +143,10 @@ def simulate_one(frame,i,side,end,family=None):
     if not np.isfinite(entry) or not np.isfinite(distance) or entry<=0 or distance<=0: return None
     target=entry+direction*distance*target_r
     if stop<=0 or target<=0: return None
+    target_fill=target*(1-SLIP) if side=="BUY" else target*(1+SLIP)
+    net_target_reward=direction*(target_fill-entry)-FEE*(entry+target)
+    net_rr=net_target_reward/distance
+    if not np.isfinite(net_rr) or net_rr<MIN_NET_RR: return None
     last=min(end-1,ei+MAX_HOLD-1); exit_raw=float(frame.iloc[last].close); reason="TIME"
     for j in range(ei,last+1):
         bar=frame.iloc[j]; opn,hi,lo=float(bar.open),float(bar.high),float(bar.low)
@@ -157,7 +162,7 @@ def simulate_one(frame,i,side,end,family=None):
     return {"signal_index":i,"entry_index":ei,"exit_index":last,"signal_time":int(row.timestamp),
       "entry_time":int(nxt.timestamp),"exit_time":int(frame.iloc[last].timestamp),"side":side,
       "entry":entry,"stop":stop,"target":target,"exit":exit_fill,"reason":reason,
-      "net_r":net/denom,"net_return_pct":net/entry*100}
+      "net_r":net/denom,"net_rr":net_rr,"net_return_pct":net/entry*100}
 
 def simulate_candidate(frame,signals,start,end,family=None):
     trades=[]; i=max(start,220); end=min(end,len(frame))
@@ -211,7 +216,7 @@ def run_lab():
     results.sort(key=lambda x:x["validation_median_symbol_expectancy_r"],reverse=True)
     report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"market":"Binance USD-M linear perpetual OHLCV",
       "timeframes":{"signal":"4h","regime":"last fully closed 1d candle"},"symbols":list(data),"start":START,
-      "fee_per_side":FEE,"adverse_slippage_per_side":SLIP,"stop_atr_multiple":ATR_MULT,"target_r":TARGET_R,
+      "fee_per_side":FEE,"adverse_slippage_per_side":SLIP,"minimum_net_rr":MIN_NET_RR,"stop_atr_multiple":ATR_MULT,"target_r":TARGET_R,
       "max_hold_4h_bars":MAX_HOLD,"split":"60/20/20 chronological; validation ranks candidates",
       "fill_model":"next 4h open; adverse slippage both sides; stop-first same-bar ambiguity",
       "funding":"not included; required before any live promotion",
