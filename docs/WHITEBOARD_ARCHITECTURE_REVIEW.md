@@ -32,7 +32,7 @@ flowchart TD
 | Market access | `exchange.py` | CCXT lifecycle and market-universe discovery are isolated from orchestration |
 | Candle hygiene | `market_data.py` | Closed-candle validation rejects forming, invalid and duplicate rows |
 | Indicators and strategy | `indicators.py` + strategy functions in `bot.py` | Indicator math is extracted; strategy gates and signal construction still need separation |
-| Risk and sizing | `build_signal`, `safety_filters.py` | Distinguish stop-distance cap from account/equity risk |
+| Risk and sizing | `risk.py`, `safety_filters.py` | Pure fee/slippage-aware sizing; keep stop-distance distinct from account/equity risk |
 | Trade lifecycle | `manage_signal`, `close_piece` | Simulated price-based exits; not exchange-native stop orders |
 | Persistence | `storage.py` via compatibility wrappers in `bot.py` | Atomic writes; malformed state fails closed instead of silently resetting history |
 | Telegram | `notifications.py` + `panel.py` | Signal delivery is separated from the interactive control plane |
@@ -80,7 +80,8 @@ Refactor incrementally into small modules while preserving public imports used b
 - `market_data.py`: OHLCV validation, closed-candle handling and freshness checks
 - `indicators.py`: pure indicator calculations
 - `strategy.py`: setup gates and signal candidate generation
-- `risk.py`: symbol filters, stop validation, fee/slippage-aware sizing
+- `risk.py`: fee/slippage-aware sizing and risk calculations
+- `safety_filters.py`: symbol, liquidity and stop-distance admission filters
 - `trade_manager.py`: deterministic TP/SL/expiry state transitions
 - `storage.py`: validated, atomic state reads/writes and schema migration
 - `notifications.py`: Telegram delivery with retry and delivery observability
