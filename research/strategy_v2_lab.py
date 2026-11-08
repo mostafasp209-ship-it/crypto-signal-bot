@@ -24,8 +24,8 @@ def validate_ohlcv(frame, tf_ms):
     if frame.empty or not set(cols).issubset(frame.columns): raise ValueError("Missing/empty OHLCV")
     x=frame[cols].copy()
     for c in cols: x[c]=pd.to_numeric(x[c],errors="coerce")
-    x.replace([np.inf,-np.inf],np.nan,inplace=True); x.dropna(subset=cols,inplace=True)
-    x.drop_duplicates("timestamp",keep="last",inplace=True); x.sort_values("timestamp",kind="stable",inplace=True)
+    x=x.replace([np.inf,-np.inf],np.nan).dropna(subset=cols)
+    x=x.drop_duplicates("timestamp",keep="last").sort_values("timestamp",kind="stable")
     ok=(x.timestamp>=0)&(x[["open","high","low","close"]]>0).all(axis=1)&(x.volume>=0)
     ok &= x.high>=x[["open","close","low"]].max(axis=1)
     ok &= x.low<=x[["open","close","high"]].min(axis=1)
@@ -94,7 +94,7 @@ def add_features(four_hour,daily):
         d[["available_at","close","daily_ema50"]].sort_values("available_at"),
         on="available_at",direction="backward",allow_exact_matches=True)
     x["daily_close"]=aligned.close.to_numpy(); x["daily_ema50"]=aligned.daily_ema50.to_numpy()
-    x.drop(columns="available_at",inplace=True)
+    x=x.drop(columns="available_at")
     x["donchian_high20"]=h.shift(1).rolling(20,min_periods=20).max()
     x["donchian_low20"]=l.shift(1).rolling(20,min_periods=20).min()
     return x
