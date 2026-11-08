@@ -36,15 +36,16 @@ def validate_ohlcv(frame, tf_ms):
 def fetch_history(exchange,symbol,timeframe,start_ms):
     tf_ms=exchange.parse_timeframe(timeframe)*1000
     safe=symbol.replace("/","_").replace(":","_")
-    cache=CACHE/f"{safe}_{timeframe}_{START}.csv"
+    cache=CACHE/f"{exchange.id}_{safe}_{timeframe}_{START}.csv"
     now=int(datetime.now(timezone.utc).timestamp()*1000)
     if cache.exists():
         old=pd.read_csv(cache)
         if len(old) and int(old.timestamp.max())+tf_ms>=now-2*tf_ms:
             return validate_ohlcv(old[old.timestamp+tf_ms<=now],tf_ms)
     rows={}; since=start_ms
-    for _ in range(80):
-        batch=exchange.fetch_ohlcv(symbol,timeframe=timeframe,since=since,limit=1500)
+    limit=300 if exchange.id=="okx" else 1000
+    for _ in range(100):
+        batch=exchange.fetch_ohlcv(symbol,timeframe=timeframe,since=since,limit=limit)
         if not batch: break
         for row in batch:
             ts=int(row[0])
@@ -189,16 +190,45 @@ def splits(n):
     return {"train":(220,a),"validation":(a,b),"holdout":(b,n)}
 
 def run_lab():
-    ex=ccxt.binanceusdm({"enableRateLimit":True,"timeout":30000}); ex.load_markets()
-    start=int(pd.Timestamp(START,tz="UTC").timestamp()*1000); data={}; failures=[]
-    for symbol in SYMBOLS:
+    # Binance USD-M is restricted from some GitHub-hosted runner regions.
+    # Prefer the same liquid USDT-perpetual venues used by the production scanner.
+    exchange_options = {
+        "okx": {"options": {"defaultType": "swap"}},
+        "gateio": {"options": {"defaultType": "swap"}},
+        "bitget": {"options": {"defaultType": "swap", "defaultSubType": "linear", "fetchMarkets": ["swap"]}},
+    }
+    exchanges = {}
+    failures = []
+    for exchange_id, options in exchange_options.items():
         try:
-            if symbol not in ex.markets: raise ValueError("Not a listed USD-M perpetual")
-            f=fetch_history(ex,symbol,"4h",start); d=fetch_history(ex,symbol,"1d",start)
-            x=add_features(f,d)
-            if len(x)<1200: raise ValueError(f"Only {len(x)} valid 4h bars")
-            data[symbol]=x; print(f"[data] {symbol}: {len(x)} 4h bars",flush=True)
-        except Exception as e: failures.append({"symbol":symbol,"error":f"{type(e).__name__}: {e}"})
+            ex = getattr(ccxt, exchange_id)({"enableRateLimit": True, "timeout": 30000, **options})
+            ex.load_markets()
+            exchanges[exchange_id] = ex
+            print(f"[venue] {exchange_id}: markets={len(ex.markets)}", flush=True)
+        except Exception as exc:
+            failures.append({"exchange": exchange_id, "error": f"{type(exc).__name__}: {exc}"})
+            print(f"[venue unavailable] {exchange_id}: {type(exc).__name__}: {exc}", flush=True)
+    if not exchanges:
+        raise RuntimeError("No configured public futures data source is available")
+
+    start=int(pd.Timestamp(START,tz="UTC").timestamp()*1000); data={}; data_sources={}
+    for symbol in SYMBOLS:
+        symbol_errors = []
+        for exchange_id, ex in exchanges.items():
+            if symbol not in ex.markets:
+                symbol_errors.append(f"{exchange_id}: symbol not listed")
+                continue
+            try:
+                f=fetch_history(ex,symbol,"4h",start); d=fetch_history(ex,symbol,"1d",start)
+                x=add_features(f,d)
+                if len(x)<1200: raise ValueError(f"Only {len(x)} valid 4h bars")
+                data[symbol]=x; data_sources[symbol]=exchange_id
+                print(f"[data] {symbol}: {len(x)} 4h bars via {exchange_id}",flush=True)
+                break
+            except Exception as exc:
+                symbol_errors.append(f"{exchange_id}: {type(exc).__name__}: {exc}")
+        if symbol not in data:
+            failures.append({"symbol":symbol,"providers_tried":symbol_errors})
     if len(data)<4: raise RuntimeError(f"Need at least 4 symbols; got {len(data)}")
     results=[]
     for family in FAMILIES:
@@ -214,8 +244,8 @@ def run_lab():
         tmp=OUT/"checkpoint.json.tmp"; tmp.write_text(json.dumps(checkpoint,indent=2,allow_nan=False)); tmp.replace(OUT/"checkpoint.json")
         print(f"[checkpoint] {len(results)}/{len(FAMILIES)}",flush=True)
     results.sort(key=lambda x:x["validation_median_symbol_expectancy_r"],reverse=True)
-    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"market":"Binance USD-M linear perpetual OHLCV",
-      "timeframes":{"signal":"4h","regime":"last fully closed 1d candle"},"symbols":list(data),"start":START,
+    report={"generated_at_utc":datetime.now(timezone.utc).isoformat(),"market":"USDT-linear perpetual OHLCV from OKX/Gate.io/Bitget fallback providers",
+      "timeframes":{"signal":"4h","regime":"last fully closed 1d candle"},"symbols":list(data),"data_sources":data_sources,"start":START,
       "fee_per_side":FEE,"adverse_slippage_per_side":SLIP,"minimum_net_rr":MIN_NET_RR,"stop_atr_multiple":ATR_MULT,"target_r":TARGET_R,
       "max_hold_4h_bars":MAX_HOLD,"split":"60/20/20 chronological; validation ranks candidates",
       "fill_model":"next 4h open; adverse slippage both sides; stop-first same-bar ambiguity",
