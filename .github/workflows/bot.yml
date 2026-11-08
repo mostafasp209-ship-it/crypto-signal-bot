@@ -80,7 +80,7 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           GH_REPO: mostafasp209-ship-it/crypto-signal-bot
           GH_PAT: ${{ github.token }}
-          GH_BRANCH: main
+          GH_BRANCH: ${{ github.ref_name }}
           PYTHONUNBUFFERED: "1"
         run: python -u panel.py --once
 
@@ -100,6 +100,6 @@ jobs:
           done
           if [ "$changed" = "1" ]; then
             git commit -m "Persist bot and Telegram panel state [skip ci]" || true
-            git pull --rebase -X theirs origin main
-            git push origin HEAD:main
+            git pull --rebase -X theirs origin "$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
           fi
