@@ -1,4 +1,4 @@
-"""Research-only Binance USD-M perpetual strategy-family lab."""
+"""Research-only USDT-linear perpetual strategy-family lab."""
 from __future__ import annotations
 import json, os, time
 from datetime import datetime, timezone
