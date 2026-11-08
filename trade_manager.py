@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
-from config import FEE_RATE, RISK_USD, SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE
+from config import FEE_RATE, RISK_USD, SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE, TP_WEIGHTS
 from utils import safe_float
 
 
