@@ -226,6 +226,20 @@ class SignalExecutionTests(unittest.TestCase):
         self.assertFalse(signal["tp3_hit"])
         self.assertAlmostEqual(signal["realized_pnl"], 9.59, places=2)
 
+    def test_legacy_signal_with_null_components_can_still_close(self):
+        signal = {
+            "symbol": "LEGACY/USDT", "side": "BUY", "status": "ACTIVE",
+            "components": None, "entry": 100.0, "sl": 95.0,
+            "tp1": 105.0, "tp2": 110.0, "tp3": 115.0,
+            "initial_sl": 95.0, "initial_risk_per_unit": 5.0,
+            "position_quantity": 1.0, "remaining_fraction": 1.0,
+            "realized_pnl": 0.0, "fees_paid": 0.0,
+        }
+        self.assertTrue(bot.manage_signal(signal, 94.0))
+        self.assertEqual(signal["status"], "CLOSED")
+        self.assertEqual(signal["closed_reason"], "SL")
+        self.assertEqual(signal["remaining_fraction"], 0.0)
+
     def test_unbookable_tp_does_not_move_stop_or_mark_target_hit(self):
         signal = {
             "symbol": "TEST/USDT", "side": "BUY", "status": "ACTIVE",
