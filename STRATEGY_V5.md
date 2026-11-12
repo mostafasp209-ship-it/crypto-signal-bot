@@ -54,3 +54,22 @@ Do not claim live edge until:
 1. >= 50 closed forward-test trades on the filtered universe
 2. Net expectancy > 0 after fees
 3. Observed stop slippage per trade <= 1.5x intended risk in >= 90% of trades
+
+
+---
+
+## Implementation status audit — 2026-11-05
+
+**Important:** this document does not describe the executable strategy currently present in `main`. It is a historical V5 design/forward-test note.
+
+The current `bot.py` implementation emits `REFERENCE_RSI_STOCH_ATR_RR15` signals with:
+- 4H closed-candle RSI(14) recovery through 30 / 70;
+- Stochastic(14,3) cross, with K below 38 for longs or above 62 for shorts;
+- volume above 1.12 × the 20-bar average and candle direction confirmation;
+- entry at the next 4H candle open;
+- five-bar swing versus 1.32 × ATR(14) stop;
+- one full-position target at 1.5R.
+
+The EMA20/50 + EMA100 / 2R V5 configuration above is not the active entry path in the current `main` source. Do not treat its reported family-lab results as evidence for the current RSI/Stochastic implementation.
+
+The safety-gate audit and proposed corrections are tracked separately in PR #28. They do not change the entry strategy or establish profitability.
