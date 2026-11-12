@@ -30,7 +30,7 @@ SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
 FUNDING_SOURCES = ["bitget", "okx", "gateio"]
 
 QUOTE = "USDT"
-TIMEFRAME = "4h"
+TIMEFRAME = "15m"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = None  # Scan every eligible active USDT-M perpetual contract
@@ -63,6 +63,7 @@ USERS_FILE = os.getenv("USERS_FILE", "users.json")
 
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
+MAX_SYMBOLS_PER_EXCHANGE = 25
 DAILY_LIMIT = 120
 SLEEP_BETWEEN_SYMBOLS = 0.05
 BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
@@ -1302,68 +1303,115 @@ def calculate_reference_strategy_gates(df):
     return result
 
 
-def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamentals=None, news_context=None):
-    """Create a Binance USDⓈ-M 4H long/short signal using next candle open."""
-    st = calculate_reference_strategy_gates(df)
+def _htf_trend(df):
+    """Trend state from completed higher-timeframe candles only."""
+    if df is None or len(df) < 205:
+        return None
+    x = df.copy()
+    high, low, close = x["high"], x["low"], x["close"]
+    tenkan = (high.rolling(9).max() + low.rolling(9).min()) / 2
+    kijun = (high.rolling(26).max() + low.rolling(26).min()) / 2
+    span_a = (tenkan + kijun) / 2
+    span_b = (high.rolling(52).max() + low.rolling(52).min()) / 2
+    ema200 = close.ewm(span=200, adjust=False, min_periods=200).mean()
+    if any(pd.isna(v) for v in (tenkan.iloc[-1], kijun.iloc[-1], span_a.iloc[-1], span_b.iloc[-1], ema200.iloc[-1], ema200.iloc[-6])):
+        return None
+    top, bottom = max(span_a.iloc[-1], span_b.iloc[-1]), min(span_a.iloc[-1], span_b.iloc[-1])
+    slope = ema200.iloc[-1] - ema200.iloc[-6]
+    return {
+        "bull": bool(close.iloc[-1] > top and tenkan.iloc[-1] > kijun.iloc[-1]
+                     and close.iloc[-1] > ema200.iloc[-1] and slope > 0),
+        "bear": bool(close.iloc[-1] < bottom and tenkan.iloc[-1] < kijun.iloc[-1]
+                     and close.iloc[-1] < ema200.iloc[-1] and slope < 0),
+        "ema200": float(ema200.iloc[-1]), "cloud_top": float(top), "cloud_bottom": float(bottom),
+    }
+
+
+def calculate_rtm_ichimoku_gates(df, h1_df, h4_df):
+    """15m sweep/reclaim + subsequent BOS/displacement, aligned with closed 1h/4h trends."""
+    out = {"signal_long": False, "signal_short": False, "atr": None, "volume_ratio": None,
+           "h1": None, "h4": None, "signal_timestamp": None, "setup": None}
+    if df is None or h1_df is None or h4_df is None or len(df) < 80:
+        return out
+    h1, h4 = _htf_trend(h1_df), _htf_trend(h4_df)
+    if h1 is None or h4 is None:
+        return out
+    x = df.copy().reset_index(drop=True)
+    high, low, close, opn, volume = (x[c].astype(float) for c in ("high", "low", "close", "open", "volume"))
+    prev_hi = high.shift(1).rolling(20, min_periods=20).max()
+    prev_lo = low.shift(1).rolling(20, min_periods=20).min()
+    sweep_l = (low < prev_lo) & (close > prev_lo)
+    sweep_s = (high > prev_hi) & (close < prev_hi)
+    # Allow the reclaim to occur within the last three completed bars, then require a fresh BOS.
+    recent_sweep_l = sweep_l.shift(1).rolling(3, min_periods=1).max().fillna(0).astype(bool)
+    recent_sweep_s = sweep_s.shift(1).rolling(3, min_periods=1).max().fillna(0).astype(bool)
+    prev_bos_hi = high.shift(1).rolling(5, min_periods=5).max()
+    prev_bos_lo = low.shift(1).rolling(5, min_periods=5).min()
+    tr = pd.concat([high-low, (high-close.shift(1)).abs(), (low-close.shift(1)).abs()], axis=1).max(axis=1)
+    av = tr.ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    vol_avg = volume.rolling(20, min_periods=20).mean().shift(1)
+    body = (close-opn).abs()
+    disp = (body > av*0.8) & (volume > vol_avg)
+    long_trigger = bool(recent_sweep_l.iloc[-1] and close.iloc[-1] > prev_bos_hi.iloc[-1] and disp.iloc[-1])
+    short_trigger = bool(recent_sweep_s.iloc[-1] and close.iloc[-1] < prev_bos_lo.iloc[-1] and disp.iloc[-1])
+    atr_now = safe_float(av.iloc[-1])
+    vol_ratio = safe_float(volume.iloc[-1] / vol_avg.iloc[-1]) if safe_float(vol_avg.iloc[-1]) not in (None, 0) else None
+    out.update({"atr": atr_now, "volume_ratio": vol_ratio, "h1": h1, "h4": h4,
+                "signal_timestamp": safe_float(x.iloc[-1]["timestamp"])})
+    out["signal_long"] = bool(long_trigger and h1["bull"] and h4["bull"])
+    out["signal_short"] = bool(short_trigger and h1["bear"] and h4["bear"])
+    out["setup"] = "RTM_ICHIMOKU_15M_1H_4H_3R"
+    return out
+
+
+def build_signal(symbol, exchange_name, df, next_open=None, h1_df=None, h4_df=None,
+                 fundamentals=None, news_context=None):
+    """Create an RTM + Ichimoku USDT perpetual signal from closed 15m/1h/4h candles."""
+    st = calculate_rtm_ichimoku_gates(df, h1_df, h4_df)
     if not st["signal_long"] and not st["signal_short"]:
         return None
     raw_entry, atr_now = safe_float(next_open), safe_float(st["atr"])
     if raw_entry is None or raw_entry <= 0 or atr_now is None or atr_now <= 0:
-        print(f"[SIGNAL SKIP] {symbol}: next 4H open unavailable; no close-price fallback")
         return None
     side = "BUY" if st["signal_long"] else "SELL"
-    entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
-    recent = df.tail(5)
-    if side == "BUY":
-        swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
-        if swing is None: return None
-        stop = min(swing, entry-1.32*atr_now)
-        risk = entry-stop
-    else:
-        swing = safe_float(pd.to_numeric(recent["high"], errors="coerce").max())
-        if swing is None: return None
-        stop = max(swing, entry+1.32*atr_now)
-        risk = stop-entry
-    risk_pct = risk/entry
-    if not (0.0035 < risk_pct < 0.038):
+    entry = raw_entry * (1 + SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1 - SLIPPAGE_RATE)
+    recent = df.tail(4)
+    swing = safe_float(pd.to_numeric(recent["low" if side == "BUY" else "high"], errors="coerce").min()
+                       if side == "BUY" else pd.to_numeric(recent["high"], errors="coerce").max())
+    if swing is None:
         return None
-    target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
+    stop = swing - 0.15*atr_now if side == "BUY" else swing + 0.15*atr_now
+    risk = entry-stop if side == "BUY" else stop-entry
+    risk_pct = risk/entry if entry > 0 else 0
+    if risk <= 0 or not (0.002 < risk_pct < 0.025):
+        return None
+    target = entry + (3*risk if side == "BUY" else -3*risk)
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
     raw_qty = RISK_USD/(risk+cost_unit)
-    cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
+    cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD > 0 else raw_qty
     qty = min(raw_qty, cap_qty)
     now = iso_now()
-    setup = "REFERENCE_RSI_STOCH_ATR_RR15"
-    components = {
-        "setup": setup, "strategy_mode": "rsi_recovery_stochastic_cross", "timeframe": "4h",
-        "rr": 1.5, "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
-        "stoch_k_period": 14, "stoch_d_period": 3, "stoch_long_zone_max": 38,
-        "stoch_short_zone_min": 62, "volume_multiplier": 1.12, "volume_ma_period": 20,
-        "atr_period": 14, "atr_multiplier": 1.32, "swing_lookback": 5,
-        "atr14": atr_now, "rsi": st["rsi"], "stoch_k": st["stoch_k"],
-        "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
-        "fee_rate": FEE_RATE, "slippage_rate": SLIPPAGE_RATE,
-        "entry_model": "next_4h_open", "out_of_sample_status": "NOT_VALIDATED_ON_REAL_MARKET_DATA",
-    }
+    setup = "RTM_ICHIMOKU_15M_1H_4H_3R"
     return {
         "id": f"{symbol.replace('/', '_').replace(':', '_')}_{side}_{int(time.time())}",
         "symbol": symbol, "exchange": exchange_name, "side": side, "status": "ACTIVE",
-        "strength": "Research candidate RR1.5", "score": 0, "created_at": now, "updated_at": now,
+        "strength": "RTM + Ichimoku 3R", "score": 0, "created_at": now, "updated_at": now,
         "expiry_at": (utc_now()+timedelta(hours=SIGNAL_EXPIRY_HOURS)).isoformat(),
         "entry": entry, "sl": stop, "tp1": target, "tp2": target, "tp3": target,
-        "support": None, "resistance": None, "sl_method": "5-bar_swing_vs_1.32_ATR14",
-        "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
+        "support": None, "resistance": None, "sl_method": "15m_sweep_extreme_plus_0.15_ATR",
+        "tp_methods": ["single_target_3R"], "rr": 3.0, "risk_pct": risk_pct*100,
         "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
         "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
         "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
         "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
-        "components": components,
-        "entry_snapshot": {"timeframe": "4h", "setup": setup, "rr": 1.5, "rsi": st["rsi"],
-            "stoch_k": st["stoch_k"], "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
-            "atr": atr_now, "swing_level": swing, "candle_timestamp": st["signal_timestamp"],
-            "next_open": raw_entry, "captured_at": now},
-        "trend": "4H RSI/Stochastic reversal", "fundamentals": fundamentals or {},
+        "components": {"setup": setup, "strategy_mode": "rtm_ichimoku_multi_timeframe",
+            "timeframe": "15m", "confirmation_timeframes": ["1h", "4h"], "rr": 3.0,
+            "atr14": atr_now, "volume_ratio": st["volume_ratio"], "ema200_4h": st["h4"]["ema200"],
+            "fee_rate": FEE_RATE, "slippage_rate": SLIPPAGE_RATE, "entry_model": "next_15m_open",
+            "out_of_sample_status": "NOT_YET_VALIDATED"},
+        "entry_snapshot": {"timeframe": "15m", "setup": setup, "rr": 3.0, "atr": atr_now,
+            "signal_candle_timestamp": st["signal_timestamp"], "next_open": raw_entry, "captured_at": now},
+        "trend": "RTM + Ichimoku 1h/4h", "fundamentals": fundamentals or {},
         "news": news_context or {"score_adjustment": 0, "label": "not_used_for_entry", "headlines": []},
         "tp1_hit": False, "tp2_hit": False, "tp3_hit": False, "remaining_fraction": 1.0,
         "realized_pnl": 0.0, "fees_paid": 0.0, "closed_reason": None,
@@ -1891,6 +1939,7 @@ def format_signal(signal):
     setup = components.get("setup", "")
     is_v3 = setup == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
     is_reference_futures = setup == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_rtm = setup == "RTM_ICHIMOKU_15M_1H_4H_3R"
     is_legacy_single_tp = setup == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION" or is_reference_futures
 
     entry, sl = safe_float(signal.get("entry")), safe_float(signal.get("sl"))
@@ -1948,6 +1997,8 @@ def format_signal(signal):
                       "🔒 پس از هدف اول: انتقال حد ضرر به نقطه ورود"])
     elif is_reference_futures:
         lines.append(f"🎯 حد سود: <code>{fmt_price(tp1)}</code>  |  بستن کل موقعیت در +۱٫۵R")
+    elif is_rtm:
+        lines.append(f"🎯 حد سود نهایی: <code>{fmt_price(tp1)}</code>  |  بستن کل موقعیت در +۳R")
     elif is_legacy_single_tp:
         lines.append(f"🎯 هدف نهایی: <code>{fmt_price(tp1)}</code>  |  بستن کل موقعیت")
     else:
@@ -1979,7 +2030,7 @@ def format_signal(signal):
                   "بودجه ریسک هدف: " + (f"{risk_target:.2f} دلار" if risk_target is not None else "مشخص نشده")])
     if actual_risk is not None:
         lines.append(f"ریسک برآوردی با کارمزد و لغزش قیمت: <b>{actual_risk:.2f} دلار</b>")
-    if is_reference_futures:
+    if is_reference_futures or is_rtm:
         lines.append(f"هزینه تخمینی هر سمت معامله: کارمزد {FEE_RATE*100:.3f}٪ + لغزش قیمت {SLIPPAGE_RATE*100:.3f}٪")
 
     lines.extend(["", "🌐 <b>اطلاعات بازار</b>",
@@ -2067,26 +2118,25 @@ def scan_market(manager, state):
 
             try:
                 stats["checked"] += 1
-                raw = manager.fetch_ohlcv(exchange, symbol)
+                raw = manager.fetch_ohlcv(exchange, symbol, timeframe="15m", limit=260)
                 df = closed_candles(raw)
-                if len(df) < 65:
+                raw1h = exchange.fetch_ohlcv(symbol, timeframe="1h", limit=260)
+                raw4h = exchange.fetch_ohlcv(symbol, timeframe="4h", limit=260)
+                h1_df, h4_df = closed_candles(raw1h), closed_candles(raw4h)
+                if len(df) < 80 or len(h1_df) < 205 or len(h4_df) < 205:
                     stats["no_setup_or_score"] += 1
                     break
 
-                # RSI/Stochastic is the sole entry admission rule; news context is informational.
+                # Use the next 15m candle's actual open only when it immediately follows
+                # the last completed signal candle; never substitute a stale close.
                 next_open = None
                 if raw and len(raw) >= 2:
                     closed_ts = safe_float(df.iloc[-1].get("timestamp"))
                     current_ts = safe_float(raw[-1][0])
-                    interval_ms = safe_float(exchange.parse_timeframe(TIMEFRAME), 14400.0) * 1000.0
-                    now_ms = utc_now().timestamp() * 1000.0
-                    # The scheduled scan runs shortly after the UTC 4H boundary.
-                    # If Actions starts late, do not pretend the old candle open is executable.
-                    if (closed_ts is not None and current_ts is not None
-                            and abs(current_ts-closed_ts-interval_ms) < 1
-                            and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
+                    if closed_ts is not None and current_ts is not None and abs(current_ts-closed_ts-900000) < 1:
                         next_open = safe_float(raw[-1][1])
-                signal = build_signal(symbol, exchange_name, df, next_open=next_open)
+                signal = build_signal(symbol, exchange_name, df, next_open=next_open,
+                                       h1_df=h1_df, h4_df=h4_df)
                 if signal:
                     # Snapshot the current Binance funding rate for alert context.
                     # Historical funding cashflows are not yet accrued into PnL.
@@ -2162,7 +2212,7 @@ def scan_market(manager, state):
 
 def main(manage_only=False):
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
+    print("CRYPTO SIGNAL BOT — RTM + ICHIMOKU FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
     print("Started:", iso_now())
     print("=" * 70)
 
@@ -2174,9 +2224,9 @@ def main(manage_only=False):
         state["signal_history_reset_version"] = 4
         refresh_historical_stats(state)
         save_state(state)
-        print("RSI/Stochastic Futures forward-test baseline reset; historical and active signals preserved.")
+        print("RTM + Ichimoku Futures forward-test baseline reset; historical and active signals preserved.")
         telegram_send(
-            "♻️ <b>شروع تست مستقل RSI/Stochastic Futures</b>\n"
+            "♻️ <b>شروع استراتژی RTM + Ichimoku Futures</b>\n"
             "شمارندهٔ عملکرد از صفر شروع شد. تاریخچه و سیگنال‌های فعال حذف نشدند؛ "
             "گزارش عملکرد فقط معاملات استراتژی جدید را حساب می‌کند."
         )
