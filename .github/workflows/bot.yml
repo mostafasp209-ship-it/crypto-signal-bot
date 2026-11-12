@@ -5,6 +5,18 @@ on:
     branches: [main]
     paths:
       - "bot.py"
+      - "config.py"
+      - "exchange.py"
+      - "indicators.py"
+      - "market_data.py"
+      - "notifications.py"
+      - "risk.py"
+      - "strategy.py"
+      - "utils.py"
+      - "storage.py"
+      - "trade_manager.py"
+      - "safety_filters.py"
+      - "panel.py"
       - ".github/workflows/bot.yml"
       - "requirements.txt"
       - "tests/**"
@@ -46,7 +58,7 @@ jobs:
 
       - name: Validate Python syntax
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-        run: python -m py_compile bot.py panel.py
+        run: python -m py_compile bot.py config.py exchange.py indicators.py market_data.py notifications.py panel.py risk.py safety_filters.py strategy.py storage.py trade_manager.py utils.py
 
       - name: Run strategy and position-management tests
         if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
@@ -77,7 +89,7 @@ jobs:
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           GH_REPO: mostafasp209-ship-it/crypto-signal-bot
           GH_PAT: ${{ github.token }}
-          GH_BRANCH: main
+          GH_BRANCH: ${{ github.ref_name }}
           PYTHONUNBUFFERED: "1"
         run: python -u panel.py --once
 
@@ -97,6 +109,6 @@ jobs:
           done
           if [ "$changed" = "1" ]; then
             git commit -m "Persist bot and Telegram panel state [skip ci]" || true
-            git pull --rebase -X theirs origin main
-            git push origin HEAD:main
+            git pull --rebase -X theirs origin "$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
           fi

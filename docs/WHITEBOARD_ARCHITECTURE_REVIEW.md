@@ -29,13 +29,13 @@ flowchart TD
 | Area | Current implementation | Main concern |
 |---|---|---|
 | Runtime configuration | `config.py` + imports in `bot.py` | Keep defaults and environment parsing centralized |
-| Market access | `ExchangeManager` in `bot.py` | Exchange discovery, liquidity filtering and data retrieval are coupled |
-| Candle hygiene | `closed_candles` in `bot.py` | Must remain the only strategy input path |
-| Indicators and strategy | `bot.py` | Large file mixes indicator math, setup rules and signal construction |
-| Risk and sizing | `build_signal`, `safety_filters.py` | Distinguish stop-distance cap from account/equity risk |
-| Trade lifecycle | `manage_signal`, `close_piece` | Simulated price-based exits; not exchange-native stop orders |
-| Persistence | `load_state`, `save_state` | JSON file is a single-writer state store; concurrency matters |
-| Telegram | `telegram_send`, `panel.py` | Delivery and control-plane behavior should be isolated |
+| Market access | `exchange.py` | CCXT lifecycle and market-universe discovery are isolated from orchestration |
+| Candle hygiene | `market_data.py` | Closed-candle validation rejects forming, invalid and duplicate rows |
+| Indicators and strategy | `indicators.py` + `strategy.py` | Indicator math, scoring and setup gates are extracted; orchestration and signal construction remain in `bot.py` |
+| Risk and sizing | `risk.py`, `safety_filters.py` | Pure fee/slippage-aware sizing; keep stop-distance distinct from account/equity risk |
+| Trade lifecycle | `trade_manager.py` | Deterministic simulated TP/SL/expiry transitions; not exchange-native stop orders |
+| Persistence | `storage.py` via compatibility wrappers in `bot.py` | Atomic writes; malformed state fails closed instead of silently resetting history |
+| Telegram | `notifications.py` + `panel.py` | Signal delivery is separated from the interactive control plane |
 | Automation | `.github/workflows/bot.yml` | CI, scheduled operation and state persistence share one workflow |
 
 ## 2. Confirmed execution path
@@ -71,11 +71,19 @@ flowchart TD
 Refactor incrementally into small modules while preserving public imports used by `panel.py` and existing tests:
 
 - `config.py`: immutable runtime settings and environment parsing
-- `exchange.py`: CCXT lifecycle, market universe and market-data adapters
+- `exchange.py`: CCXT lifecycle and market-universe adapters
+- `market_data.py`: OHLCV normalization and closed-candle validation
+- `indicators.py`: pure indicator calculations
+- `risk.py`: fee/slippage-aware sizing and risk-plan calculations
+- `trade_manager.py`: deterministic simulated trade lifecycle
+- `notifications.py`: Telegram signal delivery
+- `utils.py`: dependency-light numeric and formatting helpers
+- `storage.py`: schema-checked state loading and atomic persistence
 - `market_data.py`: OHLCV validation, closed-candle handling and freshness checks
 - `indicators.py`: pure indicator calculations
-- `strategy.py`: setup gates and signal candidate generation
-- `risk.py`: symbol filters, stop validation, fee/slippage-aware sizing
+- `strategy.py`: technical features, structural levels and deterministic setup gates
+- `risk.py`: fee/slippage-aware sizing and risk calculations
+- `safety_filters.py`: symbol, liquidity and stop-distance admission filters
 - `trade_manager.py`: deterministic TP/SL/expiry state transitions
 - `storage.py`: validated, atomic state reads/writes and schema migration
 - `notifications.py`: Telegram delivery with retry and delivery observability
@@ -97,4 +105,4 @@ Before production deployment:
 
 ## 7. Review verdict
 
-The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass improves boundaries and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.
+The project has useful strategy and lifecycle tests, but the runtime is still a monolith and the state store is file-based. This pass extracts configuration, exchange access, OHLCV validation, indicators, strategy gates, risk planning, trade lifecycle, notifications, numeric parsing and state persistence into focused modules, and fixes confirmed mode/documentation defects. It does not claim a full modular rewrite or a 10/10 production-readiness score.

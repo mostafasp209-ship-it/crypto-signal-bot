@@ -1,9 +1,86 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
 import bot
+import exchange
+import notifications
+import storage
+from utils import safe_float
 from analyze_signals import audit_signals
+
+
+class NotificationTests(unittest.TestCase):
+    def test_recipients_exclude_blocked_and_opted_out_users(self):
+        with tempfile.TemporaryDirectory() as directory:
+            users_file = Path(directory) / "users.json"
+            users_file.write_text(json.dumps({"users": [
+                {"chat_id": "100", "notify": True},
+                {"chat_id": "200", "blocked": True},
+                {"chat_id": "300", "notify": False},
+                {"chat_id": "100", "notify": True},
+            ]}), encoding="utf-8")
+            with patch.object(notifications, "USERS_FILE", str(users_file)), \
+                 patch.object(notifications, "ADMIN_CHAT_ID", "admin"), \
+                 patch.object(notifications, "TELEGRAM_CHAT_ID", ""):
+                self.assertEqual(notifications.telegram_recipients(), ["admin", "100"])
+
+
+class StorageTests(unittest.TestCase):
+    def test_state_round_trip_is_atomic_and_creates_parent_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "nested" / "signals.json"
+            expected = {"signals": [{"id": "signal-1"}], "last_run": "2026-11-08T00:00:00+00:00"}
+            storage.save_state(expected, target)
+            self.assertEqual(storage.load_state(target), expected)
+            self.assertTrue(target.exists())
+            self.assertFalse(target.with_name(target.name + ".tmp").exists())
+
+    def test_missing_state_returns_empty_legacy_shape(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "missing.json"
+            self.assertEqual(storage.load_state(target), {"signals": [], "last_run": None})
+
+
+    def test_corrupt_state_is_not_silently_replaced(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "signals.json"
+            target.write_text("{broken", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                storage.load_state(target)
+            self.assertEqual(target.read_text(encoding="utf-8"), "{broken")
+
+    def test_invalid_signal_collection_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "signals.json"
+            target.write_text('{"signals": {}}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                storage.load_state(target)
+
+
+class NumericSafetyTests(unittest.TestCase):
+    def test_safe_float_rejects_non_finite_values(self):
+        self.assertEqual(safe_float("12.5"), 12.5)
+        self.assertIsNone(safe_float("nan"))
+        self.assertIsNone(safe_float("inf"))
+        self.assertEqual(safe_float("invalid", default=7.0), 7.0)
+
+
+class ExchangeInitializationTests(unittest.TestCase):
+    def test_management_only_does_not_require_scanner_exchanges(self):
+        manager = bot.ExchangeManager()
+        with patch.object(exchange, "SCAN_EXCHANGE_NAMES", []):
+            self.assertTrue(manager.build(require_scanners=False))
+
+    def test_normal_scan_still_requires_at_least_one_scanner(self):
+        manager = bot.ExchangeManager()
+        with patch.object(exchange, "SCAN_EXCHANGE_NAMES", []):
+            with self.assertRaises(RuntimeError):
+                manager.build(require_scanners=True)
 
 
 class CandleSafetyTests(unittest.TestCase):
@@ -18,6 +95,31 @@ class CandleSafetyTests(unittest.TestCase):
     def test_closed_candles_rejects_short_input(self):
         self.assertTrue(bot.closed_candles([]).empty)
         self.assertTrue(bot.closed_candles([[0, 1, 1, 1, 1, 1]] * 29).empty)
+
+    def test_closed_candles_sort_deduplicate_and_reject_invalid_ohlcv(self):
+        raw = []
+        for i in range(40):
+            close = 100 + i
+            raw.append([i * 14400000, close, close + 2, close - 2, close + 1, 1000])
+        # Duplicate timestamp: keep the last exchange observation.
+        raw.insert(5, [5 * 14400000, 105, 107, 103, 106, 900])
+        # Impossible high/low geometry must not reach indicator calculations.
+        raw[10] = [10 * 14400000, 110, 100, 105, 111, 1000]
+        # Reverse the response to prove ordering is normalized.
+        raw = list(reversed(raw))
+        df = bot.closed_candles(raw)
+        self.assertTrue(df["timestamp"].is_monotonic_increasing)
+        self.assertEqual(df["timestamp"].duplicated().sum(), 0)
+        self.assertNotIn(10 * 14400000, set(df["timestamp"].astype(int)))
+        self.assertEqual(int(df.iloc[-1]["timestamp"]), 38 * 14400000)
+
+    def test_closed_candles_rejects_non_finite_rows(self):
+        raw = []
+        for i in range(40):
+            raw.append([i * 14400000, 100, 102, 99, 101, 1000])
+        raw[8] = [8 * 14400000, 100, float("inf"), 99, 101, 1000]
+        df = bot.closed_candles(raw)
+        self.assertNotIn(8 * 14400000, set(df["timestamp"].astype(int)))
 
     def test_indicators_produce_expected_columns(self):
         raw = []
@@ -123,6 +225,20 @@ class SignalExecutionTests(unittest.TestCase):
         self.assertFalse(signal["tp2_hit"])
         self.assertFalse(signal["tp3_hit"])
         self.assertAlmostEqual(signal["realized_pnl"], 9.59, places=2)
+
+    def test_legacy_signal_with_null_components_can_still_close(self):
+        signal = {
+            "symbol": "LEGACY/USDT", "side": "BUY", "status": "ACTIVE",
+            "components": None, "entry": 100.0, "sl": 95.0,
+            "tp1": 105.0, "tp2": 110.0, "tp3": 115.0,
+            "initial_sl": 95.0, "initial_risk_per_unit": 5.0,
+            "position_quantity": 1.0, "remaining_fraction": 1.0,
+            "realized_pnl": 0.0, "fees_paid": 0.0,
+        }
+        self.assertTrue(bot.manage_signal(signal, 94.0))
+        self.assertEqual(signal["status"], "CLOSED")
+        self.assertEqual(signal["closed_reason"], "SL")
+        self.assertEqual(signal["remaining_fraction"], 0.0)
 
     def test_unbookable_tp_does_not_move_stop_or_mark_target_hit(self):
         signal = {

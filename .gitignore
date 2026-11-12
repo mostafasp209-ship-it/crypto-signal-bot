@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Temporary and runtime output
+*.tmp
+*.log
+outcome-report.json
+historical-replay-report.json
+postmortem-report.json
+
+# Research cache and generated reports
+research_cache/
+research_results/

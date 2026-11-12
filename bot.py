@@ -14,61 +14,32 @@ import numpy as np
 import pandas as pd
 import requests
 
-
-# ============================================================
-# CONFIG
-# ============================================================
-
-EXCHANGE_NAMES = [
-    # Legacy venues may still be needed to manage already-open signals.
-    "binanceus", "bitstamp", "bitfinex", "cryptocom", "bitget", "binanceusdm", "bybit",
-]
-# Binance USD-M returned HTTP 451 from GitHub Actions (restricted-location response).
-# Use liquid USDT linear perpetual venues as scanner sources instead.
-# Bybit is geo-blocked on GitHub-hosted runners (HTTP 403). Keep multiple independent USDT-margined venues so one outage cannot stop scanning.
-SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
-FUNDING_SOURCES = ["bitget", "okx", "gateio"]
-
-QUOTE = "USDT"
-TIMEFRAME = "4h"
-TREND_TIMEFRAME = "1d"
-
-MAX_COINS = None  # Scan every eligible active USDT-M perpetual contract
-MAX_SYMBOLS_PER_EXCHANGE = None  # No per-exchange symbol cap
-MIN_SCORE = 12
-# Reject BUY entries with too little upside room before the nearest resistance.
-# Initial threshold; validate against out-of-sample backtests before tuning.
-MIN_RESISTANCE_ROOM_R = 0.75
-# RR is weighted across TP1/TP2/TP3 and includes estimated round-trip fees.
-MIN_RR = 1.35
-
-SIGNAL_EXPIRY_HOURS = 48
-RISK_USD = 10.0
-MAX_POSITION_USD = float(os.getenv("MAX_POSITION_USD", "200"))
-FEE_RATE = 0.0005
-SLIPPAGE_RATE = 0.0002
-
-TP_WEIGHTS = {
-    "tp1": 0.50,
-    "tp2": 0.30,
-    "tp3": 0.20,
-}
-
-DATA_FILE = "signals.json"
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", TELEGRAM_CHAT_ID).strip()
-USERS_FILE = os.getenv("USERS_FILE", "users.json")
-
-REQUEST_TIMEOUT_MS = 15000
-OHLCV_LIMIT = 260
-DAILY_LIMIT = 120
-SLEEP_BETWEEN_SYMBOLS = 0.05
-BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
-NEWS_FEEDS = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
-NEWS_LOOKBACK_HOURS = 24
-NEWS_TIMEOUT_SECONDS = 8
+from config import (
+    ADMIN_CHAT_ID, APP_VERSION, DAILY_LIMIT, DATA_FILE, EXCHANGE_NAMES, FEE_RATE,
+    FUNDING_SOURCES, MAX_POSITION_USD, MIN_RR, NEWS_FEEDS,
+    NEWS_LOOKBACK_HOURS, NEWS_TIMEOUT_SECONDS, OHLCV_LIMIT, RISK_USD,
+    SIGNAL_EXPIRY_HOURS, SLIPPAGE_RATE, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    TIMEFRAME, TP_WEIGHTS, TREND_TIMEFRAME, USERS_FILE,
+)
+from exchange import ExchangeManager
+from indicators import add_indicators
+from market_data import closed_candles
+from notifications import telegram_recipients, telegram_send
+from risk import calculate_risk_plan
+from strategy import (
+    _candle_rejection, _count_h1_h2, _find_breakout_retest, _market_regime,
+    _trendline_context, atr, bb_score, brooks_score, calculate_crypto_strategy_gates,
+    calculate_levels, calculate_reference_strategy_gates, ema_score, fibonacci_score,
+    find_support_resistance, ichimoku_score, rsi, rsi_score, rtm_score, sr_score,
+    stochastic,
+)
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
+from storage import load_state as _load_state, save_state as _save_state
+from trade_manager import (
+    close_piece, duplicate_exists, duplicate_on_candle_exists, manage_signal,
+    price_hit, stop_hit, update_chandelier_stop,
+)
+from utils import safe_float
 
 
 # ============================================================
@@ -81,18 +52,6 @@ def utc_now():
 
 def iso_now():
     return utc_now().isoformat()
-
-
-def safe_float(value, default=None):
-    try:
-        if value is None:
-            return default
-        x = float(value)
-        if not math.isfinite(x):
-            return default
-        return x
-    except Exception:
-        return default
 
 
 def fmt_price(value):
@@ -125,538 +84,17 @@ def clamp(x, lo, hi):
 # ============================================================
 
 def load_state():
-    if not os.path.exists(DATA_FILE):
-        return {"signals": [], "last_run": None}
-
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        if not isinstance(data, dict):
-            return {"signals": [], "last_run": None}
-
-        data.setdefault("signals", [])
-        data.setdefault("last_run", None)
-        return data
-    except Exception:
-        print("WARNING: signals.json could not be read; starting clean.")
-        return {"signals": [], "last_run": None}
+    """Backward-compatible state loader used by the bot and Telegram panel."""
+    return _load_state(DATA_FILE)
 
 
 def save_state(state):
-    tmp = DATA_FILE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, DATA_FILE)
-
-
-# ============================================================
-# TELEGRAM
-# ============================================================
-
-def telegram_recipients():
-    """Return admin plus opted-in users from users.json, without duplicate chat IDs.
-
-    Supported users.json shapes:
-      {"users": [{"chat_id": 123, "blocked": false, "notify": true}]}
-      [{"chat_id": 123, "blocked": false, "notify": true}]
-      {"123": {"blocked": false, "notify": true}, "456": true}
-      {"users": [123, 456]}
-    """
-    recipients = []
-    seen = set()
-
-    def add(chat_id):
-        if chat_id is None:
-            return
-        chat_id = str(chat_id).strip()
-        if not chat_id or chat_id in seen:
-            return
-        seen.add(chat_id)
-        recipients.append(chat_id)
-
-    # Keep the configured administrator/main chat as a recipient.
-    add(ADMIN_CHAT_ID or TELEGRAM_CHAT_ID)
-
-    if not os.path.exists(USERS_FILE):
-        print(f"[TELEGRAM] {USERS_FILE} not found; only the admin chat will receive messages.")
-        return recipients
-
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as exc:
-        print(f"[TELEGRAM] Could not read {USERS_FILE}: {exc}; using admin only.")
-        return recipients
-
-    users = data.get("users", data) if isinstance(data, dict) else data
-    if isinstance(users, dict):
-        entries = []
-        for key, value in users.items():
-            # A dict keyed by chat ID is supported as well as a wrapper object.
-            if key == "users" and isinstance(value, list):
-                entries.extend(value)
-            else:
-                entries.append((key, value))
-    elif isinstance(users, list):
-        entries = users
-    else:
-        entries = []
-
-    for entry in entries:
-        chat_id = None
-        settings = {}
-        if isinstance(entry, (str, int)):
-            chat_id = entry
-        elif isinstance(entry, (list, tuple)) and len(entry) == 2:
-            chat_id, settings = entry
-            if not isinstance(settings, dict):
-                settings = {"notify": bool(settings)}
-        elif isinstance(entry, dict):
-            settings = entry
-            chat_id = entry.get("chat_id", entry.get("telegram_id", entry.get("user_id", entry.get("id"))))
-        if settings.get("blocked") is True or settings.get("is_blocked") is True:
-            continue
-        if settings.get("notify") is False or settings.get("notifications") is False or settings.get("active") is False:
-            continue
-        add(chat_id)
-
-    print(f"[TELEGRAM] recipients loaded: {len(recipients)}")
-    return recipients
-
-
-def telegram_send(text):
-    """Send a message to the administrator and all subscribed users."""
-    if not TELEGRAM_BOT_TOKEN:
-        print("Telegram bot token is missing; message skipped.")
-        return False
-
-    recipients = telegram_recipients()
-    if not recipients:
-        print("No Telegram recipients configured; message skipped.")
-        return False
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    delivered = 0
-    failed = 0
-
-    for chat_id in recipients:
-        try:
-            r = requests.post(
-                url,
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True,
-                },
-                timeout=20,
-            )
-            if r.ok:
-                delivered += 1
-            else:
-                failed += 1
-                # Telegram often returns 403 when a user has not started the bot or blocked it.
-                print(f"[TELEGRAM FAIL] chat_id={chat_id}: HTTP {r.status_code} {r.text[:250]}")
-        except Exception as exc:
-            failed += 1
-            print(f"[TELEGRAM FAIL] chat_id={chat_id}: {type(exc).__name__}: {exc}")
-        time.sleep(0.05)
-
-    print(f"[TELEGRAM] delivered={delivered} failed={failed} total={len(recipients)}")
-    return delivered > 0
-
-
-# ============================================================
-# EXCHANGE MANAGER
-# ============================================================
-
-class ExchangeManager:
-    def __init__(self):
-        self.exchanges = {}
-        self.market_counts = {}
-
-    def build(self, required_exchanges=None):
-        # Load only Binance for scanning plus venues that actually hold active legacy signals.
-        # Loading every configured exchange on every run adds several avoidable network round-trips.
-        names = list(dict.fromkeys(
-            SCAN_EXCHANGE_NAMES + list(required_exchanges or [])
-        ))
-        for name in names:
-            try:
-                cls = getattr(ccxt, name)
-                exchange_config = {
-                    "enableRateLimit": True,
-                    "timeout": REQUEST_TIMEOUT_MS,
-                }
-                if name == "bitget":
-                    # Only load linear perpetual markets; unrelated spot/options
-                    # metadata endpoints are not required by this scanner.
-                    exchange_config["options"] = {
-                        "defaultType": "swap",
-                        "defaultSubType": "linear",
-                        "fetchMarkets": ["swap"],
-                    }
-                ex = cls(exchange_config)
-                ex.load_markets()
-                self.exchanges[name] = ex
-                self.market_counts[name] = len(ex.markets)
-                print(f"[OK] {name}: {len(ex.markets)} markets")
-            except Exception as exc:
-                print(f"[FAIL] {name}: {type(exc).__name__}: {exc}")
-                # Keep the root cause visible in GitHub Actions and continue to other venues.
-                traceback.print_exc(limit=5)
-
-        available_scanners = [name for name in SCAN_EXCHANGE_NAMES if name in self.exchanges]
-        if not available_scanners:
-            raise RuntimeError(
-                "No configured futures data source initialized successfully: "
-                + ", ".join(SCAN_EXCHANGE_NAMES)
-            )
-        print("[DATA SOURCES] active futures scanners: " + ", ".join(available_scanners))
-        return True
-
-    def get_exchange(self, name):
-        return self.exchanges.get(name)
-
-    def market_symbols(self, exchange):
-        result = []
-        for symbol, market in exchange.markets.items():
-            if not market.get("active", True):
-                continue
-            if not market.get("spot", False):
-                continue
-            if market.get("quote") != QUOTE:
-                continue
-            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
-                continue
-            result.append(symbol)
-        return sorted(set(result))
-
-    def futures_symbols(self, exchange):
-        """Active linear USDT-margined perpetual contracts."""
-        result = []
-        for symbol, market in exchange.markets.items():
-            if not market.get("active", True) or not market.get("swap", False):
-                continue
-            if not market.get("linear", False):
-                continue
-            if market.get("quote") != QUOTE or market.get("settle") != QUOTE:
-                continue
-            if market.get("base") in {"USDT", "USDC", "USD", "BUSD"}:
-                continue
-            result.append(symbol)
-        return sorted(set(result))
-
-    def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
-        ordered = []
-        seen = set()
-
-        for name in SCAN_EXCHANGE_NAMES:
-            ex = self.exchanges.get(name)
-            if not ex:
-                continue
-
-            symbols = self.futures_symbols(ex)
-            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
-            try:
-                tickers = ex.fetch_tickers(symbols)
-                ranked = []
-                for symbol in symbols:
-                    ticker = tickers.get(symbol, {})
-                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
-                    ranked.append((quote_volume, symbol))
-                symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
-            except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
-
-            added_from_exchange = 0
-            for symbol in symbols:
-                if symbol in seen:
-                    continue
-                ordered.append((name, symbol))
-                seen.add(symbol)
-                added_from_exchange += 1
-
-                if MAX_COINS is not None and len(ordered) >= MAX_COINS:
-                    return ordered
-                if MAX_SYMBOLS_PER_EXCHANGE is not None and added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
-                    break
-
-        if not ordered:
-            raise RuntimeError(
-                "No active linear USDT-margined perpetual markets found on: "
-                + ", ".join(SCAN_EXCHANGE_NAMES)
-            )
-        print(f"[SCAN UNIVERSE] {len(ordered)} active USDT perpetual markets")
-        return ordered
-
-    def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
-        return exchange.fetch_ohlcv(
-            symbol,
-            timeframe=timeframe,
-            limit=limit,
-        )
-
-    def ticker_price(self, exchange, symbol):
-        try:
-            ticker = exchange.fetch_ticker(symbol)
-            return safe_float(ticker.get("last"))
-        except Exception:
-            return None
-
-
-# ============================================================
-# INDICATORS
-# ============================================================
-
-def add_indicators(df):
-    df = df.copy()
-
-    close = df["close"]
-    high = df["high"]
-    low = df["low"]
-
-    df["ema20"] = close.ewm(span=20, adjust=False).mean()
-    df["ema50"] = close.ewm(span=50, adjust=False).mean()
-    df["ema200"] = close.ewm(span=200, adjust=False).mean()
-
-    delta = close.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    df["rsi"] = 100 - (100 / (1 + rs))
-
-    prev_close = close.shift(1)
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    df["atr"] = tr.ewm(alpha=1 / 14, adjust=False).mean()
-
-    mid = close.rolling(20).mean()
-    std = close.rolling(20).std(ddof=0)
-    df["bb_mid"] = mid
-    df["bb_upper"] = mid + 2 * std
-    df["bb_lower"] = mid - 2 * std
-
-    # Ichimoku
-    tenkan = (
-        high.rolling(9).max() +
-        low.rolling(9).min()
-    ) / 2
-
-    kijun = (
-        high.rolling(26).max() +
-        low.rolling(26).min()
-    ) / 2
-
-    span_a = ((tenkan + kijun) / 2).shift(26)
-    span_b = (
-        (
-            high.rolling(52).max() +
-            low.rolling(52).min()
-        ) / 2
-    ).shift(26)
-
-    df["tenkan"] = tenkan
-    df["kijun"] = kijun
-    df["span_a"] = span_a
-    df["span_b"] = span_b
-
-    return df
-
-
-def closed_candles(raw):
-    if not raw or len(raw) < 30:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
-        raw,
-        columns=["timestamp", "open", "high", "low", "close", "volume"],
-    )
-
-    # Always ignore the currently forming candle.
-    df = df.iloc[:-1].copy()
-
-    for col in ["open", "high", "low", "close", "volume"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df.dropna(inplace=True)
-    return df
+    """Backward-compatible state writer used by the bot and Telegram panel."""
+    return _save_state(state, DATA_FILE)
 
 
 # ============================================================
 # TECHNICAL SCORE COMPONENTS
-# ============================================================
-
-def ema_score(last):
-    score = 0
-    if last["close"] > last["ema20"]:
-        score += 1
-    if last["ema20"] > last["ema50"]:
-        score += 1
-    if last["ema50"] > last["ema200"]:
-        score += 1
-
-    bull = score >= 2
-    bear = score <= 1
-    return bull, bear, score
-
-
-def rsi_score(last):
-    rsi = safe_float(last["rsi"])
-    if rsi is None:
-        return False, False, 0
-
-    if 52 <= rsi <= 68:
-        return True, False, 2
-    if 32 <= rsi <= 48:
-        return False, True, 2
-    if rsi > 70:
-        return False, True, 1
-    if rsi < 30:
-        return True, False, 1
-
-    return False, False, 0
-
-
-def bb_score(last):
-    close = last["close"]
-    upper = last["bb_upper"]
-    lower = last["bb_lower"]
-
-    if pd.isna(upper) or pd.isna(lower):
-        return False, False, 0
-
-    width = upper - lower
-    if width <= 0:
-        return False, False, 0
-
-    pos = (close - lower) / width
-
-    if pos < 0.25:
-        return True, False, 1
-    if pos > 0.75:
-        return False, True, 1
-
-    return False, False, 0
-
-
-def ichimoku_score(last):
-    close = last["close"]
-    span_a = last["span_a"]
-    span_b = last["span_b"]
-    tenkan = last["tenkan"]
-    kijun = last["kijun"]
-
-    if any(pd.isna(x) for x in [span_a, span_b, tenkan, kijun]):
-        return False, False, 0
-
-    cloud_top = max(span_a, span_b)
-    cloud_bottom = min(span_a, span_b)
-
-    if close > cloud_top and tenkan > kijun:
-        return True, False, 2
-
-    if close < cloud_bottom and tenkan < kijun:
-        return False, True, 2
-
-    return False, False, 0
-
-
-def fibonacci_score(df):
-    recent = df.tail(80)
-    hi = recent["high"].max()
-    lo = recent["low"].min()
-
-    if hi <= lo:
-        return False, False, 0
-
-    close = df.iloc[-1]["close"]
-    span = hi - lo
-
-    levels = [
-        lo + span * 0.382,
-        lo + span * 0.500,
-        lo + span * 0.618,
-    ]
-
-    distance = min(abs(close - x) for x in levels) / span
-
-    if distance < 0.04 and close > lo:
-        return True, False, 1
-
-    if distance < 0.04 and close < hi:
-        return False, True, 1
-
-    return False, False, 0
-
-
-def sr_score(df):
-    recent = df.tail(60)
-    close = df.iloc[-1]["close"]
-
-    resistance = recent["high"].quantile(0.90)
-    support = recent["low"].quantile(0.10)
-
-    bull = close <= support * 1.03
-    bear = close >= resistance * 0.97
-
-    if bull:
-        return True, False, 1
-    if bear:
-        return False, True, 1
-
-    return False, False, 0
-
-
-def brooks_score(df):
-    # Price-action proxy inspired by trend/bar pressure.
-    recent = df.tail(8)
-    body = recent["close"] - recent["open"]
-    bullish = int((body > 0).sum())
-    bearish = int((body < 0).sum())
-
-    if bullish >= 6:
-        return True, False, 1
-    if bearish >= 6:
-        return False, True, 1
-
-    return False, False, 0
-
-
-def rtm_score(df):
-    # Supply/demand proxy: strong displacement after a short base.
-    if len(df) < 12:
-        return False, False, 0
-
-    recent = df.tail(12)
-    returns = recent["close"].pct_change().dropna()
-
-    recent_returns = returns.tail(4)
-    positive = recent_returns.clip(lower=0).sum()
-    negative = recent_returns.clip(upper=0).sum()
-
-    if positive > 0.025 and positive > abs(negative):
-        return True, False, 1
-    if negative < -0.025 and abs(negative) > positive:
-        return False, True, 1
-
-    return False, False, 0
-
-
-# ============================================================
-# TREND FILTER
 # ============================================================
 
 def daily_trend(exchange, symbol):
@@ -865,445 +303,8 @@ def news_context_for_symbol(symbol, headlines):
 # SIGNAL ENGINE
 # ============================================================
 
-def find_support_resistance(df, entry, atr, lookback=120):
-    """Build ATR-sized support/resistance zones from confirmed 2-left/2-right pivots."""
-    if df is None or len(df) < 30 or not entry or not atr or atr <= 0:
-        return [], []
-    recent = df.tail(lookback).reset_index(drop=True)
-    highs = recent["high"].astype(float).to_numpy()
-    lows = recent["low"].astype(float).to_numpy()
-    closes = recent["close"].astype(float).to_numpy()
-    tolerance = max(atr * 0.45, entry * 0.002)
-    pivots = []
-
-    # A pivot is only usable after two candles have closed to its right.
-    for i in range(2, len(recent) - 2):
-        if lows[i] <= min(lows[i-2:i]) and lows[i] <= min(lows[i+1:i+3]):
-            pivots.append({"price": float(lows[i]), "idx": i, "kind": "support"})
-        if highs[i] >= max(highs[i-2:i]) and highs[i] >= max(highs[i+1:i+3]):
-            pivots.append({"price": float(highs[i]), "idx": i, "kind": "resistance"})
-
-    def make_zones(kind):
-        points = sorted((p for p in pivots if p["kind"] == kind), key=lambda p: p["price"])
-        groups = []
-        for point in points:
-            if not groups or point["price"] - sum(p["price"] for p in groups[-1]) / len(groups[-1]) > tolerance:
-                groups.append([point])
-            else:
-                groups[-1].append(point)
-
-        zones = []
-        for group in groups:
-            center = sum(p["price"] for p in group) / len(group)
-            lo_zone, hi_zone = center - tolerance * 0.35, center + tolerance * 0.35
-            # Count distinct revisits after the first pivot; don't count the
-            # pivot bars that define this zone as retests.
-            touches = 0
-            armed = True
-            last_touch = None
-            pivot_indices = {p["idx"] for p in group}
-            for j in range(min(p["idx"] for p in group) + 3, len(recent)):
-                if j in pivot_indices:
-                    continue
-                intersects = lows[j] <= hi_zone and highs[j] >= lo_zone
-                if armed and intersects:
-                    touches += 1
-                    last_touch = j
-                    armed = False
-                if not intersects and abs(closes[j] - center) >= max(atr * 0.65, tolerance):
-                    armed = True
-            last_pivot = max(p["idx"] for p in group)
-            zones.append({
-                "center": center, "low": lo_zone, "high": hi_zone,
-                "pivot_count": len(group), "touches": touches,
-                "last_pivot": last_pivot, "last_touch": last_touch,
-                "age": len(recent) - 1 - last_pivot,
-                "fresh": touches == 0,
-            })
-        return zones
-
-    support_zones = [z for z in make_zones("support") if z["center"] < entry]
-    resistance_zones = [z for z in make_zones("resistance") if z["center"] > entry]
-    support_zones.sort(key=lambda z: entry - z["center"])
-    resistance_zones.sort(key=lambda z: z["center"] - entry)
-    # Preserve the tuple interface used by level/notification code.
-    supports = [(z["center"], z["touches"], z) for z in support_zones]
-    resistances = [(z["center"], z["touches"], z) for z in resistance_zones]
-    return supports, resistances
-
-
-def _candle_rejection(row, side, atr):
-    opn, close = float(row["open"]), float(row["close"])
-    high, low = float(row["high"]), float(row["low"])
-    span = max(high - low, 1e-12)
-    body = abs(close - opn)
-    close_loc = (close - low) / span
-    lower_wick = min(opn, close) - low
-    upper_wick = high - max(opn, close)
-    if side == "BUY":
-        return close > opn and close_loc >= 0.62 and (lower_wick >= body * 0.35 or body >= 0.35 * atr)
-    return close < opn and close_loc <= 0.38 and (upper_wick >= body * 0.35 or body >= 0.35 * atr)
-
-
-def _trendline_context(df, atr):
-    """Return a conservative trendline read from the last confirmed swing pivots."""
-    if df is None or len(df) < 20:
-        return {"up_near": False, "down_near": False, "up_break": False, "down_break": False}
-    hi = df["high"].astype(float).to_numpy()
-    lo = df["low"].astype(float).to_numpy()
-    piv_hi, piv_lo = [], []
-    for i in range(2, len(df) - 2):
-        if hi[i] >= max(hi[i-2:i]) and hi[i] >= max(hi[i+1:i+3]):
-            piv_hi.append((i, hi[i]))
-        if lo[i] <= min(lo[i-2:i]) and lo[i] <= min(lo[i+1:i+3]):
-            piv_lo.append((i, lo[i]))
-    last_close = float(df.iloc[-1]["close"])
-    out = {"up_near": False, "down_near": False, "up_break": False, "down_break": False}
-    if len(piv_lo) >= 2:
-        (x1, y1), (x2, y2) = piv_lo[-2:]
-        if x2 > x1 and y2 > y1:
-            projected = y2 + (y2-y1) / (x2-x1) * (len(df)-1-x2)
-            out["up_near"] = abs(last_close-projected) <= 0.45*atr
-            out["up_break"] = last_close < projected - 0.20*atr
-    if len(piv_hi) >= 2:
-        (x1, y1), (x2, y2) = piv_hi[-2:]
-        if x2 > x1 and y2 < y1:
-            projected = y2 + (y2-y1) / (x2-x1) * (len(df)-1-x2)
-            out["down_near"] = abs(last_close-projected) <= 0.45*atr
-            out["down_break"] = last_close > projected + 0.20*atr
-    return out
-
-
-def _market_regime(df, atr):
-    """Classify the latest closed-bar context without using future candles."""
-    if df is None or len(df) < 60 or not atr or atr <= 0:
-        return {"regime": "UNCLEAR", "higher_highs": False, "higher_lows": False}
-    work = df.tail(100).reset_index(drop=True)
-    hi = work["high"].astype(float).to_numpy()
-    lo = work["low"].astype(float).to_numpy()
-    piv_hi, piv_lo = [], []
-    for j in range(2, len(work) - 2):
-        if hi[j] >= max(hi[j-2:j]) and hi[j] >= max(hi[j+1:j+3]):
-            piv_hi.append((j, hi[j]))
-        if lo[j] <= min(lo[j-2:j]) and lo[j] <= min(lo[j+1:j+3]):
-            piv_lo.append((j, lo[j]))
-    higher_highs = len(piv_hi) >= 3 and piv_hi[-1][1] > piv_hi[-2][1] > piv_hi[-3][1]
-    higher_lows = len(piv_lo) >= 3 and piv_lo[-1][1] > piv_lo[-2][1] > piv_lo[-3][1]
-    lower_highs = len(piv_hi) >= 3 and piv_hi[-1][1] < piv_hi[-2][1] < piv_hi[-3][1]
-    lower_lows = len(piv_lo) >= 3 and piv_lo[-1][1] < piv_lo[-2][1] < piv_lo[-3][1]
-    close = float(work.iloc[-1]["close"])
-    ema = work["close"].ewm(span=50, adjust=False).mean()
-    slope = float(ema.iloc[-1] - ema.iloc[-6])
-    if higher_highs and higher_lows and close > float(ema.iloc[-1]) and slope > 0:
-        regime = "UPTREND"
-    elif lower_highs and lower_lows and close < float(ema.iloc[-1]) and slope < 0:
-        regime = "DOWNTREND"
-    else:
-        recent_range = float(work["high"].tail(20).max() - work["low"].tail(20).min())
-        net_move = abs(float(work["close"].iloc[-1]) - float(work["close"].iloc[-21]))
-        efficiency = net_move / max(recent_range, 1e-12)
-        regime = "RANGE" if efficiency < 0.30 else "TRANSITION"
-    return {"regime": regime, "higher_highs": bool(higher_highs),
-            "higher_lows": bool(higher_lows), "lower_highs": bool(lower_highs),
-            "lower_lows": bool(lower_lows), "ema50_slope": slope}
-
-
-def _count_h1_h2(df, lookback=18):
-    """Approximate Brooks-style H1/H2 attempts after a pullback in a bull trend.
-
-    A trigger is a bullish bar that trades above the previous bar's high.
-    H2 requires a distinct second trigger attempt after an intervening pullback;
-    two bullish candles by themselves do not qualify.
-    """
-    result = {"h1": False, "h2": False, "attempts": 0, "pullback_bars": 0}
-    if df is None or len(df) < 8:
-        return result
-    w = df.tail(lookback).reset_index(drop=True)
-    pullback_start = None
-    for start in range(max(1, len(w) - 10), len(w) - 3):
-        segment = w.iloc[start:min(start + 4, len(w))]
-        values = segment["close"].to_numpy()
-        if int((values[1:] < values[:-1]).sum()) >= 2 and pullback_start is None:
-            # Keep the start of the pullback sequence so the first trigger,
-            # intervening retracement, and second trigger can all be counted.
-            pullback_start = start
-    if pullback_start is None:
-        return result
-    post = w.iloc[pullback_start + 1:].reset_index(drop=True)
-    result["pullback_bars"] = int(len(post))
-    attempts = 0
-    previous_trigger = None
-    retraced_after_trigger = False
-    for j in range(1, len(post)):
-        row, prev = post.iloc[j], post.iloc[j-1]
-        trigger = float(row["close"]) > float(row["open"]) and float(row["high"]) > float(prev["high"])
-        if trigger:
-            if attempts == 0:
-                attempts = 1
-                previous_trigger = j
-            elif retraced_after_trigger and j > (previous_trigger or 0):
-                attempts = 2
-                break
-        if attempts and previous_trigger is not None and j > previous_trigger:
-            if float(row["low"]) < float(post.iloc[previous_trigger]["low"]) or float(row["close"]) < float(row["open"]):
-                retraced_after_trigger = True
-    result["attempts"] = attempts
-    result["h1"] = attempts >= 1
-    result["h2"] = attempts >= 2
-    return result
-
-
-def _find_breakout_retest(df, atr, bullish_trend):
-    """Find a prior confirmed close above a resistance pivot and a later retest."""
-    if df is None or len(df) < 30 or atr <= 0 or not bullish_trend:
-        return None
-    highs = df["high"].astype(float).to_numpy()
-    lows = df["low"].astype(float).to_numpy()
-    closes = df["close"].astype(float).to_numpy()
-    i = len(df) - 1
-    for k in range(i - 2, max(4, i - 7), -1):
-        for p in range(max(2, k - 35), k - 2):
-            if highs[p] >= max(highs[p-2:p]) and highs[p] >= max(highs[p+1:p+3]):
-                level = highs[p]
-                if closes[k] <= level + 0.12 * atr or closes[k-1] > level:
-                    continue
-                touched = any(lows[j] <= level + 0.20 * atr and highs[j] >= level - 0.20 * atr
-                              for j in range(k + 1, i + 1))
-                last = df.iloc[-1]
-                if touched and lows[i] <= level + 0.20 * atr and closes[i] > level and _candle_rejection(last, "BUY", atr):
-                    return {"center": float(level), "low": float(level - 0.20*atr),
-                            "high": float(level + 0.20*atr), "touches": 1,
-                            "pivot_count": 1, "fresh": False, "last_pivot": p}
-    return None
-
-
-def calculate_levels(side, entry, atr, df):
-    """Set structural invalidation and staged targets; use R-multiples if SR is sparse."""
-    entry, atr = safe_float(entry), safe_float(atr)
-    if not entry or not atr or atr <= 0:
-        return None
-    supports, resistances = find_support_resistance(df, entry, atr)
-    buffer = max(atr * 0.22, entry * 0.0015)
-
-    if side == "BUY":
-        if not supports:
-            print("[FILTER] no structural support below entry")
-            return None
-        support = supports[0][0]
-        sl = support - buffer
-        risk = entry - sl
-        structural = [float(item[0]) for item in resistances
-                      if float(item[0]) > entry + max(atr * 0.25, entry * 0.001)]
-        structural = sorted(set(structural))
-        tp1 = structural[0] if structural else entry + 1.25 * risk
-        tp2 = structural[1] if len(structural) > 1 and structural[1] > tp1 + 0.25*risk else max(entry + 1.8*risk, tp1 + 0.5*risk)
-        tp3 = structural[2] if len(structural) > 2 and structural[2] > tp2 + 0.25*risk else max(entry + 2.6*risk, tp2 + 0.5*risk)
-        tp_methods = [
-            "resistance_zone" if structural else "fallback_1.25R",
-            "resistance_zone" if len(structural) > 1 and structural[1] > tp1 + 0.25*risk else "fallback_R_multiple",
-            "resistance_zone" if len(structural) > 2 and structural[2] > tp2 + 0.25*risk else "fallback_R_multiple",
-        ]
-    elif side == "SELL":
-        if not resistances:
-            return None
-        resistance = resistances[0][0]
-        sl = resistance + buffer
-        risk = sl - entry
-        structural = sorted(set(float(item[0]) for item in supports
-                                if float(item[0]) < entry - max(atr * 0.25, entry * 0.001)), reverse=True)
-        tp1 = structural[0] if structural else entry - 1.25 * risk
-        tp2 = structural[1] if len(structural) > 1 and structural[1] < tp1 - 0.25*risk else min(entry - 1.8*risk, tp1 - 0.5*risk)
-        tp3 = structural[2] if len(structural) > 2 and structural[2] < tp2 - 0.25*risk else min(entry - 2.6*risk, tp2 - 0.5*risk)
-        tp_methods = [
-            "support_zone" if structural else "fallback_1.25R",
-            "support_zone" if len(structural) > 1 and structural[1] < tp1 - 0.25*risk else "fallback_R_multiple",
-            "support_zone" if len(structural) > 2 and structural[2] < tp2 - 0.25*risk else "fallback_R_multiple",
-        ]
-    else:
-        return None
-
-    if risk <= 0 or (side == "BUY" and sl >= entry) or (side == "SELL" and sl <= entry):
-        return None
-    if side == "BUY" and not (entry < tp1 < tp2 < tp3):
-        return None
-    if side == "SELL" and not (entry > tp1 > tp2 > tp3):
-        return None
-
-    weighted_reward = sum(TP_WEIGHTS[k] * abs(target-entry) for k, target in
-                          (("tp1", tp1), ("tp2", tp2), ("tp3", tp3)))
-    entry_fee = entry * FEE_RATE
-    stop_fee = abs(sl) * FEE_RATE
-    target_fee = sum(TP_WEIGHTS[k] * abs(target) * FEE_RATE for k, target in
-                     (("tp1", tp1), ("tp2", tp2), ("tp3", tp3)))
-    net_risk = risk + entry_fee + stop_fee
-    net_reward = weighted_reward - entry_fee - target_fee
-    rr = net_reward / net_risk if net_risk > 0 else 0.0
-    if rr < MIN_RR:
-        print(f"[FILTER] structural/fallback RR {rr:.2f} < MIN_RR={MIN_RR}")
-        return None
-    return {
-        "entry": entry, "sl": sl, "tp1": tp1, "tp2": tp2, "tp3": tp3,
-        "risk_per_unit": risk, "net_risk_per_unit": net_risk, "rr": rr,
-        "support": supports[0][0] if supports else None,
-        "resistance": resistances[0][0] if resistances else None,
-        "tp_methods": tp_methods,
-        "sl_method": "below_support_zone" if side == "BUY" else "above_resistance_zone",
-    }
-
-
-def calculate_crypto_strategy_gates(df):
-    """
-    V3 spot-long breakout strategy using only fully closed 4h candles.
-    The strictest of the 10/20/30-bar levels is used (equivalent to the 30-bar high).
-    Entry gates: volume >= 1.5x prior 20-bar average, close > EMA200, ADX(14) > 32.
-    """
-    result = {
-        "atr": None, "volume_avg": None, "volume_ratio": None,
-        "breakout_level": None, "lookback": 30,
-        "lookbacks": [10, 20, 30], "volume_multiplier": 1.5,
-        "atr_multiplier": 2.0, "partial_r": 0.75, "partial_pct": 1.0 / 3.0,
-        "chandelier_atr_multiplier": 3.0, "ema200": None, "adx": None,
-        "signal_long": False,
-    }
-    required = {"open", "high", "low", "close", "volume"}
-    if df is None or len(df) < 220 or not required.issubset(df.columns):
-        return result
-
-    work = df.copy()
-    for col in ("open", "high", "low", "close", "volume"):
-        work[col] = pd.to_numeric(work[col], errors="coerce")
-    work = work.dropna(subset=["open", "high", "low", "close", "volume"]).reset_index(drop=True)
-    if len(work) < 220:
-        return result
-
-    close, high, low, volume = work["close"], work["high"], work["low"], work["volume"]
-    prev_close = close.shift(1)
-    true_range = pd.concat([
-        high - low,
-        (high - prev_close).abs(),
-        (low - prev_close).abs(),
-    ], axis=1).max(axis=1)
-    atr = true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-
-    up_move, down_move = high.diff(), -low.diff()
-    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=work.index)
-    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=work.index)
-    smoothed_plus = plus_dm.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-    smoothed_minus = minus_dm.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-    plus_di = 100.0 * smoothed_plus / atr.replace(0, np.nan)
-    minus_di = 100.0 * smoothed_minus / atr.replace(0, np.nan)
-    di_sum = (plus_di + minus_di).replace(0, np.nan)
-    dx = (100.0 * (plus_di - minus_di).abs() / di_sum).replace([np.inf, -np.inf], np.nan)
-    adx = dx.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean()
-
-    levels = {
-        lookback: high.shift(1).rolling(lookback, min_periods=lookback).max()
-        for lookback in (10, 20, 30)
-    }
-    # Levels are shifted: the breakout candle never contributes to its own level.
-    breakout = pd.concat(list(levels.values()), axis=1).max(axis=1)
-    volume_avg = volume.rolling(20, min_periods=20).mean().shift(1)
-    ema200 = close.ewm(span=200, adjust=False, min_periods=200).mean()
-
-    values = {
-        "atr": safe_float(atr.iloc[-1]),
-        "volume_avg": safe_float(volume_avg.iloc[-1]),
-        "close": safe_float(close.iloc[-1]),
-        "volume": safe_float(volume.iloc[-1]),
-        "breakout": safe_float(breakout.iloc[-1]),
-        "ema200": safe_float(ema200.iloc[-1]),
-        "adx": safe_float(adx.iloc[-1]),
-    }
-    result.update({
-        "atr": values["atr"],
-        "volume_avg": values["volume_avg"],
-        "volume_ratio": (
-            values["volume"] / values["volume_avg"]
-            if values["volume"] is not None and values["volume_avg"] is not None
-            and values["volume_avg"] > 0 else None
-        ),
-        "breakout_level": values["breakout"],
-        "ema200": values["ema200"],
-        "adx": values["adx"],
-    })
-    if any(value is None for value in values.values()) or values["atr"] <= 0 or values["volume_avg"] <= 0:
-        return result
-
-    result["signal_long"] = bool(
-        values["close"] > values["breakout"]
-        and values["volume"] >= 1.5 * values["volume_avg"]
-        and values["close"] > values["ema200"]
-        and values["adx"] > 32.0
-    )
-    return result
-
-def rsi(series, period=14):
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    avg_loss = loss.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-    rs = avg_gain / (avg_loss + 1e-12)
-    return 100 - (100 / (1 + rs))
-
-
-def atr(high, low, close, period=14):
-    previous_close = close.shift(1)
-    tr = pd.concat([high-low, (high-previous_close).abs(), (low-previous_close).abs()], axis=1).max(axis=1)
-    return tr.ewm(alpha=1 / period, min_periods=period, adjust=False).mean()
-
-
-def stochastic(high, low, close, k_period=14, d_period=3):
-    lowest, highest = low.rolling(k_period).min(), high.rolling(k_period).max()
-    k = 100 * (close-lowest) / (highest-lowest+1e-12)
-    return k, k.rolling(d_period).mean()
-
-
-def calculate_reference_strategy_gates(df):
-    """Evaluate the confirmed 4H RSI/Stochastic reversal on the latest closed bar."""
-    result = {"signal_long": False, "signal_short": False, "atr": None, "rsi": None,
-              "stoch_k": None, "stoch_d": None, "volume_ratio": None, "signal_timestamp": None}
-    required = {"timestamp", "open", "high", "low", "close", "volume"}
-    if df is None or len(df) < 140 or not required.issubset(df.columns):
-        return result
-    work = df.copy()
-    for col in required:
-        work[col] = pd.to_numeric(work[col], errors="coerce")
-    work = work.dropna(subset=list(required)).reset_index(drop=True)
-    if len(work) < 140:
-        return result
-
-    close, high, low = work["close"], work["high"], work["low"]
-    rv, av = rsi(close, 14), atr(high, low, close, 14)
-    sk, sd = stochastic(high, low, close, 14, 3)
-    volma = work["volume"].rolling(20, min_periods=20).mean()
-    i = len(work)-1
-    vals = [safe_float(rv.iloc[i-1]), safe_float(rv.iloc[i]), safe_float(av.iloc[i]),
-            safe_float(sk.iloc[i-1]), safe_float(sd.iloc[i-1]),
-            safe_float(sk.iloc[i]), safe_float(sd.iloc[i]), safe_float(volma.iloc[i])]
-    if any(v is None for v in vals):
-        return result
-    rp, rn, atr_now, kp, dp, kn, dn, vm = vals
-    volume = safe_float(work.iloc[i]["volume"])
-    if volume is None or vm <= 0 or atr_now <= 0:
-        return result
-    vr = volume / vm
-    long_cross = kp <= dp and kn > dn and kn < 38
-    short_cross = kp >= dp and kn < dn and kn > 62
-    long_rsi = rp < 30 and rn >= 30
-    short_rsi = rp > 70 and rn <= 70
-    candle = work.iloc[i]
-    result.update({
-        "atr": atr_now, "rsi": rn, "stoch_k": kn, "stoch_d": dn,
-        "volume_ratio": vr, "signal_timestamp": safe_float(candle["timestamp"]),
-        "signal_long": bool(long_rsi and long_cross and volume > 1.12*vm and candle["close"] > candle["open"]),
-        "signal_short": bool(short_rsi and short_cross and volume > 1.12*vm and candle["close"] < candle["open"]),
-    })
-    return result
-
-
 def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamentals=None, news_context=None):
-    """Create a Binance USDⓈ-M 4H long/short signal using next candle open."""
+    """Create a USDT-linear perpetual 4H signal using the next candle open."""
     st = calculate_reference_strategy_gates(df)
     if not st["signal_long"] and not st["signal_short"]:
         return None
@@ -1313,6 +314,9 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         return None
     side = "BUY" if st["signal_long"] else "SELL"
     entry = raw_entry * (1+SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1-SLIPPAGE_RATE)
+    if not is_tradable_symbol(symbol, entry_price=entry, require_quote_volume=False):
+        print(f"[SIGNAL SKIP] {symbol}: entry failed price/symbol safety validation")
+        return None
     recent = df.tail(5)
     if side == "BUY":
         swing = safe_float(pd.to_numeric(recent["low"], errors="coerce").min())
@@ -1325,19 +329,30 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         stop = max(swing, entry+1.32*atr_now)
         risk = stop-entry
     risk_pct = risk/entry
-    if not (0.0035 < risk_pct < 0.038):
+    # Hard cap from the post-mortem safety policy; never silently use the older 3.8% limit.
+    if not (0.0035 < risk_pct <= MAX_RISK_PCT):
         return None
     target = entry + (1.5*risk if side=="BUY" else -1.5*risk)
-    # Entry slippage is already embedded in entry; add both-side fees and exit slippage once.
-    cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
-    raw_qty = RISK_USD/(risk+cost_unit)
-    cap_qty = MAX_POSITION_USD/entry if MAX_POSITION_USD>0 else raw_qty
-    qty = min(raw_qty, cap_qty)
+    risk_plan = calculate_risk_plan(
+        side=side, entry=entry, stop=stop, target=target,
+        risk_budget_usd=RISK_USD, max_position_usd=MAX_POSITION_USD,
+        fee_rate=FEE_RATE, slippage_rate=SLIPPAGE_RATE,
+    )
+    if risk_plan is None:
+        print(f"[SIGNAL SKIP] {symbol}: invalid risk or execution-cost plan")
+        return None
+    net_rr = risk_plan["net_rr"]
+    if net_rr < MIN_RR:
+        print(f"[SIGNAL SKIP] {symbol}: net RR {net_rr:.3f} below MIN_RR={MIN_RR:.2f}")
+        return None
+    raw_qty = risk_plan["raw_quantity"]
+    qty = risk_plan["quantity"]
     now = iso_now()
     setup = "REFERENCE_RSI_STOCH_ATR_RR15"
     components = {
         "setup": setup, "strategy_mode": "rsi_recovery_stochastic_cross", "timeframe": "4h",
-        "rr": 1.5, "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
+        "rr": 1.5, "net_rr": net_rr, "max_risk_pct": MAX_RISK_PCT,
+        "rsi_period": 14, "rsi_long_recovery": 30, "rsi_short_recovery": 70,
         "stoch_k_period": 14, "stoch_d_period": 3, "stoch_long_zone_max": 38,
         "stoch_short_zone_min": 62, "volume_multiplier": 1.12, "volume_ma_period": 20,
         "atr_period": 14, "atr_multiplier": 1.32, "swing_lookback": 5,
@@ -1355,9 +370,10 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
         "support": None, "resistance": None, "sl_method": "5-bar_swing_vs_1.32_ATR14",
         "tp_methods": ["single_target_1.5R"], "rr": 1.5, "risk_pct": risk_pct*100,
         "initial_risk_per_unit": risk, "initial_sl": stop, "risk_usd": RISK_USD,
-        "risk_target_usd": RISK_USD, "actual_risk_usd": qty*(risk+cost_unit),
-        "position_quantity": qty, "quantity": qty, "position_value": qty*entry,
-        "position_capped": qty+1e-12 < raw_qty, "signal_candle_timestamp": st["signal_timestamp"],
+        "net_rr": net_rr,
+        "risk_target_usd": RISK_USD, "actual_risk_usd": risk_plan["actual_risk_usd"],
+        "position_quantity": qty, "quantity": qty, "position_value": risk_plan["position_value_usd"],
+        "position_capped": bool(risk_plan["position_capped"]), "signal_candle_timestamp": st["signal_timestamp"],
         "components": components,
         "entry_snapshot": {"timeframe": "4h", "setup": setup, "rr": 1.5, "rsi": st["rsi"],
             "stoch_k": st["stoch_k"], "stoch_d": st["stoch_d"], "volume_ratio": st["volume_ratio"],
@@ -1372,298 +388,6 @@ def build_signal(symbol, exchange_name, df, next_open=None, trend=None, fundamen
 # ============================================================
 # TRADE MANAGEMENT
 # ============================================================
-
-def duplicate_exists(state, symbol, side):
-    for signal in state.get("signals", []):
-        if signal.get("symbol") == symbol and signal.get("side") == side:
-            if signal.get("status") == "ACTIVE":
-                return True
-    return False
-
-def duplicate_on_candle_exists(state, candidate):
-    """Prevent repeated entries from the same closed 4h signal candle."""
-    candle_ts = candidate.get("signal_candle_timestamp")
-    if candle_ts is None:
-        return False
-    for signal in state.get("signals", []):
-        if (
-            signal.get("symbol") == candidate.get("symbol")
-            and signal.get("side") == candidate.get("side")
-            and signal.get("signal_candle_timestamp") == candle_ts
-        ):
-            return True
-    return False
-
-
-def close_piece(signal, exit_price, fraction, label):
-    """Book a partial exit only when original risk can be determined reliably."""
-    entry = safe_float(signal.get("entry"))
-    exit_price = safe_float(exit_price)
-    fraction = safe_float(fraction)
-    if entry is None or entry <= 0 or exit_price is None or exit_price <= 0 or fraction is None or fraction <= 0:
-        print(f"[PNL ERROR] Invalid close values for {signal.get('symbol')}")
-        return False
-
-    risk_per_unit = safe_float(signal.get("initial_risk_per_unit"))
-    original_sl = safe_float(signal.get("initial_sl"))
-    if (risk_per_unit is None or risk_per_unit <= 0) and original_sl is None:
-        current_sl = safe_float(signal.get("sl"))
-        # Never infer risk from TP1; it may not equal the initial stop distance.
-        if current_sl is not None and not math.isclose(current_sl, entry, rel_tol=1e-9, abs_tol=1e-12):
-            original_sl = current_sl
-    if risk_per_unit is None or risk_per_unit <= 0:
-        risk_per_unit = abs(entry - original_sl) if original_sl is not None else 0.0
-    if risk_per_unit <= 0:
-        print(f"[PNL ERROR] Cannot determine original risk for {signal.get('symbol')}; PnL not booked")
-        return False
-
-    quantity = safe_float(signal.get("position_quantity"))
-    if quantity is None or quantity <= 0:
-        quantity = RISK_USD / risk_per_unit
-        signal["position_quantity"] = quantity
-    remaining = safe_float(signal.get("remaining_fraction"), 1.0)
-    fraction = min(fraction, max(0.0, remaining))
-    if fraction <= 0:
-        return False
-
-    piece_qty = quantity * fraction
-    is_reference_futures = signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
-    if is_reference_futures:
-        slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
-        exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
-    gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
-    # Preserve the 0.10% fee model for known legacy setups; generic/new records
-    # continue to use the configured current fee unless they carry their own rate.
-    setup_name = signal.get("components", {}).get("setup")
-    legacy_setup = setup_name in {
-        "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3",
-        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
-    }
-    fee_default = 0.001 if legacy_setup else FEE_RATE
-    fee_rate = safe_float(signal.get("components", {}).get("fee_rate"), fee_default)
-    fees = (entry + exit_price) * piece_qty * fee_rate
-    signal["realized_pnl"] = safe_float(signal.get("realized_pnl"), 0.0) + gross_piece - fees
-    signal["fees_paid"] = safe_float(signal.get("fees_paid"), 0.0) + fees
-    signal["remaining_fraction"] = max(0.0, remaining - fraction)
-    # Preserve execution evidence so the audit can distinguish strategy loss from
-    # stop execution slippage. Ticker polling can observe a price beyond the stop.
-    signal["last_exit_price"] = exit_price
-    signal["last_exit_label"] = label
-    if label == "sl":
-        stop_price = safe_float(signal.get("sl"))
-        if stop_price is not None:
-            if signal.get("side") == "BUY":
-                slippage = max(0.0, stop_price - exit_price) * piece_qty
-            else:
-                slippage = max(0.0, exit_price - stop_price) * piece_qty
-            signal["stop_slippage_usd"] = safe_float(signal.get("stop_slippage_usd"), 0.0) + slippage
-    signal[f"{label}_hit"] = True
-    signal["updated_at"] = iso_now()
-    return True
-
-
-def price_hit(signal, price, level_name):
-    price = safe_float(price)
-    level = safe_float(signal.get(level_name))
-
-    if price is None or level is None:
-        return False
-
-    if signal["side"] == "BUY":
-        return price >= level
-    return price <= level
-
-
-def stop_hit(signal, price):
-    price = safe_float(price)
-    sl = safe_float(signal.get("sl"))
-
-    if price is None or sl is None:
-        return False
-
-    if signal["side"] == "BUY":
-        return price <= sl
-    return price >= sl
-
-
-def update_chandelier_stop(signal, df):
-    """Ratchet the V3 stop using closed-candle highest close minus 3*ATR(14)."""
-    if signal.get("components", {}).get("setup") != "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
-        return False
-    if df is None or len(df) < 20 or not {"high", "low", "close", "timestamp"}.issubset(df.columns):
-        return False
-
-    work = df.copy()
-    for col in ("high", "low", "close", "timestamp"):
-        work[col] = pd.to_numeric(work[col], errors="coerce")
-    work = work.dropna(subset=["high", "low", "close", "timestamp"]).reset_index(drop=True)
-    if len(work) < 20:
-        return False
-
-    latest_ts = safe_float(work.iloc[-1]["timestamp"])
-    previous_ts = safe_float(signal.get("last_trailing_candle_ts"))
-    if latest_ts is None or (previous_ts is not None and latest_ts <= previous_ts):
-        return False
-
-    entry_ts = safe_float(signal.get("signal_candle_timestamp"))
-    if entry_ts is not None:
-        post_entry = work[work["timestamp"] >= entry_ts]
-    else:
-        post_entry = work
-    if post_entry.empty:
-        post_entry = work.tail(1)
-
-    highest_close = safe_float(post_entry["close"].max())
-    signal["last_trailing_candle_ts"] = latest_ts
-    if highest_close is not None:
-        signal["highest_close_since_entry"] = max(
-            safe_float(signal.get("highest_close_since_entry"), safe_float(signal.get("entry"), 0.0)) or 0.0,
-            highest_close,
-        )
-
-    # Before the first partial, the original 2*ATR stop remains in force.
-    if not signal.get("tp1_hit") or not signal.get("trailing_active"):
-        return False
-
-    close = work["close"]
-    previous_close = close.shift(1)
-    true_range = pd.concat([
-        work["high"] - work["low"],
-        (work["high"] - previous_close).abs(),
-        (work["low"] - previous_close).abs(),
-    ], axis=1).max(axis=1)
-    atr = safe_float(true_range.ewm(alpha=1 / 14, adjust=False, min_periods=14).mean().iloc[-1])
-    peak = safe_float(signal.get("highest_close_since_entry"))
-    entry = safe_float(signal.get("entry"))
-    current_sl = safe_float(signal.get("sl"))
-    if any(value is None for value in (atr, peak, entry, current_sl)) or atr <= 0:
-        return False
-
-    candidate = max(entry, peak - 3.0 * atr)
-    if candidate > current_sl:
-        signal["sl"] = candidate
-        signal["updated_at"] = iso_now()
-        return True
-    return False
-
-
-def manage_signal(signal, current_price):
-    if signal.get("status") != "ACTIVE":
-        return False
-
-    changed = False
-
-    created = signal.get("created_at")
-    if created:
-        try:
-            created_dt = datetime.fromisoformat(created)
-            if utc_now() - created_dt >= timedelta(hours=SIGNAL_EXPIRY_HOURS):
-                # Close remaining position at current price.
-                remaining = safe_float(signal.get("remaining_fraction"), 0)
-                if remaining > 0 and not close_piece(signal, current_price, remaining, "expiry"):
-                    # Do not finalize a trade when its exit could not be booked.
-                    # Keep it active so the accounting problem remains visible/retryable.
-                    print(f"[MANAGE ERROR] {signal.get('symbol')}: expiry exit not booked; keeping signal active")
-                    return False
-                signal["status"] = "EXPIRED"
-                signal["closed_reason"] = "48h expiry"
-                signal["updated_at"] = iso_now()
-                return True
-        except Exception:
-            pass
-
-    is_v3 = (
-        signal.get("components", {}).get("setup")
-        == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3"
-    )
-    if is_v3:
-        # Stop takes priority over an unbooked partial target.
-        if stop_hit(signal, current_price):
-            remaining = safe_float(signal.get("remaining_fraction"), 0.0) or 0.0
-            if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
-                print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 stop exit not booked; keeping signal active")
-                return False
-            signal["status"] = "CLOSED"
-            entry = safe_float(signal.get("entry"), 0.0) or 0.0
-            stop = safe_float(signal.get("sl"), entry) or entry
-            if signal.get("trailing_active") and stop > entry + 1e-12:
-                signal["closed_reason"] = "TRAILING_SL"
-            elif signal.get("trailing_active"):
-                signal["closed_reason"] = "BREAKEVEN_SL"
-            else:
-                signal["closed_reason"] = "SL"
-            signal["updated_at"] = iso_now()
-            return True
-
-        if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-            partial_pct = safe_float(signal.get("components", {}).get("partial_pct"), 1.0 / 3.0)
-            partial_target = safe_float(signal.get("tp1"))
-            if partial_target is None or not close_piece(signal, partial_target, partial_pct, "tp1"):
-                print(f"[MANAGE ERROR] {signal.get('symbol')}: V3 partial exit not booked; leaving trade active")
-                return False
-            entry = safe_float(signal.get("entry"))
-            if entry is None:
-                return False
-            signal["sl"] = max(entry, safe_float(signal.get("sl"), entry) or entry)
-            signal["trailing_active"] = True
-            signal["updated_at"] = iso_now()
-            return True
-        return False
-
-    # Stop is checked before new TP levels.
-    if stop_hit(signal, current_price):
-        remaining = safe_float(signal.get("remaining_fraction"), 0)
-        if remaining > 0 and not close_piece(signal, current_price, remaining, "sl"):
-            print(f"[MANAGE ERROR] {signal.get('symbol')}: stop exit not booked; keeping signal active")
-            return False
-        signal["status"] = "CLOSED"
-        signal["closed_reason"] = "SL"
-        signal["updated_at"] = iso_now()
-        return True
-
-    # This reference setup has one final target; the repeated TP fields are legacy compatibility.
-    is_single_target = signal.get("components", {}).get("setup") in {
-        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
-    }
-    if is_single_target and price_hit(signal, current_price, "tp1"):
-        remaining = safe_float(signal.get("remaining_fraction"), 1.0)
-        if remaining > 0 and not close_piece(signal, signal["tp1"], remaining, "tp1"):
-            print(f"[MANAGE ERROR] {signal.get('symbol')}: final target exit not booked; keeping signal active")
-            return False
-        signal["status"] = "CLOSED"
-        signal["closed_reason"] = "TP1"
-        signal["updated_at"] = iso_now()
-        return True
-
-    if not signal.get("tp1_hit") and price_hit(signal, current_price, "tp1"):
-        if not close_piece(signal, signal["tp1"], TP_WEIGHTS["tp1"], "tp1"):
-            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP1 exit not booked; leaving trade state unchanged")
-            return changed
-        # Move the remaining position's stop to breakeven only after TP1 is booked.
-        signal["sl"] = signal["entry"]
-        changed = True
-
-    if not signal.get("tp2_hit") and price_hit(signal, current_price, "tp2"):
-        if not close_piece(signal, signal["tp2"], TP_WEIGHTS["tp2"], "tp2"):
-            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP2 exit not booked; leaving remaining state unchanged")
-            return changed
-        changed = True
-
-    if not signal.get("tp3_hit") and price_hit(signal, current_price, "tp3"):
-        if not close_piece(signal, signal["tp3"], TP_WEIGHTS["tp3"], "tp3"):
-            print(f"[MANAGE ERROR] {signal.get('symbol')}: TP3 exit not booked; leaving remaining state unchanged")
-            return changed
-        changed = True
-
-    if signal.get("remaining_fraction", 0) <= 0.000001:
-        signal["remaining_fraction"] = 0
-        signal["status"] = "CLOSED"
-        signal["closed_reason"] = "TP3"
-        signal["updated_at"] = iso_now()
-        changed = True
-
-    return changed
-
 
 def update_open_signals(state, manager):
     """Update active signals and return one Telegram message per new event."""
@@ -2086,6 +810,9 @@ def scan_market(manager, state):
                             and abs(current_ts-closed_ts-interval_ms) < 1
                             and 0 <= now_ms-current_ts <= 10 * 60 * 1000):
                         next_open = safe_float(raw[-1][1])
+                if next_open is not None and not is_tradable_symbol(symbol, entry_price=next_open, require_quote_volume=False):
+                    stats["no_setup_or_score"] += 1
+                    break
                 signal = build_signal(symbol, exchange_name, df, next_open=next_open)
                 if signal:
                     # Snapshot the current Binance funding rate for alert context.
@@ -2162,7 +889,7 @@ def scan_market(manager, state):
 
 def main(manage_only=False):
     print("=" * 70)
-    print("CRYPTO SIGNAL BOT — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
+    print(f"CRYPTO SIGNAL BOT v{APP_VERSION} — RSI/STOCH FUTURES" + (" — MANAGEMENT ONLY" if manage_only else ""))
     print("Started:", iso_now())
     print("=" * 70)
 
@@ -2188,7 +915,10 @@ def main(manage_only=False):
         for signal in state.get("signals", [])
         if signal.get("status") == "ACTIVE" and signal.get("exchange")
     }
-    if not manager.build(required_exchanges=required_exchanges):
+    if not manager.build(
+        required_exchanges=required_exchanges,
+        require_scanners=not manage_only,
+    ):
         telegram_send(
             "❌ <b>Crypto Signal Bot</b>\n"
             "هیچ صرافی قابل دسترسی نبود."
@@ -2256,7 +986,7 @@ def main(manage_only=False):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="Crypto spot signal bot")
+    parser = argparse.ArgumentParser(description="USDT-margined perpetual crypto signal bot")
     parser.add_argument("--manage-only", action="store_true", help="Manage active signals without scanning markets")
     args = parser.parse_args()
     try:
