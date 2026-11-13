@@ -63,7 +63,7 @@ USERS_FILE = os.getenv("USERS_FILE", "users.json")
 
 REQUEST_TIMEOUT_MS = 15000
 OHLCV_LIMIT = 260
-MAX_SYMBOLS_PER_EXCHANGE = 25
+MAX_SYMBOLS_PER_EXCHANGE = None  # Explicitly unlimited; every eligible contract is retained
 DAILY_LIMIT = 120
 SLEEP_BETWEEN_SYMBOLS = 0.05
 BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
@@ -350,48 +350,39 @@ class ExchangeManager:
         return sorted(set(result))
 
     def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
+        """Return every eligible (exchange, symbol) pair without cross-exchange deduplication.
+
+        A symbol listed on multiple venues is intentionally scanned once per venue:
+        prices, liquidity, candles and contract specifications are exchange-specific.
+        """
         ordered = []
-        seen = set()
+        per_exchange_counts = {}
 
         for name in SCAN_EXCHANGE_NAMES:
             ex = self.exchanges.get(name)
             if not ex:
+                print(f"[SCAN UNAVAILABLE] {name}: exchange did not initialize")
                 continue
 
             symbols = self.futures_symbols(ex)
-            # Prefer liquid markets instead of alphabetically scanning obscure tickers first.
-            try:
-                tickers = ex.fetch_tickers(symbols)
-                ranked = []
-                for symbol in symbols:
-                    ticker = tickers.get(symbol, {})
-                    quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
-                    ranked.append((quote_volume, symbol))
-                symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
-            except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
+            per_exchange_counts[name] = len(symbols)
+            print(f"[SCAN UNIVERSE] {name}: {len(symbols)} active linear {QUOTE} perpetual contracts")
 
-            added_from_exchange = 0
-            for symbol in symbols:
-                if symbol in seen:
-                    continue
-                ordered.append((name, symbol))
-                seen.add(symbol)
-                added_from_exchange += 1
-
-                if MAX_COINS is not None and len(ordered) >= MAX_COINS:
-                    return ordered
-                if MAX_SYMBOLS_PER_EXCHANGE is not None and added_from_exchange >= MAX_SYMBOLS_PER_EXCHANGE:
-                    break
+            # Do not call fetch_tickers for the whole universe just to rank it:
+            # some venues impose endpoint-specific symbol limits. Deterministic
+            # alphabetical iteration guarantees every discovered market is queued.
+            ordered.extend((name, symbol) for symbol in symbols)
 
         if not ordered:
             raise RuntimeError(
                 "No active linear USDT-margined perpetual markets found on: "
                 + ", ".join(SCAN_EXCHANGE_NAMES)
             )
-        print(f"[SCAN UNIVERSE] {len(ordered)} active USDT perpetual markets")
+
+        print("[SCAN UNIVERSE SUMMARY] " + ", ".join(
+            f"{name}={count}" for name, count in per_exchange_counts.items()
+        ))
+        print(f"[SCAN UNIVERSE SUMMARY] total_exchange_symbol_pairs={len(ordered)}")
         return ordered
 
     def fetch_ohlcv(self, exchange, symbol, timeframe=TIMEFRAME, limit=OHLCV_LIMIT):
@@ -2101,12 +2092,9 @@ def scan_market(manager, state):
     rate_limited_exchanges = set()
 
     for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
+        # Scan this exact exchange-symbol pair. Do not silently substitute another
+        # venue: the same ticker can have different liquidity, candles and contract data.
         exchange_names = [preferred_exchange_name]
-        for fallback_name in EXCHANGE_NAMES:
-            if fallback_name not in exchange_names:
-                fallback_exchange = manager.get_exchange(fallback_name)
-                if fallback_exchange and symbol in fallback_exchange.markets:
-                    exchange_names.append(fallback_name)
 
         for exchange_name in exchange_names:
             # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
