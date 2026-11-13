@@ -1,93 +1,95 @@
-name: Crypto Signal Pro + Telegram Panel
+name: Crypto Signal Bot CI and Runtime
 
 on:
   push:
     branches: [main]
     paths:
       - "bot.py"
+      - "panel.py"
+      - "config.py"
+      - "safety_filters.py"
+      - ".github/workflows/bot.yml"
+      - "requirements.txt"
+      - "tests/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "bot.py"
+      - "panel.py"
+      - "config.py"
+      - "safety_filters.py"
       - ".github/workflows/bot.yml"
       - "requirements.txt"
       - "tests/**"
   schedule:
-    # One serialized 15-minute strategy cycle; management runs inside bot.py once.
     - cron: "*/15 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: write
-  actions: write
-
-concurrency:
-  group: crypto-signal-pro-panel
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  run:
+  test:
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
           cache-dependency-glob: requirements.txt
-
       - name: Install dependencies
         run: uv pip install --system -r requirements.txt
-
       - name: Validate Python syntax
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-        run: python -m py_compile bot.py panel.py
-
-      - name: Run strategy and position-management tests
-        if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+        run: python -m py_compile bot.py panel.py config.py safety_filters.py
+      - name: Run tests
         run: python -m unittest discover -s tests -v
 
-      - name: Run market scanner
-
+  runtime:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: crypto-signal-bot-runtime
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: requirements.txt
+      - name: Install dependencies
+        run: uv pip install --system -r requirements.txt
+      - name: Run market scanner and signal manager
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
           PYTHONUNBUFFERED: "1"
         run: python -u bot.py
-
-      - name: Poll Telegram panel
+      - name: Persist signal state
         if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          ADMIN_CHAT_ID: ${{ secrets.ADMIN_CHAT_ID }}
-          GH_REPO: mostafasp209-ship-it/crypto-signal-bot
-          GH_PAT: ${{ github.token }}
-          GH_BRANCH: main
-          PYTHONUNBUFFERED: "1"
-        run: python -u panel.py --once
-
-      - name: Persist bot and panel state
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          changed=0
-          for file in signals.json users.json; do
-            if [ -f "$file" ] && [ -n "$(git status --porcelain -- "$file")" ]; then
-              git add "$file"
-              changed=1
-            fi
-          done
-          if [ "$changed" = "1" ]; then
-            git commit -m "Persist bot and Telegram panel state [skip ci]" || true
+          if [ -f signals.json ] && [ -n "$(git status --porcelain -- signals.json)" ]; then
+            git add signals.json
+            git commit -m "Persist signal state [skip ci]" || true
             git pull --rebase -X theirs origin main
             git push origin HEAD:main
           fi
