@@ -6,6 +6,36 @@ import bot
 from analyze_signals import audit_signals
 
 
+class RateLimitRetryTests(unittest.TestCase):
+    def test_rate_limit_retries_then_succeeds(self):
+        attempts = {"count": 0}
+        def flaky():
+            attempts["count"] += 1
+            if attempts["count"] < 3:
+                raise RuntimeError("Too Many Requests")
+            return "ok"
+
+        with mock.patch.object(bot.time, "sleep") as sleep:
+            result = bot.call_with_rate_limit_retry(flaky, max_attempts=4, base_delay=0.01)
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(attempts["count"], 3)
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_rate_limit_exhaustion_raises_after_bounded_attempts(self):
+        attempts = {"count": 0}
+        def always_limited():
+            attempts["count"] += 1
+            raise RuntimeError("rate limit exceeded")
+
+        with unittest.mock.patch.object(bot.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "rate limit"):
+                bot.call_with_rate_limit_retry(always_limited, max_attempts=3, base_delay=0.01)
+
+        self.assertEqual(attempts["count"], 3)
+        self.assertEqual(sleep.call_count, 2)
+
+
 class CandleSafetyTests(unittest.TestCase):
     def test_closed_candles_excludes_forming_candle(self):
         raw = []
