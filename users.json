@@ -15,10 +15,10 @@
     },
     "6919179483": {
       "name": "",
-      "blocked": false,
+      "blocked": true,
       "notify": true,
       "last_seen": 1793790556
     }
   },
-  "last_update_id": 25144607
+  "last_update_id": 25144608
 }
