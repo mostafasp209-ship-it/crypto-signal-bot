@@ -28,6 +28,9 @@ class RuntimeHardeningTests(unittest.TestCase):
             "initial_sl": 90.0,
             "position_quantity": 1.0,
             "remaining_fraction": 1.0,
+            "tp1_hit": False,
+            "tp2_hit": False,
+            "tp3_hit": False,
             "realized_pnl": 0.0,
             "fees_paid": 0.0,
             "components": {
