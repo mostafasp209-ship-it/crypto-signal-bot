@@ -1,4 +1,5 @@
 import unittest
+from unittest import mock
 
 import pandas as pd
 
@@ -28,7 +29,7 @@ class RateLimitRetryTests(unittest.TestCase):
             attempts["count"] += 1
             raise RuntimeError("rate limit exceeded")
 
-        with unittest.mock.patch.object(bot.time, "sleep") as sleep:
+        with mock.patch.object(bot.time, "sleep") as sleep:
             with self.assertRaisesRegex(RuntimeError, "rate limit"):
                 bot.call_with_rate_limit_retry(always_limited, max_attempts=3, base_delay=0.01)
 
