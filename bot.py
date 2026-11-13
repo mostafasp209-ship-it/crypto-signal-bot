@@ -66,7 +66,8 @@ OHLCV_LIMIT = 260
 MAX_SYMBOLS_PER_EXCHANGE = None  # Explicitly unlimited; every eligible contract is retained
 DAILY_LIMIT = 120
 SLEEP_BETWEEN_SYMBOLS = 0.05
-BITFINEX_RATE_LIMIT_COOLDOWN_SECONDS = 0.0  # Skip Bitfinex for the remainder of a scan after a rate-limit response
+RATE_LIMIT_MAX_ATTEMPTS = 4
+RATE_LIMIT_BASE_DELAY_SECONDS = 2.0
 NEWS_FEEDS = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
 NEWS_LOOKBACK_HOURS = 24
 NEWS_TIMEOUT_SECONDS = 8
@@ -94,6 +95,35 @@ def safe_float(value, default=None):
         return x
     except Exception:
         return default
+
+
+def is_rate_limit_error(exc):
+    message = str(exc).lower()
+    rate_limit_type = getattr(ccxt, "RateLimitExceeded", ())
+    return (
+        (isinstance(rate_limit_type, type) and isinstance(exc, rate_limit_type))
+        or "ratelimit" in message
+        or "rate limit" in message
+        or "too many requests" in message
+        or "11010" in message
+    )
+
+
+def call_with_rate_limit_retry(callable_, *args, max_attempts=RATE_LIMIT_MAX_ATTEMPTS,
+                               base_delay=RATE_LIMIT_BASE_DELAY_SECONDS, **kwargs):
+    """Retry a rate-limited request with bounded exponential backoff; never skip a venue."""
+    for attempt in range(max_attempts):
+        try:
+            return callable_(*args, **kwargs)
+        except Exception as exc:
+            if not is_rate_limit_error(exc) or attempt + 1 >= max_attempts:
+                raise
+            delay = base_delay * (2 ** attempt)
+            print(
+                f"[RATE LIMIT RETRY] attempt={attempt + 1}/{max_attempts - 1}; "
+                f"sleep={delay:.1f}s; error={type(exc).__name__}"
+            )
+            time.sleep(delay)
 
 
 def fmt_price(value):
@@ -2081,107 +2111,110 @@ def scan_market(manager, state):
     signals = []
     stats = {
         "candidates": len(candidates),
+        "attempted": 0,
         "checked": 0,
         "signals": 0,
         "no_setup_or_score": 0,
         "unknown_trend": 0,
         "duplicates": 0,
-        "rate_limited_exchanges": set(),
+        "rate_limited_pairs": 0,
         "errors": 0,
+        "skipped": 0,
     }
-    rate_limited_exchanges = set()
 
-    for idx, (preferred_exchange_name, symbol) in enumerate(candidates, 1):
-        # Scan this exact exchange-symbol pair. Do not silently substitute another
-        # venue: the same ticker can have different liquidity, candles and contract data.
-        exchange_names = [preferred_exchange_name]
+    for idx, (exchange_name, symbol) in enumerate(candidates, 1):
+        exchange = manager.get_exchange(exchange_name)
+        if not exchange:
+            stats["skipped"] += 1
+            print(f"[SCAN SKIP] {exchange_name} {symbol}: exchange unavailable")
+            continue
 
-        for exchange_name in exchange_names:
-            # Once a venue rate-limits us, avoid hammering it for every remaining symbol.
-            if exchange_name in rate_limited_exchanges:
+        stats["attempted"] += 1
+        try:
+            raw = call_with_rate_limit_retry(
+                manager.fetch_ohlcv, exchange, symbol, timeframe="15m", limit=260
+            )
+            df = closed_candles(raw)
+            raw1h = call_with_rate_limit_retry(
+                exchange.fetch_ohlcv, symbol, timeframe="1h", limit=260
+            )
+            raw4h = call_with_rate_limit_retry(
+                exchange.fetch_ohlcv, symbol, timeframe="4h", limit=260
+            )
+            h1_df, h4_df = closed_candles(raw1h), closed_candles(raw4h)
+            stats["checked"] += 1
+
+            if len(df) < 80 or len(h1_df) < 205 or len(h4_df) < 205:
+                stats["no_setup_or_score"] += 1
                 continue
-            exchange = manager.get_exchange(exchange_name)
-            if not exchange:
+
+            # Use the next 15m candle's actual open only when it immediately follows
+            # the last completed signal candle; never substitute a stale close.
+            next_open = None
+            if raw and len(raw) >= 2:
+                closed_ts = safe_float(df.iloc[-1].get("timestamp"))
+                current_ts = safe_float(raw[-1][0])
+                if closed_ts is not None and current_ts is not None and abs(current_ts-closed_ts-900000) < 1:
+                    next_open = safe_float(raw[-1][1])
+            signal = build_signal(symbol, exchange_name, df, next_open=next_open,
+                                  h1_df=h1_df, h4_df=h4_df)
+            if signal:
+                # Snapshot the configured funding source for alert context.
+                # Historical funding cashflows are not yet accrued into PnL.
+                signal["fundamentals"] = fundamental_data(manager, symbol)
+
+            if not signal:
+                stats["no_setup_or_score"] += 1
                 continue
 
-            try:
-                stats["checked"] += 1
-                raw = manager.fetch_ohlcv(exchange, symbol, timeframe="15m", limit=260)
-                df = closed_candles(raw)
-                raw1h = exchange.fetch_ohlcv(symbol, timeframe="1h", limit=260)
-                raw4h = exchange.fetch_ohlcv(symbol, timeframe="4h", limit=260)
-                h1_df, h4_df = closed_candles(raw1h), closed_candles(raw4h)
-                if len(df) < 80 or len(h1_df) < 205 or len(h4_df) < 205:
-                    stats["no_setup_or_score"] += 1
-                    break
+            if duplicate_exists(state, symbol, signal["side"]) or duplicate_on_candle_exists(state, signal):
+                stats["duplicates"] += 1
+                continue
 
-                # Use the next 15m candle's actual open only when it immediately follows
-                # the last completed signal candle; never substitute a stale close.
-                next_open = None
-                if raw and len(raw) >= 2:
-                    closed_ts = safe_float(df.iloc[-1].get("timestamp"))
-                    current_ts = safe_float(raw[-1][0])
-                    if closed_ts is not None and current_ts is not None and abs(current_ts-closed_ts-900000) < 1:
-                        next_open = safe_float(raw[-1][1])
-                signal = build_signal(symbol, exchange_name, df, next_open=next_open,
-                                       h1_df=h1_df, h4_df=h4_df)
-                if signal:
-                    # Snapshot the current Binance funding rate for alert context.
-                    # Historical funding cashflows are not yet accrued into PnL.
-                    signal["fundamentals"] = fundamental_data(manager, symbol)
+            signals.append(signal)
+            stats["signals"] += 1
+            print(
+                f"[SIGNAL] {symbol} {signal['side']} "
+                f"score={signal['score']} exchange={exchange_name} "
+                f"setup={signal.get('components', {}).get('setup', 'N/A')}"
+            )
 
-                if not signal:
-                    stats["no_setup_or_score"] += 1
-                    break
-
-                if duplicate_exists(state, symbol, signal["side"]) or duplicate_on_candle_exists(state, signal):
-                    stats["duplicates"] += 1
-                    break
-
-                signals.append(signal)
-                stats["signals"] += 1
+        except Exception as exc:
+            stats["errors"] += 1
+            stats["skipped"] += 1
+            if is_rate_limit_error(exc):
+                stats["rate_limited_pairs"] += 1
                 print(
-                    f"[SIGNAL] {symbol} {signal['side']} "
-                    f"score={signal['score']} exchange={exchange_name} "
-                    f"setup={signal.get('components', {}).get('setup', 'N/A')}"
+                    f"[RATE LIMIT EXHAUSTED] {exchange_name} {symbol}: "
+                    f"failed after {RATE_LIMIT_MAX_ATTEMPTS} attempts; "
+                    "pair is counted as skipped and will be retried on the next scan."
                 )
-                break
-
-            except Exception as exc:
-                message = str(exc).lower()
-                is_rate_limit = (
-                    isinstance(exc, getattr(ccxt, "RateLimitExceeded", ()))
-                    or "ratelimit" in message
-                    or "rate limit" in message
-                    or '11010' in message
+            else:
+                print(
+                    f"[SCAN FAIL] {exchange_name} {symbol}: "
+                    f"{type(exc).__name__}: {exc}; pair counted as skipped."
                 )
-                if is_rate_limit:
-                    rate_limited_exchanges.add(exchange_name)
-                    stats["rate_limited_exchanges"].add(exchange_name)
-                    print(
-                        f"[RATE LIMIT] {exchange_name}: pausing this venue for the rest of this scan; "
-                        f"will try fallback exchanges."
-                    )
-                else:
-                    stats["errors"] += 1
-                    print(
-                        f"[SCAN FAIL] {exchange_name} {symbol}: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                # Continue to a different configured venue for this symbol.
-                continue
 
         if idx % 25 == 0 or idx == len(candidates):
             print(
-                f"[SCAN PROGRESS] {idx}/{len(candidates)} symbols; "
-                f"signals={stats['signals']}; rate_limited={','.join(sorted(rate_limited_exchanges)) or 'none'}"
+                f"[SCAN PROGRESS] {idx}/{len(candidates)} pairs; "
+                f"checked={stats['checked']} skipped={stats['skipped']} "
+                f"signals={stats['signals']}"
             )
-        # CCXT rate limiting handles request pacing; avoid extra per-symbol delay.
 
     if stats["checked"] == 0:
         raise RuntimeError(
-            "Market scan failed: candidates were found but no OHLCV request succeeded."
+            "Market scan failed: candidates were found but no complete OHLCV set succeeded. "
+            f"attempted={stats['attempted']} skipped={stats['skipped']}"
         )
+    print(
+        "[SCAN SUMMARY] "
+        f"candidates={stats['candidates']} attempted={stats['attempted']} "
+        f"checked={stats['checked']} skipped={stats['skipped']} "
+        f"signals={stats['signals']} no_setup_or_score={stats['no_setup_or_score']} "
+        f"unknown_trend={stats['unknown_trend']} duplicates={stats['duplicates']} "
+        f"errors={stats['errors']} rate_limited_pairs={stats['rate_limited_pairs']}"
+    )
     signals.sort(key=lambda x: safe_float(x.get("rr"), 0.0) or 0.0, reverse=True)
     print(
         "[SCAN SUMMARY] "
