@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - feat/rsi-stoch-usdtm-rr15
+      - fix/full-perpetual-universe-scan
 
 permissions:
   contents: read
