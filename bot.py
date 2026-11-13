@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
+
 
 # ============================================================
 # CONFIG
@@ -134,14 +136,18 @@ def load_state():
             data = json.load(f)
 
         if not isinstance(data, dict):
-            return {"signals": [], "last_run": None}
+            raise RuntimeError(f"Invalid state in {DATA_FILE}: root must be a JSON object.")
 
         data.setdefault("signals", [])
         data.setdefault("last_run", None)
-        return data
-    except Exception:
-        print("WARNING: signals.json could not be read; starting clean.")
-        return {"signals": [], "last_run": None}
+    except (OSError, json.JSONDecodeError) as exc:
+        # Never overwrite an unreadable state file with an empty state: that
+        # would silently destroy the signal history on the next save.
+        raise RuntimeError(f"Cannot safely load {DATA_FILE}; refusing to start with empty state: {exc}") from exc
+
+    if not isinstance(data.get("signals"), list):
+        raise RuntimeError(f"Invalid state in {DATA_FILE}: 'signals' must be a list.")
+    return data
 
 
 def save_state(state):
@@ -350,7 +356,7 @@ class ExchangeManager:
         return sorted(set(result))
 
     def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
+        # New entries are exclusively liquid linear USDT-margined perpetual futures.
         ordered = []
         seen = set()
 
@@ -367,11 +373,15 @@ class ExchangeManager:
                 for symbol in symbols:
                     ticker = tickers.get(symbol, {})
                     quote_volume = safe_float(ticker.get("quoteVolume"), 0.0) or 0.0
-                    ranked.append((quote_volume, symbol))
+                    if is_tradable_symbol(symbol, quote_volume=quote_volume):
+                        ranked.append((quote_volume, symbol))
                 symbols = [symbol for _, symbol in sorted(ranked, reverse=True)]
             except Exception as exc:
-                print(f"[LIQUIDITY] {name}: ticker ranking unavailable ({type(exc).__name__}); using market list")
-            print(f"{name}: {len(symbols)} {QUOTE} USDT-M perpetual symbols")
+                # Fail closed: without trustworthy quote-volume data, do not
+                # bypass the liquidity gate by scanning the unranked market list.
+                print(f"[LIQUIDITY] {name}: ticker data unavailable ({type(exc).__name__}); skipping venue")
+                continue
+            print(f"{name}: {len(symbols)} liquid {QUOTE} USDT-M perpetual symbols")
 
             added_from_exchange = 0
             for symbol in symbols:
@@ -1375,6 +1385,8 @@ def build_signal(symbol, exchange_name, df, next_open=None, h1_df=None, h4_df=No
         return None
     side = "BUY" if st["signal_long"] else "SELL"
     entry = raw_entry * (1 + SLIPPAGE_RATE) if side == "BUY" else raw_entry * (1 - SLIPPAGE_RATE)
+    if not is_tradable_symbol(symbol, entry_price=entry):
+        return None
     recent = df.tail(4)
     swing = safe_float(pd.to_numeric(recent["low" if side == "BUY" else "high"], errors="coerce").min()
                        if side == "BUY" else pd.to_numeric(recent["high"], errors="coerce").max())
@@ -1383,7 +1395,7 @@ def build_signal(symbol, exchange_name, df, next_open=None, h1_df=None, h4_df=No
     stop = swing - 0.15*atr_now if side == "BUY" else swing + 0.15*atr_now
     risk = entry-stop if side == "BUY" else stop-entry
     risk_pct = risk/entry if entry > 0 else 0
-    if risk <= 0 or not (0.002 < risk_pct < 0.025):
+    if risk <= 0 or not (0.002 < risk_pct <= MAX_RISK_PCT):
         return None
     target = entry + (3*risk if side == "BUY" else -3*risk)
     cost_unit = (entry+stop)*FEE_RATE + stop*SLIPPAGE_RATE
@@ -1475,8 +1487,10 @@ def close_piece(signal, exit_price, fraction, label):
         return False
 
     piece_qty = quantity * fraction
-    is_reference_futures = signal.get("components", {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
-    if is_reference_futures:
+    setup_name = signal.get("components", {}).get("setup")
+    is_reference_futures = setup_name == "REFERENCE_RSI_STOCH_ATR_RR15"
+    is_rtm = setup_name == "RTM_ICHIMOKU_15M_1H_4H_3R"
+    if is_reference_futures or is_rtm:
         slip = safe_float(signal.get("components", {}).get("slippage_rate"), SLIPPAGE_RATE) or 0.0
         exit_price = exit_price * (1-slip) if signal.get("side") == "BUY" else exit_price * (1+slip)
     gross_piece = ((exit_price - entry) if signal.get("side") == "BUY" else (entry - exit_price)) * piece_qty
@@ -1671,7 +1685,9 @@ def manage_signal(signal, current_price):
 
     # This reference setup has one final target; the repeated TP fields are legacy compatibility.
     is_single_target = signal.get("components", {}).get("setup") in {
-        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION", "REFERENCE_RSI_STOCH_ATR_RR15"
+        "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
+        "REFERENCE_RSI_STOCH_ATR_RR15",
+        "RTM_ICHIMOKU_15M_1H_4H_3R",
     }
     if is_single_target and price_hit(signal, current_price, "tp1"):
         remaining = safe_float(signal.get("remaining_fraction"), 1.0)
@@ -1770,9 +1786,14 @@ def update_open_signals(state, manager):
 
         side = signal.get("side", "BUY")
         header = f"<b>{symbol} — {side}</b>"
+        setup_name = signal.get("components", {}).get("setup")
         if (
             not before["tp1_hit"] and signal.get("tp1_hit")
-            and signal.get("components", {}).get("setup") != "REFERENCE_EMA_RSI_STOCH_ATR_SESSION"
+            and setup_name not in {
+                "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
+                "REFERENCE_RSI_STOCH_ATR_RR15",
+                "RTM_ICHIMOKU_15M_1H_4H_3R",
+            }
         ):
             if signal.get("components", {}).get("setup") == "BREAKOUT_ADX_EMA200_PARTIAL_CHANDELIER_V3":
                 events.append(
@@ -1823,8 +1844,12 @@ def update_open_signals(state, manager):
                 title = "🛑 <b>حد ضرر (SL) فعال شد</b>"
             elif reason == "TP3":
                 title = "✅ <b>موقعیت با TP3 بسته شد</b>"
-            elif reason == "TP1" and signal.get("components", {}).get("setup") == "REFERENCE_EMA_RSI_STOCH_ATR_SESSION":
-                title = "✅ <b>هدف نهایی فعال شد؛ موقعیت کامل بسته شد</b>"
+            elif reason == "TP1" and signal.get("components", {}).get("setup") in {
+                "REFERENCE_EMA_RSI_STOCH_ATR_SESSION",
+                "REFERENCE_RSI_STOCH_ATR_RR15",
+                "RTM_ICHIMOKU_15M_1H_4H_3R",
+            }:
+                title = "✅ <b>هدف نهایی فعال شد؛ کل موقعیت بسته شد</b>"
             else:
                 title = "📕 <b>موقعیت بسته شد</b>"
             events.append(
@@ -1892,11 +1917,11 @@ def refresh_historical_stats(state):
 
 
 def performance_report(state):
-    # Only the new RSI/Stochastic futures setup is included in the current forward test.
+    # Report only the currently active RTM + Ichimoku forward-test setup.
     start_at = state.get("forward_test_started_at")
     signals = [
         s for s in state.get("signals", [])
-        if (s.get("components", {}) or {}).get("setup") == "REFERENCE_RSI_STOCH_ATR_RR15"
+        if (s.get("components", {}) or {}).get("setup") == "RTM_ICHIMOKU_15M_1H_4H_3R"
     ]
     if start_at:
         signals = [
@@ -1909,7 +1934,7 @@ def performance_report(state):
     ]
 
     if not closed:
-        return "📊 <b>Performance</b>\nهنوز معامله بسته‌شده‌ای ثبت نشده."
+        return "📊 <b>عملکرد RTM + Ichimoku</b>\nهنوز معامله بسته‌شده‌ای برای این استراتژی ثبت نشده."
 
     wins = sum(1 for s in closed if safe_float(s.get("realized_pnl"), 0) > 0)
     losses = len(closed) - wins
@@ -1920,7 +1945,7 @@ def performance_report(state):
     win_rate = wins / len(closed) * 100
 
     return (
-        "📊 <b>Performance</b>\n"
+        "📊 <b>عملکرد RTM + Ichimoku</b>\n"
         f"معاملات بسته: {len(closed)}\n"
         f"برد: {wins} | باخت: {losses}\n"
         f"Win Rate: {win_rate:.1f}%\n"

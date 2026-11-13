@@ -1,0 +1,9 @@
+# Local runtime state and secrets
+users.json
+users.private.json
+*.tmp
+.env
+.env.*
+__pycache__/
+*.py[cod]
+.pytest_cache/
