@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from safety_filters import MAX_QUOTE_VOLUME_USDT, MAX_RISK_PCT, is_tradable_symbol
+from safety_filters import MAX_RISK_PCT, is_tradable_symbol
 
 
 # ============================================================
@@ -140,7 +140,6 @@ def load_state():
 
         data.setdefault("signals", [])
         data.setdefault("last_run", None)
-        return data
     except (OSError, json.JSONDecodeError) as exc:
         # Never overwrite an unreadable state file with an empty state: that
         # would silently destroy the signal history on the next save.
@@ -148,6 +147,7 @@ def load_state():
 
     if not isinstance(data.get("signals"), list):
         raise RuntimeError(f"Invalid state in {DATA_FILE}: 'signals' must be a list.")
+    return data
 
 
 def save_state(state):
@@ -356,7 +356,7 @@ class ExchangeManager:
         return sorted(set(result))
 
     def scan_symbols(self):
-        # New entries are exclusively Binance USDⓈ-M perpetual futures.
+        # New entries are exclusively liquid linear USDT-margined perpetual futures.
         ordered = []
         seen = set()
 
