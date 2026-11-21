@@ -12,15 +12,15 @@ EXCHANGE_NAMES = [
     "binanceus", "bitstamp", "bitfinex", "cryptocom",
     "bitget", "binanceusdm", "bybit",
 ]
-SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gateio"]
-FUNDING_SOURCES = ["bitget", "okx", "gateio"]
+SCAN_EXCHANGE_NAMES = ["bitget", "okx", "gate"]
+FUNDING_SOURCES = ["bitget", "okx", "gate"]
 
 QUOTE = "USDT"
 TIMEFRAME = "4h"
 TREND_TIMEFRAME = "1d"
 
 MAX_COINS = None
-MAX_SYMBOLS_PER_EXCHANGE = None
+MAX_SYMBOLS_PER_EXCHANGE = 40
 MIN_SCORE = 12
 MIN_RESISTANCE_ROOM_R = 0.75
 MIN_RR = 1.35

@@ -5,12 +5,15 @@ on:
     branches: [main]
     paths:
       - "bot.py"
+      - "safety_filters.py"
+      - "config.py"
       - ".github/workflows/bot.yml"
       - "requirements.txt"
       - "tests/**"
   schedule:
-    # One serialized 15-minute strategy cycle; management runs inside bot.py once.
-    - cron: "*/15 * * * *"
+    # Hourly. A */15 cron is dropped by GitHub for hours at a time, so 15m setups never fired.
+    # The 4h signal stays valid for the whole following candle, so one run per hour is enough.
+    - cron: "7 * * * *"
   workflow_dispatch:
 
 permissions:
