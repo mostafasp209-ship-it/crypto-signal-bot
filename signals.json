@@ -393,7 +393,7 @@
       "last_exit_label": "tp1"
     }
   ],
-  "last_run": "2026-11-20T23:53:25.134983+00:00",
+  "last_run": "2026-11-21T00:11:08.742097+00:00",
   "historical_stats": {
     "closed": 4,
     "tp3": 0,
@@ -411,6 +411,6 @@
       "5-bar_swing_vs_1.32_ATR14": 4
     }
   },
-  "forward_test_started_at": "2026-11-01T09:19:53.235Z",
-  "signal_history_reset_version": 5
+  "forward_test_started_at": "2026-11-21T00:10:37.939614+00:00",
+  "signal_history_reset_version": 6
 }
